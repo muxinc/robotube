@@ -1,4 +1,10 @@
-# Welcome to your Expo app 👋
+# robotube 🤖🍑
+![robotube logo](./assets/images/robotube-logo.png)
+![kirbutt](./assets/images/kirbutt.png)
+
+This is a video streaming app built with Expo and React Native. 
+
+We use Mux + Convex + RN to bring a video streaming experience to your fingertips that are for you and your AI agent. Use Mux AI to analyze videos, and more!
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
