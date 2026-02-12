@@ -1,98 +1,118 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { Ionicons } from "@expo/vector-icons";
+import { useQuery } from "convex/react";
+import { Image } from "expo-image";
+import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { FeedVideoCard, type FeedVideoItem } from "@/components/feed-video-card";
+import { api } from "@/convex/_generated/api";
 
-export default function HomeScreen() {
+export default function HomePage() {
+  const insets = useSafeAreaInsets();
+  const feedVideos = useQuery((api as any).feed.listFeedVideos, {
+    limit: 20,
+  }) as FeedVideoItem[] | undefined;
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
+    <View style={styles.container}>
+      <View
+        style={[
+          styles.navbar,
+          {
+            height: 62 + insets.top,
+            paddingTop: insets.top + 6,
+          },
+        ]}
+      >
         <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
+          source={require("../../assets/images/robotube-logo.png")}
+          contentFit="contain"
+          style={styles.logo}
         />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+        <View style={styles.actions}>
+          <Pressable style={styles.iconButton}>
+            <Ionicons name="tv-outline" size={22} color="#111111" />
+          </Pressable>
+          <Pressable style={styles.iconButton}>
+            <Ionicons name="notifications-outline" size={22} color="#111111" />
+          </Pressable>
+          <Pressable style={styles.iconButton}>
+            <Ionicons name="search-outline" size={22} color="#111111" />
+          </Pressable>
+        </View>
+      </View>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      <FlatList
+        data={feedVideos ?? []}
+        keyExtractor={(item) => item.muxAssetId}
+        renderItem={({ item }) => <FeedVideoCard item={item} />}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.feedContent}
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>
+              {feedVideos === undefined ? "Loading feed..." : "No videos yet"}
+            </Text>
+            <Text style={styles.emptySubtitle}>
+              Upload a few videos from the Upload tab and they will show here.
+            </Text>
+          </View>
+        }
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  container: {
+    flex: 1,
+    backgroundColor: "#ffffff",
+  },
+  navbar: {
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#e5e5e5",
+  },
+  logo: {
+    width: 150,
+    height: 46,
+    marginLeft: -40,
+  },
+  actions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  iconButton: {
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 18,
+  },
+  feedContent: {
+    paddingTop: 8,
+    paddingBottom: 24,
+  },
+  emptyState: {
+    paddingTop: 40,
+    paddingHorizontal: 20,
+    alignItems: "center",
     gap: 8,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#1a1a1a",
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  emptySubtitle: {
+    textAlign: "center",
+    fontSize: 14,
+    color: "#666666",
   },
 });
+
