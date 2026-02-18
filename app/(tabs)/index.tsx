@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "convex/react";
 import { Image } from "expo-image";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { useRef, useState } from "react";
+import { FlatList, Pressable, StyleSheet, Text, View, type ViewToken } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
@@ -15,6 +16,28 @@ export default function HomePage() {
   const feedVideos = useQuery((api as any).feed.listFeedVideos, {
     limit: 20,
   }) as FeedVideoItem[] | undefined;
+  const [focusedIndex, setFocusedIndex] = useState(0);
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: ViewToken<FeedVideoItem>[] }) => {
+      const viewableIndexes = viewableItems
+        .map((token) => token.index)
+        .filter((index): index is number => index !== null)
+        .sort((a, b) => a - b);
+
+      if (viewableIndexes.length === 0) return;
+
+      const nextFocusedIndex = viewableIndexes[0];
+
+      setFocusedIndex((current) =>
+        current === nextFocusedIndex ? current : nextFocusedIndex,
+      );
+    },
+  );
+
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 65,
+    minimumViewTime: 100,
+  });
 
   return (
     <View style={styles.container}>
@@ -50,9 +73,19 @@ export default function HomePage() {
       <FlatList
         data={feedVideos ?? []}
         keyExtractor={(item) => item.muxAssetId}
-        renderItem={({ item }) => (
-          <FeedVideoCard item={item} showPlayIcon={false} />
-        )}
+        onViewableItemsChanged={onViewableItemsChanged.current}
+        viewabilityConfig={viewabilityConfig.current}
+        renderItem={({ item, index }) => {
+          const shouldPreload = Math.abs(index - focusedIndex) <= 1;
+          return (
+            <FeedVideoCard
+              item={item}
+              showPlayIcon={false}
+              isFocused={index === focusedIndex}
+              shouldPreload={shouldPreload}
+            />
+          );
+        }}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.feedContent}
         ListEmptyComponent={
@@ -102,8 +135,8 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   feedContent: {
-    paddingTop: 8,
-    paddingBottom: 24,
+    paddingTop: 12,
+    paddingBottom: 100,
   },
   emptyState: {
     paddingTop: 40,

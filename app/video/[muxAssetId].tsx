@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "convex/react";
 import { Stack, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -13,7 +13,15 @@ import {
 } from "@/components/feed-video-card";
 import { api } from "@/convex/_generated/api";
 
-function FullVideoPlayer({ playbackUrl }: { playbackUrl: string }) {
+function FullVideoPlayer({
+  playbackUrl,
+  startAtSeconds,
+}: {
+  playbackUrl: string;
+  startAtSeconds?: number;
+}) {
+  const didSeekToStartRef = useRef(false);
+
   const player = useVideoPlayer(
     { uri: playbackUrl, contentType: "hls" },
     (videoPlayer) => {
@@ -21,6 +29,14 @@ function FullVideoPlayer({ playbackUrl }: { playbackUrl: string }) {
       videoPlayer.play();
     },
   );
+
+  useEffect(() => {
+    if (didSeekToStartRef.current) return;
+    if (startAtSeconds === undefined || Number.isNaN(startAtSeconds)) return;
+
+    player.currentTime = Math.max(0, startAtSeconds);
+    didSeekToStartRef.current = true;
+  }, [player, startAtSeconds]);
 
   return (
     <VideoView
@@ -37,13 +53,17 @@ export default function VideoDetailPage() {
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { muxAssetId: rawMuxAssetId } = useLocalSearchParams<{
-    muxAssetId?: string | string[];
-  }>();
+  const { muxAssetId: rawMuxAssetId, startAt: rawStartAt } =
+    useLocalSearchParams<{
+      muxAssetId?: string | string[];
+      startAt?: string | string[];
+    }>();
 
   const muxAssetId = Array.isArray(rawMuxAssetId)
     ? rawMuxAssetId[0]
     : rawMuxAssetId;
+  const startAtParam = Array.isArray(rawStartAt) ? rawStartAt[0] : rawStartAt;
+  const startAtSeconds = startAtParam ? Number(startAtParam) : undefined;
 
   const selectedVideo = useQuery(
     (api as any).feed.getFeedVideoByMuxAssetId,
@@ -104,10 +124,13 @@ export default function VideoDetailPage() {
         renderItem={({ item }) => (
           <FeedVideoCard
             item={item}
-            onPress={(video) =>
+            onPress={(video, startAt) =>
               router.replace({
                 pathname: "/video/[muxAssetId]",
-                params: { muxAssetId: video.muxAssetId },
+                params: {
+                  muxAssetId: video.muxAssetId,
+                  startAt: String(startAt ?? 0),
+                },
               })
             }
           />
@@ -118,6 +141,7 @@ export default function VideoDetailPage() {
               <FullVideoPlayer
                 key={selectedVideo.muxAssetId}
                 playbackUrl={selectedVideo.playbackUrl}
+                startAtSeconds={startAtSeconds}
               />
               <Pressable
                 style={[styles.backButton, { top: insets.top + 8 }]}

@@ -1,8 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import { useMemo } from "react";
+import { Activity, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+
+import { InlineVideoPlayer } from "@/components/inline-video-player";
 
 export type FeedVideoItem = {
   muxAssetId: string;
@@ -38,36 +40,59 @@ export function formatPublished(createdAtMs: number) {
 
 type FeedVideoCardProps = {
   item: FeedVideoItem;
-  onPress?: (item: FeedVideoItem) => void;
+  onPress?: (item: FeedVideoItem, startAtSeconds?: number) => void;
   showPlayIcon?: boolean;
+  isFocused?: boolean;
+  shouldPreload?: boolean;
+  onMeasured?: (layout: { y: number; height: number }) => void;
 };
 
 export function FeedVideoCard({
   item,
   onPress,
   showPlayIcon = true,
+  isFocused = false,
+  shouldPreload = false,
+  onMeasured,
 }: FeedVideoCardProps) {
   const router = useRouter();
+  const [isNavigatingToDetail, setIsNavigatingToDetail] = useState(false);
+  const [previewPositionSeconds, setPreviewPositionSeconds] = useState(0);
 
   const durationLabel = useMemo(
     () => formatDuration(item.durationSeconds),
     [item.durationSeconds],
   );
 
+  const shouldRenderPlayer = shouldPreload || isFocused || isNavigatingToDetail;
+  const showPreview = isFocused || isNavigatingToDetail;
+
   const handlePress = () => {
+    setIsNavigatingToDetail(true);
+
     if (onPress) {
-      onPress(item);
+      onPress(item, previewPositionSeconds);
       return;
     }
+
     router.push({
       pathname: "/video/[muxAssetId]",
-      params: { muxAssetId: item.muxAssetId },
+      params: {
+        muxAssetId: item.muxAssetId,
+        startAt: String(previewPositionSeconds),
+      },
     });
   };
 
   return (
     <Pressable
       onPress={handlePress}
+      onLayout={(event) => {
+        onMeasured?.({
+          y: event.nativeEvent.layout.y,
+          height: event.nativeEvent.layout.height,
+        });
+      }}
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
     >
       <View style={styles.videoContainer}>
@@ -76,6 +101,20 @@ export function FeedVideoCard({
           contentFit="cover"
           style={styles.thumbnail}
         />
+        {shouldRenderPlayer ? (
+          <Activity mode="visible" name={`feed-preview-${item.muxAssetId}`}>
+            <View
+              style={[styles.previewLayer, !showPreview && styles.previewHidden]}
+            >
+              <InlineVideoPlayer
+                playbackUrl={item.playbackUrl}
+                isFocused={isFocused || isNavigatingToDetail}
+                startAtSeconds={previewPositionSeconds}
+                onTimeUpdate={setPreviewPositionSeconds}
+              />
+            </View>
+          </Activity>
+        ) : null}
         {showPlayIcon ? (
           <View style={styles.playOverlay}>
             <Ionicons name="play-circle" size={56} color="#FFFFFFE6" />
@@ -112,7 +151,7 @@ export function FeedVideoCard({
 
 const styles = StyleSheet.create({
   card: {
-    marginBottom: 18,
+    marginBottom: 20,
   },
   cardPressed: {
     opacity: 0.9,
@@ -131,31 +170,37 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  previewLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  previewHidden: {
+    opacity: 0,
+  },
   durationBadge: {
     position: "absolute",
-    right: 8,
-    bottom: 8,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    right: 12,
+    bottom: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderRadius: 4,
     backgroundColor: "#000000CC",
   },
   durationText: {
     color: "#fff",
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: "600",
   },
   metaRow: {
     flexDirection: "row",
-    gap: 10,
+    gap: 14,
     paddingHorizontal: 12,
-    paddingTop: 10,
+    paddingTop: 14,
     alignItems: "flex-start",
   },
   avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     backgroundColor: "#FF4FA7",
     alignItems: "center",
     justifyContent: "center",
@@ -163,25 +208,28 @@ const styles = StyleSheet.create({
   avatarText: {
     color: "#fff",
     fontWeight: "700",
+    fontSize: 18,
   },
   metaTextWrap: {
     flex: 1,
-    gap: 2,
+    gap: 4,
   },
   title: {
-    fontSize: 15,
-    lineHeight: 20,
+    fontSize: 18,
+    lineHeight: 24,
     fontWeight: "600",
     color: "#101010",
   },
   meta: {
-    fontSize: 13,
+    fontSize: 14,
     color: "#666",
+    lineHeight: 20,
   },
   moreButton: {
-    width: 24,
-    height: 24,
+    width: 32,
+    height: 32,
     alignItems: "center",
     justifyContent: "center",
+    marginTop: 4,
   },
 });
