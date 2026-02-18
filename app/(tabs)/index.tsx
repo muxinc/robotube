@@ -1,8 +1,9 @@
+import { FlashList, type ViewToken } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "convex/react";
 import { Image } from "expo-image";
 import { useRef, useState } from "react";
-import { FlatList, Pressable, StyleSheet, Text, View, type ViewToken } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
@@ -70,7 +71,7 @@ export default function HomePage() {
         </View>
       </View>
 
-      <FlatList
+      <FlashList
         data={feedVideos ?? []}
         keyExtractor={(item) => item.muxAssetId}
         onViewableItemsChanged={onViewableItemsChanged.current}
