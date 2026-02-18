@@ -14,8 +14,11 @@ import type * as http from "../http.js";
 import type * as migrations from "../migrations.js";
 import type * as moderation from "../moderation.js";
 import type * as muxWebhook from "../muxWebhook.js";
+import type * as search from "../search.js";
 import type * as uploadStatus from "../uploadStatus.js";
 import type * as uploads from "../uploads.js";
+import type * as videoEmbeddings from "../videoEmbeddings.js";
+import type * as videoEmbeddingsNode from "../videoEmbeddingsNode.js";
 
 import type {
   ApiFromModules,
@@ -30,8 +33,11 @@ declare const fullApi: ApiFromModules<{
   migrations: typeof migrations;
   moderation: typeof moderation;
   muxWebhook: typeof muxWebhook;
+  search: typeof search;
   uploadStatus: typeof uploadStatus;
   uploads: typeof uploads;
+  videoEmbeddings: typeof videoEmbeddings;
+  videoEmbeddingsNode: typeof videoEmbeddingsNode;
 }>;
 
 /**

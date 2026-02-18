@@ -79,6 +79,17 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
     const existingCustom = asCustomRecord(metadata.custom);
 
     if (existingCustom.aiGeneratedAtMs) {
+      if (!existingCustom.embeddingsGeneratedAtMs) {
+        await ctx.scheduler.runAfter(
+          0,
+          (internal as any).videoEmbeddingsNode.generateAssetEmbeddingsInternal,
+          {
+            muxAssetId: args.muxAssetId,
+            userId: args.userId,
+            attempt: 0,
+          },
+        );
+      }
       return { ok: true, skipped: true, reason: "already_generated" };
     }
 
@@ -110,6 +121,16 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
             aiAttemptCount: attempt + 1,
           },
         }),
+      );
+
+      await ctx.scheduler.runAfter(
+        0,
+        (internal as any).videoEmbeddingsNode.generateAssetEmbeddingsInternal,
+        {
+          muxAssetId: args.muxAssetId,
+          userId: args.userId,
+          attempt: 0,
+        },
       );
 
       return { ok: true, skipped: false };

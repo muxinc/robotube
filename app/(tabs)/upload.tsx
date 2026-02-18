@@ -178,10 +178,6 @@ export default function HomeScreen() {
             contentFit="contain"
             style={styles.uploadLogo}
           />
-          <ThemedText>
-            Choose a video and upload directly to Mux. New uploads are held from
-            the feed until moderation passes.
-          </ThemedText>
 
           <ThemedView style={styles.inputWrap}>
             <ThemedText type="defaultSemiBold">Title</ThemedText>
