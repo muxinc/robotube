@@ -25,6 +25,11 @@ function asCustomRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function getMetadataRecord(value: unknown): Record<string, unknown> {
+  if (Array.isArray(value)) return asCustomRecord(value[0]);
+  return asCustomRecord(value);
+}
+
 function buildMetadataArgs(args: {
   muxAssetId: string;
   userId: string;
@@ -70,10 +75,21 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
       return { ok: false, skipped: true, reason: "asset_not_found" };
     }
 
-    const metadata = video.metadata ?? null;
-    const existingCustom = asCustomRecord(metadata?.custom);
+    const metadata = getMetadataRecord(video.metadata);
+    const existingCustom = asCustomRecord(metadata.custom);
 
     if (existingCustom.aiGeneratedAtMs) {
+      if (!existingCustom.embeddingsGeneratedAtMs) {
+        await ctx.scheduler.runAfter(
+          0,
+          (internal as any).videoEmbeddingsNode.generateAssetEmbeddingsInternal,
+          {
+            muxAssetId: args.muxAssetId,
+            userId: args.userId,
+            attempt: 0,
+          },
+        );
+      }
       return { ok: true, skipped: true, reason: "already_generated" };
     }
 
@@ -83,16 +99,23 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
         includeTranscript: true,
       });
 
+      const latestVideo = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
+        muxAssetId: args.muxAssetId,
+        userId: args.userId,
+      });
+      const latestMetadata = getMetadataRecord(latestVideo?.metadata);
+      const latestCustom = asCustomRecord(latestMetadata.custom);
+
       await ctx.runMutation(
         components.mux.videos.upsertVideoMetadata,
         buildMetadataArgs({
           muxAssetId: args.muxAssetId,
           userId: args.userId,
-          title: metadata?.title,
+          title: (latestMetadata.title as string | undefined) ?? (metadata.title as string | undefined),
           description: result.description,
           tags: result.tags,
           custom: {
-            ...existingCustom,
+            ...latestCustom,
             aiGeneratedAtMs: Date.now(),
             aiProvider: "openai",
             aiAttemptCount: attempt + 1,
@@ -100,11 +123,28 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
         }),
       );
 
+      await ctx.scheduler.runAfter(
+        0,
+        (internal as any).videoEmbeddingsNode.generateAssetEmbeddingsInternal,
+        {
+          muxAssetId: args.muxAssetId,
+          userId: args.userId,
+          attempt: 0,
+        },
+      );
+
       return { ok: true, skipped: false };
     } catch (error) {
       const message = getErrorMessage(error);
       const nextAttempt = attempt + 1;
       const shouldRetry = nextAttempt < MAX_ATTEMPTS;
+
+      const latestVideo = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
+        muxAssetId: args.muxAssetId,
+        userId: args.userId,
+      });
+      const latestMetadata = getMetadataRecord(latestVideo?.metadata);
+      const latestCustom = asCustomRecord(latestMetadata.custom);
 
       if (shouldRetry) {
         await ctx.scheduler.runAfter(
@@ -123,9 +163,9 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
         buildMetadataArgs({
           muxAssetId: args.muxAssetId,
           userId: args.userId,
-          title: metadata?.title,
+          title: (latestMetadata.title as string | undefined) ?? (metadata.title as string | undefined),
           custom: {
-            ...existingCustom,
+            ...latestCustom,
             aiFailedAtMs: Date.now(),
             aiLastError: message,
             aiAttemptCount: nextAttempt,

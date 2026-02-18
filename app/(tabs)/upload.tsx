@@ -5,6 +5,7 @@ import {
   ScrollView,
   StyleSheet,
   TextInput,
+  View,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
@@ -51,6 +52,7 @@ export default function HomeScreen() {
   const moderationPending =
     Boolean(lastUploadId) &&
     (moderationStatus === undefined || moderationStatus.done === false);
+  const uploadComplete = Boolean(lastUploadId) && !isUploading;
 
   useEffect(() => {
     if (!lastUploadId || isUploading) return;
@@ -67,7 +69,6 @@ export default function HomeScreen() {
 
   const handleUpload = async () => {
     try {
-      setIsUploading(true);
       setUploadProgress(2);
       setStatus("Pick a video from your Photos library.");
 
@@ -102,6 +103,7 @@ export default function HomeScreen() {
         );
       }
 
+      setIsUploading(true);
       setUploadProgress(20);
       setStatus("Creating Mux upload URL...");
       const { uploadId, uploadUrl } = await createMuxDirectUpload({
@@ -176,10 +178,6 @@ export default function HomeScreen() {
             contentFit="contain"
             style={styles.uploadLogo}
           />
-          <ThemedText>
-            Choose a video and upload directly to Mux. New uploads are held from
-            the feed until moderation passes.
-          </ThemedText>
 
           <ThemedView style={styles.inputWrap}>
             <ThemedText type="defaultSemiBold">Title</ThemedText>
@@ -203,13 +201,25 @@ export default function HomeScreen() {
             ]}
           >
             <ThemedText type="defaultSemiBold">
-              {isUploading ? "Uploading..." : "Select From Photos And Upload"}
+              {isUploading ? "Uploading..." : "Select a video and upload"}
             </ThemedText>
           </Pressable>
 
           <ThemedView style={styles.statusCard}>
             <ThemedText type="defaultSemiBold">Status</ThemedText>
-            {isUploading || moderationPending || uploadProgress === 100 ? (
+            {uploadComplete ? (
+              <View style={styles.doneBadge}>
+                <Image
+                  source={require("../../assets/images/robo-kirbutt.png")}
+                  contentFit="contain"
+                  style={styles.doneBadgeIcon}
+                />
+                <ThemedText style={styles.doneBadgeText}>
+                  Upload complete{moderationPending ? " - moderation in progress" : ""}
+                </ThemedText>
+              </View>
+            ) : null}
+            {isUploading || moderationPending ? (
               <UploadLoadingIndicator
                 isActive={isUploading || moderationPending}
                 status={status}
@@ -267,6 +277,28 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#D5DDE8",
     padding: 12,
+  },
+  doneBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 999,
+    alignSelf: "flex-start",
+    backgroundColor: "#EEF8FF",
+    borderWidth: 1,
+    borderColor: "#B8DCFF",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 2,
+  },
+  doneBadgeIcon: {
+    width: 22,
+    height: 22,
+  },
+  doneBadgeText: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: "#1E4F89",
   },
   inputWrap: {
     gap: 8,

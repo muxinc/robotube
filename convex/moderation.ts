@@ -29,6 +29,11 @@ function asCustomRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function getMetadataRecord(value: unknown): Record<string, unknown> {
+  if (Array.isArray(value)) return asCustomRecord(value[0]);
+  return asCustomRecord(value);
+}
+
 function asVisibility(value: unknown): "private" | "unlisted" | "public" | undefined {
   return value === "private" || value === "unlisted" || value === "public"
     ? value
@@ -83,9 +88,9 @@ export const moderateAssetInternal = internalAction({
       return { ok: false, skipped: true, reason: "asset_not_found" };
     }
 
-    const metadata = video.metadata ?? null;
-    const existingCustom = asCustomRecord(metadata?.custom);
-    const currentVisibility = asVisibility(metadata?.visibility);
+    const metadata = getMetadataRecord(video.metadata);
+    const existingCustom = asCustomRecord(metadata.custom);
+    const currentVisibility = asVisibility(metadata.visibility);
 
     if (existingCustom.moderationCheckedAtMs) {
       return { ok: true, skipped: true, reason: "already_moderated" };
@@ -104,17 +109,30 @@ export const moderateAssetInternal = internalAction({
           : "public"
         : "private";
 
+      const latestVideo = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
+        muxAssetId: args.muxAssetId,
+        userId: args.userId,
+      });
+      const latestMetadata = getMetadataRecord(latestVideo?.metadata);
+      const latestCustom = asCustomRecord(latestMetadata.custom);
+
       await ctx.runMutation(
         components.mux.videos.upsertVideoMetadata,
         buildMetadataArgs({
           muxAssetId: args.muxAssetId,
           userId: args.userId,
-          title: metadata?.title,
-          description: metadata?.description,
-          tags: metadata?.tags,
+          title: (latestMetadata.title as string | undefined) ?? (metadata.title as string | undefined),
+          description:
+            (latestMetadata.description as string | undefined) ??
+            (metadata.description as string | undefined),
+          tags: (Array.isArray(latestMetadata.tags)
+            ? (latestMetadata.tags as string[])
+            : Array.isArray(metadata.tags)
+              ? (metadata.tags as string[])
+              : undefined),
           visibility: nextVisibility,
           custom: {
-            ...existingCustom,
+            ...latestCustom,
             moderationCheckedAtMs: Date.now(),
             moderationProvider: "openai",
             moderationAttemptCount: attempt + 1,
@@ -138,6 +156,13 @@ export const moderateAssetInternal = internalAction({
       const nextAttempt = attempt + 1;
       const shouldRetry = nextAttempt < MAX_ATTEMPTS;
 
+      const latestVideo = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
+        muxAssetId: args.muxAssetId,
+        userId: args.userId,
+      });
+      const latestMetadata = getMetadataRecord(latestVideo?.metadata);
+      const latestCustom = asCustomRecord(latestMetadata.custom);
+
       if (shouldRetry) {
         await ctx.scheduler.runAfter(
           getRetryDelayMs(nextAttempt),
@@ -155,12 +180,18 @@ export const moderateAssetInternal = internalAction({
         buildMetadataArgs({
           muxAssetId: args.muxAssetId,
           userId: args.userId,
-          title: metadata?.title,
-          description: metadata?.description,
-          tags: metadata?.tags,
+          title: (latestMetadata.title as string | undefined) ?? (metadata.title as string | undefined),
+          description:
+            (latestMetadata.description as string | undefined) ??
+            (metadata.description as string | undefined),
+          tags: (Array.isArray(latestMetadata.tags)
+            ? (latestMetadata.tags as string[])
+            : Array.isArray(metadata.tags)
+              ? (metadata.tags as string[])
+              : undefined),
           visibility: "private",
           custom: {
-            ...existingCustom,
+            ...latestCustom,
             moderationFailedAtMs: Date.now(),
             moderationLastError: message,
             moderationAttemptCount: nextAttempt,

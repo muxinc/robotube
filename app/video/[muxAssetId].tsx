@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "convex/react";
+import { StatusBar } from "expo-status-bar";
 import { Stack, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -13,7 +14,15 @@ import {
 } from "@/components/feed-video-card";
 import { api } from "@/convex/_generated/api";
 
-function FullVideoPlayer({ playbackUrl }: { playbackUrl: string }) {
+function FullVideoPlayer({
+  playbackUrl,
+  startAtSeconds,
+}: {
+  playbackUrl: string;
+  startAtSeconds?: number;
+}) {
+  const didSeekToStartRef = useRef(false);
+
   const player = useVideoPlayer(
     { uri: playbackUrl, contentType: "hls" },
     (videoPlayer) => {
@@ -21,6 +30,14 @@ function FullVideoPlayer({ playbackUrl }: { playbackUrl: string }) {
       videoPlayer.play();
     },
   );
+
+  useEffect(() => {
+    if (didSeekToStartRef.current) return;
+    if (startAtSeconds === undefined || Number.isNaN(startAtSeconds)) return;
+
+    player.currentTime = Math.max(0, startAtSeconds);
+    didSeekToStartRef.current = true;
+  }, [player, startAtSeconds]);
 
   return (
     <VideoView
@@ -37,13 +54,17 @@ export default function VideoDetailPage() {
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { muxAssetId: rawMuxAssetId } = useLocalSearchParams<{
-    muxAssetId?: string | string[];
-  }>();
+  const { muxAssetId: rawMuxAssetId, startAt: rawStartAt } =
+    useLocalSearchParams<{
+      muxAssetId?: string | string[];
+      startAt?: string | string[];
+    }>();
 
   const muxAssetId = Array.isArray(rawMuxAssetId)
     ? rawMuxAssetId[0]
     : rawMuxAssetId;
+  const startAtParam = Array.isArray(rawStartAt) ? rawStartAt[0] : rawStartAt;
+  const startAtSeconds = startAtParam ? Number(startAtParam) : undefined;
 
   const selectedVideo = useQuery(
     (api as any).feed.getFeedVideoByMuxAssetId,
@@ -59,6 +80,8 @@ export default function VideoDetailPage() {
       (feedVideos ?? []).filter((video) => video.muxAssetId !== muxAssetId),
     [feedVideos, muxAssetId],
   );
+  const summary = selectedVideo?.summary ?? null;
+  const tags = selectedVideo?.tags ?? [];
 
   const handleBack = () => {
     if (navigation.canGoBack()) {
@@ -97,6 +120,7 @@ export default function VideoDetailPage() {
 
   return (
     <View style={styles.screen}>
+      <StatusBar style="light" backgroundColor="#000000" translucent={false} />
       <Stack.Screen options={{ headerShown: false }} />
       <FlatList
         data={relatedVideos}
@@ -104,23 +128,28 @@ export default function VideoDetailPage() {
         renderItem={({ item }) => (
           <FeedVideoCard
             item={item}
-            onPress={(video) =>
+            onPress={(video, startAt) =>
               router.replace({
                 pathname: "/video/[muxAssetId]",
-                params: { muxAssetId: video.muxAssetId },
+                params: {
+                  muxAssetId: video.muxAssetId,
+                  startAt: String(startAt ?? 0),
+                },
               })
             }
           />
         )}
         ListHeaderComponent={
           <View>
+            <View style={{ height: insets.top, backgroundColor: "#000" }} />
             <View style={styles.videoWrap}>
               <FullVideoPlayer
                 key={selectedVideo.muxAssetId}
                 playbackUrl={selectedVideo.playbackUrl}
+                startAtSeconds={startAtSeconds}
               />
               <Pressable
-                style={[styles.backButton, { top: insets.top + 8 }]}
+                style={[styles.backButton, { top: 8 }]}
                 onPress={handleBack}
               >
                 <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
@@ -132,6 +161,22 @@ export default function VideoDetailPage() {
                 {selectedVideo.channelName} ·{" "}
                 {formatPublished(selectedVideo.createdAtMs)}
               </Text>
+              {summary ? (
+                <Text style={styles.summary}>{summary}</Text>
+              ) : (
+                <Text style={styles.summaryPending}>
+                  AI summary is being generated for this video.
+                </Text>
+              )}
+              {tags.length > 0 ? (
+                <View style={styles.tagsWrap}>
+                  {tags.map((tag) => (
+                    <View key={`${selectedVideo.muxAssetId}-${tag}`} style={styles.tagPill}>
+                      <Text style={styles.tagText}>#{tag}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
             </View>
             <Text style={styles.upNextTitle}>Up next</Text>
           </View>
@@ -197,6 +242,36 @@ const styles = StyleSheet.create({
   meta: {
     fontSize: 14,
     color: "#606060",
+  },
+  summary: {
+    marginTop: 2,
+    fontSize: 14,
+    lineHeight: 20,
+    color: "#232323",
+  },
+  summaryPending: {
+    marginTop: 2,
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#7D7D7D",
+  },
+  tagsWrap: {
+    marginTop: 2,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  tagPill: {
+    borderRadius: 999,
+    backgroundColor: "#EEF4FF",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  tagText: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: "#2558A8",
+    fontWeight: "600",
   },
   upNextTitle: {
     marginTop: 18,
