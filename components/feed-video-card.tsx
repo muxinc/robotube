@@ -39,9 +39,14 @@ export function formatPublished(createdAtMs: number) {
 type FeedVideoCardProps = {
   item: FeedVideoItem;
   onPress?: (item: FeedVideoItem) => void;
+  showPlayIcon?: boolean;
 };
 
-export function FeedVideoCard({ item, onPress }: FeedVideoCardProps) {
+export function FeedVideoCard({
+  item,
+  onPress,
+  showPlayIcon = true,
+}: FeedVideoCardProps) {
   const router = useRouter();
 
   const durationLabel = useMemo(
@@ -71,9 +76,11 @@ export function FeedVideoCard({ item, onPress }: FeedVideoCardProps) {
           contentFit="cover"
           style={styles.thumbnail}
         />
-        <View style={styles.playOverlay}>
-          <Ionicons name="play-circle" size={56} color="#FFFFFFE6" />
-        </View>
+        {showPlayIcon ? (
+          <View style={styles.playOverlay}>
+            <Ionicons name="play-circle" size={56} color="#FFFFFFE6" />
+          </View>
+        ) : null}
         {durationLabel ? (
           <View style={styles.durationBadge}>
             <Text style={styles.durationText}>{durationLabel}</Text>

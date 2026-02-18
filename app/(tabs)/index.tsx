@@ -50,7 +50,9 @@ export default function HomePage() {
       <FlatList
         data={feedVideos ?? []}
         keyExtractor={(item) => item.muxAssetId}
-        renderItem={({ item }) => <FeedVideoCard item={item} />}
+        renderItem={({ item }) => (
+          <FeedVideoCard item={item} showPlayIcon={false} />
+        )}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.feedContent}
         ListEmptyComponent={
