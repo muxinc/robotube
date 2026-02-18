@@ -76,13 +76,16 @@ export default function HomePage() {
         keyExtractor={(item) => item.muxAssetId}
         onViewableItemsChanged={onViewableItemsChanged.current}
         viewabilityConfig={viewabilityConfig.current}
-        renderItem={({ item, index }) => {
-          const shouldPreload = Math.abs(index - focusedIndex) <= 1;
+        renderItem={({ item, index, target }) => {
+          const isCellTarget = target === "Cell";
+          const isFocused = isCellTarget && index === focusedIndex;
+          const shouldPreload = isCellTarget && Math.abs(index - focusedIndex) <= 1;
+
           return (
             <FeedVideoCard
               item={item}
               showPlayIcon={false}
-              isFocused={index === focusedIndex}
+              isFocused={isFocused}
               shouldPreload={shouldPreload}
             />
           );

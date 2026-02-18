@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "convex/react";
+import { StatusBar } from "expo-status-bar";
 import { Stack, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useEffect, useMemo, useRef } from "react";
@@ -117,6 +118,7 @@ export default function VideoDetailPage() {
 
   return (
     <View style={styles.screen}>
+      <StatusBar style="light" backgroundColor="#000000" translucent={false} />
       <Stack.Screen options={{ headerShown: false }} />
       <FlatList
         data={relatedVideos}
@@ -137,6 +139,7 @@ export default function VideoDetailPage() {
         )}
         ListHeaderComponent={
           <View>
+            <View style={{ height: insets.top, backgroundColor: "#000" }} />
             <View style={styles.videoWrap}>
               <FullVideoPlayer
                 key={selectedVideo.muxAssetId}
@@ -144,7 +147,7 @@ export default function VideoDetailPage() {
                 startAtSeconds={startAtSeconds}
               />
               <Pressable
-                style={[styles.backButton, { top: insets.top + 8 }]}
+                style={[styles.backButton, { top: 8 }]}
                 onPress={handleBack}
               >
                 <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
