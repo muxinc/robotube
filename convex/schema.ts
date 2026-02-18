@@ -8,7 +8,7 @@ export default defineSchema({
     chunkText: v.optional(v.string()),
     startTimeSeconds: v.optional(v.number()),
     endTimeSeconds: v.optional(v.number()),
-    embedding: v.array(v.number()),
+    embedding: v.array(v.float64()),
     createdAtMs: v.number(),
   })
     .index("by_asset", ["muxAssetId"])

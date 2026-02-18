@@ -15,7 +15,7 @@ export const replaceAssetEmbeddingsInternal = internalMutation({
     userId: v.string(),
     chunks: v.array(
       v.object({
-        embedding: v.array(v.number()),
+        embedding: v.array(v.float64()),
         chunkText: v.optional(v.string()),
         startTimeSeconds: v.optional(v.number()),
         endTimeSeconds: v.optional(v.number()),
@@ -51,32 +51,17 @@ export const replaceAssetEmbeddingsInternal = internalMutation({
   },
 });
 
-export const findNearestAssetIdsByEmbeddingInternal = internalQuery({
+export const getEmbeddingRowsByIdsInternal = internalQuery({
   args: {
-    embedding: v.array(v.number()),
-    limit: v.optional(v.number()),
+    ids: v.array(v.id("videoEmbeddings")),
   },
   handler: async (ctx, args) => {
-    const expandedLimit = Math.max(20, Math.floor((args.limit ?? 10) * 8));
-    const hits = await (ctx as any).vectorSearch("videoEmbeddings", "by_embedding", {
-      vector: args.embedding,
-      limit: expandedLimit,
-    });
-
-    const scoreByAsset = new Map<string, number>();
-    for (const hit of hits) {
-      const row = await (ctx.db as any).get(hit._id);
+    const rows: Array<{ _id: string; muxAssetId: string }> = [];
+    for (const id of args.ids) {
+      const row = await (ctx.db as any).get(id);
       if (!row) continue;
-
-      const current = scoreByAsset.get(row.muxAssetId) ?? Number.NEGATIVE_INFINITY;
-      if (hit._score > current) {
-        scoreByAsset.set(row.muxAssetId, hit._score);
-      }
+      rows.push({ _id: String(id), muxAssetId: row.muxAssetId });
     }
-
-    return Array.from(scoreByAsset.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, args.limit ?? 10)
-      .map(([muxAssetId, score]) => ({ muxAssetId, score }));
+    return rows;
   },
 });
