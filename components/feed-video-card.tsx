@@ -12,6 +12,8 @@ export type FeedVideoItem = {
   playbackUrl: string;
   thumbnailUrl: string;
   title: string;
+  summary: string | null;
+  tags: string[];
   channelName: string;
   durationSeconds: number | null;
   createdAtMs: number;

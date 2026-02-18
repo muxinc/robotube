@@ -15,9 +15,20 @@ type FeedVideoRow = {
   thumbnailUrl: string;
   durationSeconds: number | null;
   title: string;
+  summary: string | null;
+  tags: string[];
   channelName: string;
   createdAtMs: number;
 };
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
+}
 
 async function toFeedVideoRow(ctx: any, asset: any): Promise<FeedVideoRow | null> {
   const playbackIds = (asset.playbackIds ?? []) as PlaybackId[];
@@ -43,6 +54,8 @@ async function toFeedVideoRow(ctx: any, asset: any): Promise<FeedVideoRow | null
     thumbnailUrl: `https://image.mux.com/${playback.id}/thumbnail.jpg?width=1280`,
     durationSeconds: asset.durationSeconds ?? null,
     title: metadata?.title ?? `Video ${String(asset.muxAssetId).slice(0, 6)}`,
+    summary: asString(metadata?.description),
+    tags: asStringArray(metadata?.tags),
     channelName: metadata?.custom?.channelName ?? "Robotube",
     createdAtMs: asset.createdAtMs ?? Date.now(),
   };

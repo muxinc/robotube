@@ -72,6 +72,37 @@ function normalizeHeaders(headers: Record<string, string>): Record<string, strin
   return normalized;
 }
 
+function buildMetadataArgs(args: {
+  muxAssetId: string;
+  userId: string;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  visibility?: "private" | "unlisted" | "public";
+  custom?: Record<string, unknown>;
+}) {
+  const payload: {
+    muxAssetId: string;
+    userId: string;
+    title?: string;
+    description?: string;
+    tags?: string[];
+    visibility?: "private" | "unlisted" | "public";
+    custom?: Record<string, unknown>;
+  } = {
+    muxAssetId: args.muxAssetId,
+    userId: args.userId,
+  };
+
+  if (args.title !== undefined) payload.title = args.title;
+  if (args.description !== undefined) payload.description = args.description;
+  if (args.tags !== undefined) payload.tags = args.tags;
+  if (args.visibility !== undefined) payload.visibility = args.visibility;
+  if (args.custom !== undefined) payload.custom = args.custom;
+
+  return payload;
+}
+
 export const ingestMuxWebhook = internalAction({
   args: {
     rawBody: v.string(),
@@ -114,17 +145,30 @@ export const ingestMuxWebhook = internalAction({
 
         const metadata = parseMetadataPassthrough(data.passthrough);
         const userId = metadata.userId ?? "default";
-        await ctx.runMutation(components.mux.videos.upsertVideoMetadata, {
-          muxAssetId: objectId,
-          userId,
-          title: metadata.title,
-          description: metadata.description,
-          tags: metadata.tags,
-          visibility: metadata.visibility,
-          custom: metadata.custom,
-        });
+        await ctx.runMutation(
+          components.mux.videos.upsertVideoMetadata,
+          buildMetadataArgs({
+            muxAssetId: objectId,
+            userId,
+            title: metadata.title,
+            description: metadata.description,
+            tags: metadata.tags,
+            visibility: metadata.visibility,
+            custom: metadata.custom,
+          })
+        );
 
         if (asString(data.status) === "ready") {
+          await ctx.scheduler.runAfter(
+            0,
+            (internal as any).aiMetadata.generateSummaryAndTagsForAssetInternal,
+            {
+              muxAssetId: objectId,
+              userId,
+              attempt: 0,
+            },
+          );
+
           await ctx.scheduler.runAfter(
             0,
             (internal as any).moderation.moderateAssetInternal,

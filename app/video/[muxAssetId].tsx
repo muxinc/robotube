@@ -80,6 +80,8 @@ export default function VideoDetailPage() {
       (feedVideos ?? []).filter((video) => video.muxAssetId !== muxAssetId),
     [feedVideos, muxAssetId],
   );
+  const summary = selectedVideo?.summary ?? null;
+  const tags = selectedVideo?.tags ?? [];
 
   const handleBack = () => {
     if (navigation.canGoBack()) {
@@ -159,6 +161,22 @@ export default function VideoDetailPage() {
                 {selectedVideo.channelName} ·{" "}
                 {formatPublished(selectedVideo.createdAtMs)}
               </Text>
+              {summary ? (
+                <Text style={styles.summary}>{summary}</Text>
+              ) : (
+                <Text style={styles.summaryPending}>
+                  AI summary is being generated for this video.
+                </Text>
+              )}
+              {tags.length > 0 ? (
+                <View style={styles.tagsWrap}>
+                  {tags.map((tag) => (
+                    <View key={`${selectedVideo.muxAssetId}-${tag}`} style={styles.tagPill}>
+                      <Text style={styles.tagText}>#{tag}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
             </View>
             <Text style={styles.upNextTitle}>Up next</Text>
           </View>
@@ -224,6 +242,36 @@ const styles = StyleSheet.create({
   meta: {
     fontSize: 14,
     color: "#606060",
+  },
+  summary: {
+    marginTop: 2,
+    fontSize: 14,
+    lineHeight: 20,
+    color: "#232323",
+  },
+  summaryPending: {
+    marginTop: 2,
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#7D7D7D",
+  },
+  tagsWrap: {
+    marginTop: 2,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  tagPill: {
+    borderRadius: 999,
+    backgroundColor: "#EEF4FF",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  tagText: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: "#2558A8",
+    fontWeight: "600",
   },
   upNextTitle: {
     marginTop: 18,
