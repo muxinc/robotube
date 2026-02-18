@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { useVideoPlayer, VideoView } from "expo-video";
-import { useMemo, useState } from "react";
+import { useRouter } from "expo-router";
+import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 export type FeedVideoItem = {
@@ -15,7 +15,7 @@ export type FeedVideoItem = {
   createdAtMs: number;
 };
 
-function formatDuration(durationSeconds: number | null) {
+export function formatDuration(durationSeconds: number | null) {
   if (!durationSeconds || Number.isNaN(durationSeconds)) return null;
   const rounded = Math.max(0, Math.floor(durationSeconds));
   const minutes = Math.floor(rounded / 60);
@@ -23,7 +23,7 @@ function formatDuration(durationSeconds: number | null) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function formatPublished(createdAtMs: number) {
+export function formatPublished(createdAtMs: number) {
   const diffMs = Date.now() - createdAtMs;
   const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
   if (days < 1) return "Today";
@@ -36,58 +36,50 @@ function formatPublished(createdAtMs: number) {
   return `${years}y ago`;
 }
 
-export function FeedVideoCard({ item }: { item: FeedVideoItem }) {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const player = useVideoPlayer(
-    { uri: item.playbackUrl, contentType: "hls" },
-    (videoPlayer) => {
-      videoPlayer.loop = false;
-    },
-  );
+type FeedVideoCardProps = {
+  item: FeedVideoItem;
+  onPress?: (item: FeedVideoItem) => void;
+};
+
+export function FeedVideoCard({ item, onPress }: FeedVideoCardProps) {
+  const router = useRouter();
 
   const durationLabel = useMemo(
     () => formatDuration(item.durationSeconds),
     [item.durationSeconds],
   );
 
-  const togglePlayback = () => {
-    if (isPlaying) {
-      player.pause();
-      setIsPlaying(false);
+  const handlePress = () => {
+    if (onPress) {
+      onPress(item);
       return;
     }
-    player.play();
-    setIsPlaying(true);
+    router.push({
+      pathname: "/video/[muxAssetId]",
+      params: { muxAssetId: item.muxAssetId },
+    });
   };
 
   return (
-    <View style={styles.card}>
-      <Pressable onPress={togglePlayback} style={styles.videoContainer}>
-        <VideoView
-          player={player}
-          nativeControls={false}
+    <Pressable
+      onPress={handlePress}
+      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+    >
+      <View style={styles.videoContainer}>
+        <Image
+          source={{ uri: item.thumbnailUrl }}
           contentFit="cover"
-          allowsVideoFrameAnalysis={false}
-          style={styles.video}
+          style={styles.thumbnail}
         />
-        {!isPlaying ? (
-          <Image
-            source={{ uri: item.thumbnailUrl }}
-            contentFit="cover"
-            style={styles.thumbnail}
-          />
-        ) : null}
-        {!isPlaying ? (
-          <View style={styles.playOverlay}>
-            <Ionicons name="play-circle" size={56} color="#FFFFFFE6" />
-          </View>
-        ) : null}
+        <View style={styles.playOverlay}>
+          <Ionicons name="play-circle" size={56} color="#FFFFFFE6" />
+        </View>
         {durationLabel ? (
           <View style={styles.durationBadge}>
             <Text style={styles.durationText}>{durationLabel}</Text>
           </View>
         ) : null}
-      </Pressable>
+      </View>
 
       <View style={styles.metaRow}>
         <View style={styles.avatar}>
@@ -103,11 +95,11 @@ export function FeedVideoCard({ item }: { item: FeedVideoItem }) {
             {item.channelName} · {formatPublished(item.createdAtMs)}
           </Text>
         </View>
-        <Pressable hitSlop={8} style={styles.moreButton}>
+        <View style={styles.moreButton}>
           <Ionicons name="ellipsis-vertical" size={18} color="#4A4A4A" />
-        </Pressable>
+        </View>
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -115,15 +107,14 @@ const styles = StyleSheet.create({
   card: {
     marginBottom: 18,
   },
+  cardPressed: {
+    opacity: 0.9,
+  },
   videoContainer: {
     width: "100%",
     aspectRatio: 16 / 9,
     backgroundColor: "#111",
     position: "relative",
-  },
-  video: {
-    width: "100%",
-    height: "100%",
   },
   thumbnail: {
     ...StyleSheet.absoluteFillObject,

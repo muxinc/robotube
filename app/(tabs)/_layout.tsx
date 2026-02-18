@@ -50,7 +50,7 @@ export default function TabLayout() {
                   ? "systemChromeMaterialDark"
                   : "systemChromeMaterialLight"
               }
-              intensity={100}
+              intensity={60}
               style={StyleSheet.absoluteFill}
               experimentalBlurMethod={
                 Platform.OS === "android" ? "dimezisBlurView" : undefined
@@ -105,7 +105,7 @@ export default function TabLayout() {
         options={{
           title: "Explore",
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="paperplane.fill" color={color} />
+            <IconSymbol size={28} name="magnifyingglass" color={color} />
           ),
         }}
       />

@@ -1,27 +1,80 @@
-import { useState } from "react";
-import { Alert, Pressable, StyleSheet } from "react-native";
+import { useEffect, useState } from "react";
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+} from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import { FileSystemUploadType, uploadAsync } from "expo-file-system/legacy";
-import { useAction } from "convex/react";
+import { Image } from "expo-image";
+import {
+  createUploadTask,
+  FileSystemUploadType,
+} from "expo-file-system/legacy";
+import { useAction, useQuery } from "convex/react";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { api } from "@/convex/_generated/api";
-import ParallaxScrollView from "@/components/parallax-scroll-view";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
+import { UploadLoadingIndicator } from "@/components/upload-loading-indicator";
 
 export default function HomeScreen() {
-  const createMuxDirectUpload = useAction(api.migrations.createMuxDirectUpload);
+  const createMuxDirectUpload = useAction(
+    (api as any).uploads.createMuxDirectUpload,
+  );
+  const insets = useSafeAreaInsets();
   const [isUploading, setIsUploading] = useState(false);
   const [status, setStatus] = useState("Pick a video to upload it to Mux.");
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [lastUploadId, setLastUploadId] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const moderationStatus = useQuery(
+    (api as any).uploadStatus.getUploadModerationStatus,
+    lastUploadId
+      ? {
+          uploadId: lastUploadId,
+          userId: "mobile-user",
+        }
+      : "skip",
+  ) as
+    | {
+        stage: string;
+        done: boolean;
+        passed: boolean | null;
+        progress: number;
+        statusText: string;
+      }
+    | undefined;
+
+  const moderationPending =
+    Boolean(lastUploadId) &&
+    (moderationStatus === undefined || moderationStatus.done === false);
+
+  useEffect(() => {
+    if (!lastUploadId || isUploading) return;
+
+    if (moderationStatus === undefined) {
+      setStatus("Checking moderation status...");
+      setUploadProgress((current) => Math.max(current, 96));
+      return;
+    }
+
+    setStatus(moderationStatus.statusText);
+    setUploadProgress(moderationStatus.progress);
+  }, [isUploading, lastUploadId, moderationStatus]);
 
   const handleUpload = async () => {
     try {
       setIsUploading(true);
+      setUploadProgress(2);
       setStatus("Pick a video from your Photos library.");
 
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
+        setUploadProgress(0);
         setStatus("Photo library permission is required.");
         Alert.alert(
           "Permission Required",
@@ -37,6 +90,7 @@ export default function HomeScreen() {
       });
 
       if (picked.canceled || picked.assets.length === 0) {
+        setUploadProgress(0);
         setStatus("No video selected.");
         return;
       }
@@ -48,32 +102,56 @@ export default function HomeScreen() {
         );
       }
 
+      setUploadProgress(20);
       setStatus("Creating Mux upload URL...");
       const { uploadId, uploadUrl } = await createMuxDirectUpload({
         userId: "mobile-user",
+        title: title.trim() || undefined,
       });
 
+      setUploadProgress(32);
       setStatus("Uploading video to Mux...");
-      const uploadResponse = await uploadAsync(uploadUrl, asset.uri, {
-        httpMethod: "PUT",
-        uploadType: FileSystemUploadType.BINARY_CONTENT,
-        headers: {
-          "Content-Type": asset.mimeType || "application/octet-stream",
+      const uploadTask = createUploadTask(
+        uploadUrl,
+        asset.uri,
+        {
+          httpMethod: "PUT",
+          uploadType: FileSystemUploadType.BINARY_CONTENT,
+          headers: {
+            "Content-Type": asset.mimeType || "application/octet-stream",
+          },
         },
-      });
+        (event) => {
+          if (event.totalBytesExpectedToSend <= 0) {
+            return;
+          }
+          const fraction =
+            event.totalBytesSent / event.totalBytesExpectedToSend;
+          const uploadPercent = Math.round(
+            Math.min(1, Math.max(0, fraction)) * 65,
+          );
+          setUploadProgress(32 + uploadPercent);
+        },
+      );
 
+      const uploadResponse = await uploadTask.uploadAsync();
+      if (!uploadResponse) {
+        throw new Error("Upload task was interrupted.");
+      }
+
+      setUploadProgress(95);
       if (uploadResponse.status < 200 || uploadResponse.status >= 300) {
         throw new Error(
           `Mux upload failed (${uploadResponse.status}): ${uploadResponse.body}`,
         );
       }
 
+      setUploadProgress(100);
       setLastUploadId(uploadId);
-      setStatus(
-        "Upload complete. Mux processing started. Convex will sync updates.",
-      );
+      setStatus("Upload complete. Checking moderation status...");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed";
+      setUploadProgress(0);
       setStatus(`Upload failed: ${message}`);
       Alert.alert("Upload Failed", message);
     } finally {
@@ -82,46 +160,91 @@ export default function HomeScreen() {
   };
 
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: "#F0F7FF", dark: "#123347" }}
-      headerImage={<ThemedView />}
-    >
-      <ThemedView style={styles.container}>
-        <ThemedText type="title">Upload To Mux</ThemedText>
-        <ThemedText>
-          Choose a video and upload directly to Mux. Your Convex tables are
-          updated by the Mux sync component.
-        </ThemedText>
-
-        <Pressable
-          disabled={isUploading}
-          onPress={handleUpload}
-          style={({ pressed }) => [
-            styles.button,
-            pressed && !isUploading ? styles.buttonPressed : undefined,
-            isUploading ? styles.buttonDisabled : undefined,
-          ]}
-        >
-          <ThemedText type="defaultSemiBold">
-            {isUploading ? "Uploading..." : "Select From Photos And Upload"}
+    <ThemedView style={styles.screen}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          {
+            paddingTop: insets.top + 10,
+            paddingBottom: insets.bottom + 110,
+          },
+        ]}
+      >
+        <ThemedView style={styles.container}>
+          <Image
+            source={require("../../assets/images/upload-logo.png")}
+            contentFit="contain"
+            style={styles.uploadLogo}
+          />
+          <ThemedText>
+            Choose a video and upload directly to Mux. New uploads are held from
+            the feed until moderation passes.
           </ThemedText>
-        </Pressable>
 
-        <ThemedView style={styles.statusCard}>
-          <ThemedText type="defaultSemiBold">Status</ThemedText>
-          <ThemedText>{status}</ThemedText>
-          {lastUploadId ? (
-            <ThemedText>Last upload ID: {lastUploadId}</ThemedText>
-          ) : null}
+          <ThemedView style={styles.inputWrap}>
+            <ThemedText type="defaultSemiBold">Title</ThemedText>
+            <TextInput
+              value={title}
+              onChangeText={setTitle}
+              placeholder="Give your video a title"
+              autoCapitalize="sentences"
+              maxLength={120}
+              style={styles.input}
+            />
+          </ThemedView>
+
+          <Pressable
+            disabled={isUploading}
+            onPress={handleUpload}
+            style={({ pressed }) => [
+              styles.button,
+              pressed && !isUploading ? styles.buttonPressed : undefined,
+              isUploading ? styles.buttonDisabled : undefined,
+            ]}
+          >
+            <ThemedText type="defaultSemiBold">
+              {isUploading ? "Uploading..." : "Select From Photos And Upload"}
+            </ThemedText>
+          </Pressable>
+
+          <ThemedView style={styles.statusCard}>
+            <ThemedText type="defaultSemiBold">Status</ThemedText>
+            {isUploading || moderationPending || uploadProgress === 100 ? (
+              <UploadLoadingIndicator
+                isActive={isUploading || moderationPending}
+                status={status}
+                progress={uploadProgress}
+              />
+            ) : (
+              <ThemedText>{status}</ThemedText>
+            )}
+            {lastUploadId ? (
+              <ThemedText>Last upload ID: {lastUploadId}</ThemedText>
+            ) : null}
+          </ThemedView>
         </ThemedView>
-      </ThemedView>
-    </ParallaxScrollView>
+      </ScrollView>
+    </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+  },
   container: {
     gap: 14,
+    width: "100%",
+    maxWidth: 760,
+    alignSelf: "center",
+  },
+  uploadLogo: {
+    width: 240,
+    height: 88,
+    alignSelf: "center",
   },
   button: {
     borderRadius: 12,
@@ -144,5 +267,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#D5DDE8",
     padding: 12,
+  },
+  inputWrap: {
+    gap: 8,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#D5DDE8",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
   },
 });

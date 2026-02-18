@@ -4,7 +4,10 @@ import { Image } from "expo-image";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { FeedVideoCard, type FeedVideoItem } from "@/components/feed-video-card";
+import {
+  FeedVideoCard,
+  type FeedVideoItem,
+} from "@/components/feed-video-card";
 import { api } from "@/convex/_generated/api";
 
 export default function HomePage() {
@@ -24,11 +27,13 @@ export default function HomePage() {
           },
         ]}
       >
-        <Image
-          source={require("../../assets/images/robotube-logo.png")}
-          contentFit="contain"
-          style={styles.logo}
-        />
+        <View style={{ flex: 1, justifyContent: "center" }}>
+          <Image
+            source={require("../../assets/images/robotube-logo.png")}
+            contentFit="contain"
+            style={[styles.logo, { marginLeft: 0 }]}
+          />
+        </View>
         <View style={styles.actions}>
           <Pressable style={styles.iconButton}>
             <Ionicons name="tv-outline" size={22} color="#111111" />
@@ -115,4 +120,3 @@ const styles = StyleSheet.create({
     color: "#666666",
   },
 });
-

@@ -2,10 +2,10 @@
 
 import Mux from "@mux/mux-node";
 import { internalAction } from "./_generated/server";
-import { components } from "./_generated/api";
+import { components, internal } from "./_generated/api";
 import { v } from "convex/values";
 
-function requiredEnv(value: string | undefined, name: string): string {
+function requiredEnv(name: string, value: string | undefined): string {
   if (!value) throw new Error(`Missing env var: ${name}`);
   return value;
 }
@@ -21,9 +21,50 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return undefined;
 }
 
-function normalizeHeaders(
-  headers: Record<string, string>,
-): Record<string, string> {
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const strings = value.filter((item): item is string => typeof item === "string");
+  return strings.length > 0 ? strings : undefined;
+}
+
+function asVisibility(
+  value: unknown
+): "private" | "unlisted" | "public" | undefined {
+  return value === "private" || value === "unlisted" || value === "public"
+    ? value
+    : undefined;
+}
+
+function parseMetadataPassthrough(passthrough: unknown): {
+  userId?: string;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  visibility?: "private" | "unlisted" | "public";
+  custom?: Record<string, unknown>;
+} {
+  const raw = asString(passthrough);
+  if (!raw) return {};
+
+  try {
+    const parsed = JSON.parse(raw);
+    const parsedObj = asRecord(parsed);
+    if (!parsedObj) return { userId: raw };
+
+    return {
+      userId: asString(parsedObj.userId) ?? asString(parsedObj.user_id),
+      title: asString(parsedObj.title),
+      description: asString(parsedObj.description),
+      tags: asStringArray(parsedObj.tags),
+      visibility: asVisibility(parsedObj.visibility),
+      custom: asRecord(parsedObj.custom),
+    };
+  } catch {
+    return { userId: raw };
+  }
+}
+
+function normalizeHeaders(headers: Record<string, string>): Record<string, string> {
   const normalized: Record<string, string> = {};
   for (const [key, value] of Object.entries(headers)) {
     normalized[key.toLowerCase()] = value;
@@ -39,13 +80,13 @@ export const ingestMuxWebhook = internalAction({
   handler: async (ctx, args) => {
     const mux = new Mux({
       webhookSecret: requiredEnv(
-        process.env.MUX_WEBHOOK_SECRET,
         "MUX_WEBHOOK_SECRET",
+        process.env.MUX_WEBHOOK_SECRET
       ),
     });
     const event = mux.webhooks.unwrap(
       args.rawBody,
-      normalizeHeaders(args.headers),
+      normalizeHeaders(args.headers)
     ) as unknown as Record<string, unknown>;
 
     await ctx.runMutation(components.mux.sync.recordWebhookEventPublic, {
@@ -67,12 +108,33 @@ export const ingestMuxWebhook = internalAction({
           muxAssetId: objectId,
         });
       } else {
-        await ctx.runMutation(
-          components.mux.sync.upsertAssetFromPayloadPublic,
-          {
-            asset: data,
-          },
-        );
+        await ctx.runMutation(components.mux.sync.upsertAssetFromPayloadPublic, {
+          asset: data,
+        });
+
+        const metadata = parseMetadataPassthrough(data.passthrough);
+        const userId = metadata.userId ?? "default";
+        await ctx.runMutation(components.mux.videos.upsertVideoMetadata, {
+          muxAssetId: objectId,
+          userId,
+          title: metadata.title,
+          description: metadata.description,
+          tags: metadata.tags,
+          visibility: metadata.visibility,
+          custom: metadata.custom,
+        });
+
+        if (asString(data.status) === "ready") {
+          await ctx.scheduler.runAfter(
+            0,
+            (internal as any).moderation.moderateAssetInternal,
+            {
+              muxAssetId: objectId,
+              userId,
+              attempt: 0,
+            },
+          );
+        }
       }
       return { skipped: false };
     }
@@ -87,7 +149,7 @@ export const ingestMuxWebhook = internalAction({
           components.mux.sync.upsertLiveStreamFromPayloadPublic,
           {
             liveStream: data,
-          },
+          }
         );
       }
       return { skipped: false };
@@ -99,12 +161,9 @@ export const ingestMuxWebhook = internalAction({
           muxUploadId: objectId,
         });
       } else {
-        await ctx.runMutation(
-          components.mux.sync.upsertUploadFromPayloadPublic,
-          {
-            upload: data,
-          },
-        );
+        await ctx.runMutation(components.mux.sync.upsertUploadFromPayloadPublic, {
+          upload: data,
+        });
       }
       return { skipped: false };
     }

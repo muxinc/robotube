@@ -8,10 +8,14 @@
  * @module
  */
 
+import type * as aiMetadata from "../aiMetadata.js";
 import type * as feed from "../feed.js";
 import type * as http from "../http.js";
 import type * as migrations from "../migrations.js";
+import type * as moderation from "../moderation.js";
 import type * as muxWebhook from "../muxWebhook.js";
+import type * as uploadStatus from "../uploadStatus.js";
+import type * as uploads from "../uploads.js";
 
 import type {
   ApiFromModules,
@@ -20,10 +24,14 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  aiMetadata: typeof aiMetadata;
   feed: typeof feed;
   http: typeof http;
   migrations: typeof migrations;
+  moderation: typeof moderation;
   muxWebhook: typeof muxWebhook;
+  uploadStatus: typeof uploadStatus;
+  uploads: typeof uploads;
 }>;
 
 /**
