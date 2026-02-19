@@ -346,7 +346,9 @@ const styles = StyleSheet.create({
   uploadLogo: {
     width: 240,
     height: 88,
-    alignSelf: "center",
+    alignSelf: "flex-start",
+    marginLeft: -70,
+    transform: [{ scale: 1.15 }],
   },
   button: {
     borderRadius: 12,
