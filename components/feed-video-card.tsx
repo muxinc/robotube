@@ -58,7 +58,6 @@ export function FeedVideoCard({
   onMeasured,
 }: FeedVideoCardProps) {
   const router = useRouter();
-  const [isNavigatingToDetail, setIsNavigatingToDetail] = useState(false);
   const [previewPositionSeconds, setPreviewPositionSeconds] = useState(0);
 
   const durationLabel = useMemo(
@@ -66,12 +65,10 @@ export function FeedVideoCard({
     [item.durationSeconds],
   );
 
-  const shouldRenderPlayer = shouldPreload || isFocused || isNavigatingToDetail;
-  const showPreview = isFocused || isNavigatingToDetail;
+  const shouldRenderPlayer = shouldPreload || isFocused;
+  const showPreview = isFocused;
 
   const handlePress = () => {
-    setIsNavigatingToDetail(true);
-
     if (onPress) {
       onPress(item, previewPositionSeconds);
       return;
@@ -110,7 +107,7 @@ export function FeedVideoCard({
             >
               <InlineVideoPlayer
                 playbackUrl={item.playbackUrl}
-                isFocused={isFocused || isNavigatingToDetail}
+                isFocused={isFocused}
                 startAtSeconds={previewPositionSeconds}
                 onTimeUpdate={setPreviewPositionSeconds}
               />

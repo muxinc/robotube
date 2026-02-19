@@ -1,5 +1,6 @@
 import { FlashList, type ViewToken } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
+import { useIsFocused } from "@react-navigation/native";
 import { useQuery } from "convex/react";
 import { Image } from "expo-image";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -14,6 +15,7 @@ import { api } from "@/convex/_generated/api";
 
 export default function HomePage() {
   const insets = useSafeAreaInsets();
+  const isTabFocused = useIsFocused();
   const FEED_LIMIT = 200;
   const feedVideos = useQuery((api as any).feed.listFeedVideos, {
     limit: FEED_LIMIT,
@@ -146,9 +148,13 @@ export default function HomePage() {
         viewabilityConfig={viewabilityConfig.current}
         renderItem={({ item, index, target }) => {
           const isCellTarget = target === "Cell";
-          const isFocused = isCellTarget && !isScrollSettling && index === focusedIndex;
+          const isFocused =
+            isCellTarget && isTabFocused && !isScrollSettling && index === focusedIndex;
           const shouldPreload =
-            isCellTarget && !isScrollSettling && Math.abs(index - focusedIndex) <= 1;
+            isCellTarget &&
+            isTabFocused &&
+            !isScrollSettling &&
+            Math.abs(index - focusedIndex) <= 1;
 
           return (
             <FeedVideoCard
