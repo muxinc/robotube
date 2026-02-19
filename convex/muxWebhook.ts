@@ -161,6 +161,16 @@ export const ingestMuxWebhook = internalAction({
         if (asString(data.status) === "ready") {
           await ctx.scheduler.runAfter(
             0,
+            (internal as any).captions.ensureGeneratedCaptionsTrackInternal,
+            {
+              muxAssetId: objectId,
+              userId,
+              attempt: 0,
+            },
+          );
+
+          await ctx.scheduler.runAfter(
+            5 * 1000,
             (internal as any).aiMetadata.generateSummaryAndTagsForAssetInternal,
             {
               muxAssetId: objectId,

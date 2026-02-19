@@ -9,6 +9,7 @@
  */
 
 import type * as aiMetadata from "../aiMetadata.js";
+import type * as captions from "../captions.js";
 import type * as feed from "../feed.js";
 import type * as http from "../http.js";
 import type * as migrations from "../migrations.js";
@@ -28,6 +29,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   aiMetadata: typeof aiMetadata;
+  captions: typeof captions;
   feed: typeof feed;
   http: typeof http;
   migrations: typeof migrations;

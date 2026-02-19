@@ -168,19 +168,21 @@ export default function HomePage() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.feedContent}
         ListHeaderComponent={
-          feedDebugStats && feedDebugStats.hiddenTotal > 0 ? (
-            <View style={styles.debugCard}>
-              <Text style={styles.debugTitle}>Some videos are hidden from Home</Text>
-              <Text style={styles.debugText}>
-                Showing {feedDebugStats.visible} of {feedDebugStats.scanned} scanned.
-              </Text>
-              <Text style={styles.debugText}>
-                Private: {feedDebugStats.hiddenPrivateVisibility} | Not ready/deleted: {" "}
-                {feedDebugStats.hiddenNotReadyOrDeleted} | Missing playback: {" "}
-                {feedDebugStats.hiddenNoPublicPlayback}
-              </Text>
-            </View>
-          ) : null
+          // Debug visibility card (kept for future troubleshooting)
+          // feedDebugStats && feedDebugStats.hiddenTotal > 0 ? (
+          //   <View style={styles.debugCard}>
+          //     <Text style={styles.debugTitle}>Some videos are hidden from Home</Text>
+          //     <Text style={styles.debugText}>
+          //       Showing {feedDebugStats.visible} of {feedDebugStats.scanned} scanned.
+          //     </Text>
+          //     <Text style={styles.debugText}>
+          //       Private: {feedDebugStats.hiddenPrivateVisibility} | Not ready/deleted: {" "}
+          //       {feedDebugStats.hiddenNotReadyOrDeleted} | Missing playback: {" "}
+          //       {feedDebugStats.hiddenNoPublicPlayback}
+          //     </Text>
+          //   </View>
+          // ) : null
+          null
         }
         ListEmptyComponent={
           <View style={styles.emptyState}>
@@ -230,7 +232,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   feedContent: {
-    paddingTop: 12,
+    paddingTop: 0,
     paddingBottom: 100,
   },
   debugCard: {

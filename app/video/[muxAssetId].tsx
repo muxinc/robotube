@@ -3,13 +3,14 @@ import { useQuery } from "convex/react";
 import { StatusBar } from "expo-status-bar";
 import { Stack, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   FeedVideoCard,
   type FeedVideoItem,
+  formatDuration,
   formatPublished,
 } from "@/components/feed-video-card";
 import { api } from "@/convex/_generated/api";
@@ -17,9 +18,15 @@ import { api } from "@/convex/_generated/api";
 function FullVideoPlayer({
   playbackUrl,
   startAtSeconds,
+  seekToSeconds,
+  onSeekHandled,
+  onTimeUpdate,
 }: {
   playbackUrl: string;
   startAtSeconds?: number;
+  seekToSeconds?: number | null;
+  onSeekHandled?: () => void;
+  onTimeUpdate?: (seconds: number) => void;
 }) {
   const didSeekToStartRef = useRef(false);
 
@@ -38,6 +45,25 @@ function FullVideoPlayer({
     player.currentTime = Math.max(0, startAtSeconds);
     didSeekToStartRef.current = true;
   }, [player, startAtSeconds]);
+
+  useEffect(() => {
+    if (seekToSeconds === undefined || seekToSeconds === null || Number.isNaN(seekToSeconds)) {
+      return;
+    }
+
+    player.currentTime = Math.max(0, seekToSeconds);
+    onSeekHandled?.();
+  }, [onSeekHandled, player, seekToSeconds]);
+
+  useEffect(() => {
+    const subscription = player.addListener("timeUpdate", (event) => {
+      onTimeUpdate?.(event.currentTime);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [onTimeUpdate, player]);
 
   return (
     <VideoView
@@ -82,6 +108,27 @@ export default function VideoDetailPage() {
   );
   const summary = selectedVideo?.summary ?? null;
   const tags = selectedVideo?.tags ?? [];
+  const chapters = useMemo(() => selectedVideo?.chapters ?? [], [selectedVideo?.chapters]);
+  const [seekToSeconds, setSeekToSeconds] = useState<number | null>(null);
+  const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
+
+  const activeChapterStartTime = useMemo(() => {
+    if (chapters.length === 0) return null;
+    let active = chapters[0]?.startTime ?? 0;
+    for (const chapter of chapters) {
+      if (chapter.startTime <= currentTimeSeconds) {
+        active = chapter.startTime;
+      } else {
+        break;
+      }
+    }
+    return active;
+  }, [chapters, currentTimeSeconds]);
+
+  useEffect(() => {
+    setCurrentTimeSeconds(startAtSeconds ?? 0);
+    setSeekToSeconds(null);
+  }, [selectedVideo?.muxAssetId, startAtSeconds]);
 
   const handleBack = () => {
     if (navigation.canGoBack()) {
@@ -147,6 +194,9 @@ export default function VideoDetailPage() {
                 key={selectedVideo.muxAssetId}
                 playbackUrl={selectedVideo.playbackUrl}
                 startAtSeconds={startAtSeconds}
+                seekToSeconds={seekToSeconds}
+                onSeekHandled={() => setSeekToSeconds(null)}
+                onTimeUpdate={setCurrentTimeSeconds}
               />
               <Pressable
                 style={[styles.backButton, { top: 8 }]}
@@ -175,6 +225,31 @@ export default function VideoDetailPage() {
                       <Text style={styles.tagText}>#{tag}</Text>
                     </View>
                   ))}
+                </View>
+              ) : null}
+
+              {chapters.length > 0 ? (
+                <View style={styles.chaptersWrap}>
+                  <Text style={styles.chaptersTitle}>Chapters</Text>
+                  {chapters.map((chapter) => {
+                    const isActive = activeChapterStartTime === chapter.startTime;
+                    const timeLabel = formatDuration(chapter.startTime) ?? "0:00";
+
+                    return (
+                      <Pressable
+                        key={`${selectedVideo.muxAssetId}-${chapter.startTime}-${chapter.title}`}
+                        onPress={() => setSeekToSeconds(chapter.startTime)}
+                        style={({ pressed }) => [
+                          styles.chapterRow,
+                          isActive && styles.chapterRowActive,
+                          pressed && styles.chapterRowPressed,
+                        ]}
+                      >
+                        <Text style={styles.chapterTime}>{timeLabel}</Text>
+                        <Text style={styles.chapterLabel}>{chapter.title}</Text>
+                      </Pressable>
+                    );
+                  })}
                 </View>
               ) : null}
             </View>
@@ -280,6 +355,52 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
     color: "#151515",
+  },
+  chaptersWrap: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: "#E5EAF2",
+    borderRadius: 12,
+    overflow: "hidden",
+  },
+  chaptersTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#344055",
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 8,
+    backgroundColor: "#F7FAFF",
+  },
+  chapterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#E5EAF2",
+    backgroundColor: "#FFFFFF",
+  },
+  chapterRowActive: {
+    backgroundColor: "#EEF4FF",
+  },
+  chapterRowPressed: {
+    opacity: 0.8,
+  },
+  chapterTime: {
+    width: 46,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "700",
+    color: "#3966A8",
+  },
+  chapterLabel: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 18,
+    color: "#1A2332",
+    fontWeight: "600",
   },
   emptyWrap: {
     paddingHorizontal: 14,

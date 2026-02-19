@@ -210,6 +210,16 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
       if (asString(asset.status) === "ready") {
         await ctx.scheduler.runAfter(
           0,
+          (internal as any).captions.ensureGeneratedCaptionsTrackInternal,
+          {
+            muxAssetId,
+            userId: metadataArgs.userId,
+            attempt: 0,
+          },
+        );
+
+        await ctx.scheduler.runAfter(
+          5 * 1000,
           (internal as any).aiMetadata.generateSummaryAndTagsForAssetInternal,
           {
             muxAssetId,

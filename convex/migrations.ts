@@ -165,8 +165,11 @@ export const backfillAiMetadataForReadyAssets = action({
       });
       const metadata = asMetadataRecord((video as any)?.metadata);
       const existingCustom = asRecord(metadata.custom) ?? {};
+      const hasSummary = asNumber(existingCustom.aiGeneratedAtMs) !== undefined;
+      const hasChapters =
+        asNumber(existingCustom.aiChaptersGeneratedAtMs) !== undefined;
 
-      if (onlyMissing && existingCustom.aiGeneratedAtMs) {
+      if (onlyMissing && hasSummary && hasChapters) {
         skippedAlreadyGenerated += 1;
         continue;
       }
@@ -191,6 +194,7 @@ export const backfillAiMetadataForReadyAssets = action({
       queued,
       skippedNotReady,
       skippedAlreadyGenerated,
+      skippedAlreadyComplete: skippedAlreadyGenerated,
       onlyMissing,
     };
   },
@@ -331,6 +335,80 @@ export const backfillEmbeddingsForReadyAssets = action({
       queued,
       skippedNotReady,
       skippedAlreadyGenerated,
+      onlyMissing,
+    };
+  },
+});
+
+export const backfillCaptionsForReadyAssets = action({
+  args: {
+    maxAssets: v.optional(v.number()),
+    defaultUserId: v.optional(v.string()),
+    onlyMissing: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const mux = new Mux({
+      tokenId: requiredEnv("MUX_TOKEN_ID", process.env.MUX_TOKEN_ID),
+      tokenSecret: requiredEnv("MUX_TOKEN_SECRET", process.env.MUX_TOKEN_SECRET),
+    });
+
+    const maxAssets = Math.max(1, Math.floor(args.maxAssets ?? 200));
+    const onlyMissing = args.onlyMissing ?? true;
+
+    let scanned = 0;
+    let queued = 0;
+    let skippedNotReady = 0;
+    let skippedAlreadyHandled = 0;
+
+    for await (const asset of mux.video.assets.list({ limit: 100 })) {
+      if (scanned >= maxAssets) break;
+      scanned += 1;
+
+      if (!asset.id) continue;
+      if (asset.status !== "ready") {
+        skippedNotReady += 1;
+        continue;
+      }
+
+      await ctx.runMutation(components.mux.sync.upsertAssetFromPayloadPublic, {
+        asset: asset as unknown as Record<string, unknown>,
+      });
+
+      const video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
+        muxAssetId: asset.id,
+      });
+      const metadata = asMetadataRecord((video as any)?.metadata);
+      const existingCustom = asRecord(metadata.custom) ?? {};
+
+      if (
+        onlyMissing &&
+        (asNumber(existingCustom.aiCaptionsGeneratedAtMs) !== undefined ||
+          asString(existingCustom.aiCaptionsUnavailableReason) !== undefined)
+      ) {
+        skippedAlreadyHandled += 1;
+        continue;
+      }
+
+      const userId =
+        asString(metadata.userId) ?? asString(args.defaultUserId) ?? "default";
+
+      await ctx.scheduler.runAfter(
+        0,
+        (internal as any).captions.ensureGeneratedCaptionsTrackInternal,
+        {
+          muxAssetId: asset.id,
+          userId,
+          attempt: 0,
+        },
+      );
+      queued += 1;
+    }
+
+    return {
+      scanned,
+      queued,
+      skippedNotReady,
+      skippedAlreadyHandled,
       onlyMissing,
     };
   },

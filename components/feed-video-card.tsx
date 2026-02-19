@@ -14,6 +14,7 @@ export type FeedVideoItem = {
   title: string;
   summary: string | null;
   tags: string[];
+  chapters: { title: string; startTime: number }[];
   channelName: string;
   durationSeconds: number | null;
   createdAtMs: number;

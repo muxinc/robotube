@@ -17,6 +17,7 @@ type FeedVideoRow = {
   title: string;
   summary: string | null;
   tags: string[];
+  chapters: Array<{ title: string; startTime: number }>;
   channelName: string;
   createdAtMs: number;
 };
@@ -38,6 +39,25 @@ function asString(value: unknown): string | null {
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string");
+}
+
+function asChapterArray(value: unknown): Array<{ title: string; startTime: number }> {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .filter(
+      (item): item is { title: string; startTime: number } =>
+        typeof item === "object" &&
+        item !== null &&
+        typeof (item as { title?: unknown }).title === "string" &&
+        typeof (item as { startTime?: unknown }).startTime === "number" &&
+        Number.isFinite((item as { startTime: number }).startTime),
+    )
+    .map((item) => ({
+      title: item.title,
+      startTime: Math.max(0, item.startTime),
+    }))
+    .sort((a, b) => a.startTime - b.startTime);
 }
 
 async function buildFeedVideoRow(ctx: any, asset: any): Promise<FeedBuildResult> {
@@ -75,6 +95,7 @@ async function buildFeedVideoRow(ctx: any, asset: any): Promise<FeedBuildResult>
       title: metadata?.title ?? `Video ${String(asset.muxAssetId).slice(0, 6)}`,
       summary: asString(metadata?.description),
       tags: asStringArray(metadata?.tags),
+      chapters: asChapterArray(metadata?.custom?.aiChapters),
       channelName: metadata?.custom?.channelName ?? "Robotube",
       createdAtMs: asset.createdAtMs ?? Date.now(),
     },

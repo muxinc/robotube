@@ -2,7 +2,7 @@ import { Tabs } from "expo-router";
 import React from "react";
 import { Platform, StyleSheet, View } from "react-native";
 import { BlurView } from "expo-blur";
-import { Compass, House, Upload, User, Search } from "lucide-react-native";
+import { House, Search, Upload, User } from "lucide-react-native";
 
 import { HapticTab } from "@/components/haptic-tab";
 import { Colors } from "@/constants/theme";
@@ -22,25 +22,25 @@ export default function TabLayout() {
         tabBarShowLabel: false,
         tabBarStyle: {
           position: "absolute",
-          left: 14,
-          right: 14,
-          bottom: 16,
-          height: 64,
-          paddingTop: 10,
-          paddingBottom: 10,
-          borderRadius: 24,
+          left: 22,
+          right: 22,
+          bottom: 28,
+          height: 56,
+          paddingTop: 8,
+          paddingBottom: 8,
+          borderRadius: 28,
           borderTopWidth: 0,
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: isDark
-            ? "rgba(255,255,255,0.2)"
-            : "rgba(255,255,255,0.85)",
+            ? "rgba(255,255,255,0.22)"
+            : "rgba(255,255,255,0.95)",
           backgroundColor: "transparent",
           overflow: "hidden",
           shadowColor: "#000",
-          shadowOpacity: isDark ? 0.3 : 0.12,
-          shadowRadius: 18,
-          shadowOffset: { width: 0, height: 8 },
-          elevation: 0,
+          shadowOpacity: isDark ? 0.34 : 0.16,
+          shadowRadius: 24,
+          shadowOffset: { width: 0, height: 12 },
+          elevation: 8,
         },
         tabBarBackground: () => (
           <View style={StyleSheet.absoluteFill}>
@@ -50,7 +50,7 @@ export default function TabLayout() {
                   ? "systemChromeMaterialDark"
                   : "systemChromeMaterialLight"
               }
-              intensity={60}
+              intensity={72}
               style={StyleSheet.absoluteFill}
               experimentalBlurMethod={
                 Platform.OS === "android" ? "dimezisBlurView" : undefined
