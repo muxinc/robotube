@@ -2,7 +2,7 @@ import { Tabs } from "expo-router";
 import React from "react";
 import { Platform, StyleSheet, View } from "react-native";
 import { BlurView } from "expo-blur";
-import { Compass, House, Upload, User } from "lucide-react-native";
+import { Compass, House, Upload, User, Search } from "lucide-react-native";
 
 import { HapticTab } from "@/components/haptic-tab";
 import { Colors } from "@/constants/theme";
@@ -19,15 +19,15 @@ export default function TabLayout() {
         tabBarInactiveTintColor: Colors[colorScheme].tabIconDefault,
         headerShown: false,
         tabBarButton: HapticTab,
-        tabBarLabelStyle: styles.label,
+        tabBarShowLabel: false,
         tabBarStyle: {
           position: "absolute",
           left: 14,
           right: 14,
           bottom: 16,
-          height: 72,
-          paddingTop: 8,
-          paddingBottom: 8,
+          height: 64,
+          paddingTop: 10,
+          paddingBottom: 10,
           borderRadius: 24,
           borderTopWidth: 0,
           borderWidth: StyleSheet.hairlineWidth,
@@ -105,7 +105,7 @@ export default function TabLayout() {
         options={{
           title: "Explore",
           tabBarIcon: ({ color, size }) => (
-            <Compass size={size} color={color} strokeWidth={2.25} />
+            <Search size={size} color={color} strokeWidth={2.25} />
           ),
         }}
       />
@@ -123,10 +123,6 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
-  label: {
-    fontSize: 12,
-    fontWeight: "600",
-  },
   topHighlight: {
     position: "absolute",
     top: 0,

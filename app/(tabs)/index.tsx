@@ -213,9 +213,9 @@ const styles = StyleSheet.create({
     borderBottomColor: "#e5e5e5",
   },
   logo: {
-    width: 150,
-    height: 46,
-    marginLeft: -16,
+    width: 250,
+    height: 75,
+    marginLeft: -60,
   },
   actions: {
     flexDirection: "row",
