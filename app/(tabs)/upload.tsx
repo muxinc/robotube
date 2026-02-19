@@ -9,10 +9,12 @@ import {
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
+import { Ionicons } from "@expo/vector-icons";
 import {
   createUploadTask,
   FileSystemUploadType,
 } from "expo-file-system/legacy";
+import { useVideoPlayer, VideoView } from "expo-video";
 import { useAction, useQuery } from "convex/react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -21,16 +23,62 @@ import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { UploadLoadingIndicator } from "@/components/upload-loading-indicator";
 
+function SelectedVideoThumbnail({
+  uri,
+  onClear,
+  disabled,
+}: {
+  uri: string;
+  onClear: () => void;
+  disabled?: boolean;
+}) {
+  const player = useVideoPlayer({ uri }, (videoPlayer) => {
+    videoPlayer.loop = false;
+    videoPlayer.muted = true;
+    videoPlayer.pause();
+  });
+
+  return (
+    <View style={styles.selectedVideoCard}>
+      <View style={styles.selectedVideoFrame}>
+        <VideoView
+          player={player}
+          allowsVideoFrameAnalysis={false}
+          contentFit="cover"
+          nativeControls={false}
+          style={styles.selectedVideoThumbnail}
+        />
+        <Pressable
+          onPress={onClear}
+          disabled={disabled}
+          style={({ pressed }) => [
+            styles.clearSelectedVideoButton,
+            pressed && !disabled ? styles.clearSelectedVideoButtonPressed : undefined,
+            disabled ? styles.clearSelectedVideoButtonDisabled : undefined,
+          ]}
+        >
+          <Ionicons name="close" size={16} color="#FFFFFF" />
+        </Pressable>
+      </View>
+      <ThemedText style={styles.selectedVideoLabel}>Selected video ready</ThemedText>
+    </View>
+  );
+}
+
 export default function HomeScreen() {
   const createMuxDirectUpload = useAction(
     (api as any).uploads.createMuxDirectUpload,
   );
   const insets = useSafeAreaInsets();
   const [isUploading, setIsUploading] = useState(false);
-  const [status, setStatus] = useState("Pick a video to upload it to Mux.");
+  const [status, setStatus] = useState("Add a title, pick a video, then upload.");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [lastUploadId, setLastUploadId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
+  const [selectedVideo, setSelectedVideo] = useState<{
+    uri: string;
+    mimeType: string | null;
+  } | null>(null);
   const moderationStatus = useQuery(
     (api as any).uploadStatus.getUploadModerationStatus,
     lastUploadId
@@ -67,15 +115,11 @@ export default function HomeScreen() {
     setUploadProgress(moderationStatus.progress);
   }, [isUploading, lastUploadId, moderationStatus]);
 
-  const handleUpload = async () => {
+  const handlePickVideo = async () => {
     try {
-      setUploadProgress(2);
-      setStatus("Pick a video from your Photos library.");
-
       const permission =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        setUploadProgress(0);
         setStatus("Photo library permission is required.");
         Alert.alert(
           "Permission Required",
@@ -91,8 +135,8 @@ export default function HomeScreen() {
       });
 
       if (picked.canceled || picked.assets.length === 0) {
-        setUploadProgress(0);
         setStatus("No video selected.");
+        setSelectedVideo(null);
         return;
       }
 
@@ -103,8 +147,35 @@ export default function HomeScreen() {
         );
       }
 
+      setSelectedVideo({
+        uri: asset.uri,
+        mimeType: asset.mimeType ?? null,
+      });
+      setStatus("Video selected. Ready to upload.");
+      setUploadProgress(0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not select video";
+      setStatus(`Selection failed: ${message}`);
+      Alert.alert("Video Selection Failed", message);
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!title.trim()) {
+      setStatus("A title is required before upload.");
+      Alert.alert("Title Required", "Please add a title before uploading.");
+      return;
+    }
+
+    if (!selectedVideo) {
+      setStatus("Pick a video before uploading.");
+      Alert.alert("Video Required", "Please pick a video before uploading.");
+      return;
+    }
+
+    try {
       setIsUploading(true);
-      setUploadProgress(20);
+      setUploadProgress(12);
       setStatus("Creating Mux upload URL...");
       const { uploadId, uploadUrl } = await createMuxDirectUpload({
         userId: "mobile-user",
@@ -115,12 +186,12 @@ export default function HomeScreen() {
       setStatus("Uploading video to Mux...");
       const uploadTask = createUploadTask(
         uploadUrl,
-        asset.uri,
+        selectedVideo.uri,
         {
           httpMethod: "PUT",
           uploadType: FileSystemUploadType.BINARY_CONTENT,
           headers: {
-            "Content-Type": asset.mimeType || "application/octet-stream",
+            "Content-Type": selectedVideo.mimeType || "application/octet-stream",
           },
         },
         (event) => {
@@ -151,6 +222,7 @@ export default function HomeScreen() {
       setUploadProgress(100);
       setLastUploadId(uploadId);
       setStatus("Upload complete. Checking moderation status...");
+      setSelectedVideo(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed";
       setUploadProgress(0);
@@ -192,18 +264,38 @@ export default function HomeScreen() {
           </ThemedView>
 
           <Pressable
-            disabled={isUploading}
-            onPress={handleUpload}
+            disabled={isUploading || (Boolean(selectedVideo) && !title.trim())}
+            onPress={selectedVideo ? handleUpload : handlePickVideo}
             style={({ pressed }) => [
               styles.button,
-              pressed && !isUploading ? styles.buttonPressed : undefined,
-              isUploading ? styles.buttonDisabled : undefined,
+              pressed && !isUploading && (!selectedVideo || title.trim())
+                ? styles.buttonPressed
+                : undefined,
+              isUploading || (Boolean(selectedVideo) && !title.trim())
+                ? styles.buttonDisabled
+                : undefined,
             ]}
           >
             <ThemedText type="defaultSemiBold">
-              {isUploading ? "Uploading..." : "Select a video and upload"}
+              {isUploading
+                ? "Uploading..."
+                : selectedVideo
+                  ? "Upload selected video"
+                  : "Pick a video"}
             </ThemedText>
           </Pressable>
+
+          {selectedVideo ? (
+            <SelectedVideoThumbnail
+              uri={selectedVideo.uri}
+              disabled={isUploading}
+              onClear={() => {
+                setSelectedVideo(null);
+                setUploadProgress(0);
+                setStatus("Video selection cleared.");
+              }}
+            />
+          ) : null}
 
           <ThemedView style={styles.statusCard}>
             <ThemedText type="defaultSemiBold">Status</ThemedText>
@@ -300,15 +392,54 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     color: "#1E4F89",
   },
+  selectedVideoCard: {
+    borderRadius: 12,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#D5DDE8",
+    backgroundColor: "#F6F9FF",
+  },
+  selectedVideoFrame: {
+    position: "relative",
+  },
+  selectedVideoThumbnail: {
+    width: "100%",
+    aspectRatio: 16 / 9,
+    backgroundColor: "#111",
+  },
+  clearSelectedVideoButton: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#000000A8",
+  },
+  clearSelectedVideoButtonPressed: {
+    opacity: 0.8,
+  },
+  clearSelectedVideoButtonDisabled: {
+    opacity: 0.5,
+  },
+  selectedVideoLabel: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: "#395272",
+  },
   inputWrap: {
     gap: 8,
   },
   input: {
     borderWidth: 1,
     borderColor: "#D5DDE8",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 14,
+    height: 46,
     fontSize: 15,
   },
 });
