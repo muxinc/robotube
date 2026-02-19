@@ -2,9 +2,9 @@ import { Tabs } from "expo-router";
 import React from "react";
 import { Platform, StyleSheet, View } from "react-native";
 import { BlurView } from "expo-blur";
+import { Compass, House, Upload, User } from "lucide-react-native";
 
 import { HapticTab } from "@/components/haptic-tab";
-import { IconSymbol } from "@/components/ui/icon-symbol";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
@@ -86,8 +86,8 @@ export default function TabLayout() {
         name="index"
         options={{
           title: "Home",
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="house.fill" color={color} />
+          tabBarIcon: ({ color, size }) => (
+            <House size={size} color={color} strokeWidth={2.25} />
           ),
         }}
       />
@@ -95,8 +95,8 @@ export default function TabLayout() {
         name="upload"
         options={{
           title: "Upload",
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="arrow.up.circle.fill" color={color} />
+          tabBarIcon: ({ color, size }) => (
+            <Upload size={size} color={color} strokeWidth={2.25} />
           ),
         }}
       />
@@ -104,18 +104,18 @@ export default function TabLayout() {
         name="explore"
         options={{
           title: "Explore",
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="magnifyingglass" color={color} />
+          tabBarIcon: ({ color, size }) => (
+            <Compass size={size} color={color} strokeWidth={2.25} />
           ),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
-          title:"Profile",
-          tabBarIcon: ({ color }) =>(
-          <IconSymbol size={28} name="house.fill" color={color} />
-          )
+          title: "Profile",
+          tabBarIcon: ({ color, size }) => (
+            <User size={size} color={color} strokeWidth={2.25} />
+          ),
         }}
       />
     </Tabs>

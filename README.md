@@ -34,6 +34,8 @@ npx convex run migrations:backfillModerationForReadyAssets '{"maxAssets":500,"de
 
 ## Get started
 
+Note: This app is currently running the canary version of Expo. We need this to use the <Activity> Component from React 19.2.
+
 1. Install dependencies
 
    ```bash

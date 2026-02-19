@@ -90,7 +90,7 @@ export default function TabTwoScreen() {
               <ThemedText style={styles.helperText}>
                 Start typing to find videos by meaning, summary, and tags.
               </ThemedText>
-            ) : isSearching ? (
+            ) : isSearching ? 
               <ThemedText style={styles.helperText}>Searching...</ThemedText>
             ) : results.length === 0 ? (
               <ThemedText style={styles.helperText}>No videos found yet.</ThemedText>

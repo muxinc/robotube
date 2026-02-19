@@ -13,7 +13,7 @@
   "dependencies": {
     "@expo/metro-runtime": "^56.0.0-canary-20260212-4f61309",
     "@expo/vector-icons": "^15.0.3",
-    "@mux/ai": "^0.6.0",
+    "@mux/ai": "^0.7.5",
     "@mux/mux-node": "^12.8.1",
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/elements": "^2.6.3",
@@ -38,6 +38,7 @@
     "expo-system-ui": "^56.0.0-canary-20260212-4f61309",
     "expo-video": "^56.0.0-canary-20260212-4f61309",
     "expo-web-browser": "^56.0.0-canary-20260212-4f61309",
+    "lucide-react-native": "^0.575.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-native": "^0.84.0",
@@ -45,6 +46,7 @@
     "react-native-reanimated": "^4.2.2",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.23.0",
+    "react-native-svg": "15.15.3",
     "react-native-web": "~0.21.0",
     "react-native-worklets": "^0.7.4"
   },

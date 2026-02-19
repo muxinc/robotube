@@ -105,11 +105,11 @@ export default function HomePage() {
           },
         ]}
       >
-        <View style={{ flex: 1, justifyContent: "center" }}>
+        <View style={{ flex: 1 }}>
           <Image
             source={require("../../assets/images/robotube-logo.png")}
             contentFit="contain"
-            style={[styles.logo, { marginLeft: 0 }]}
+            style={styles.logo}
           />
         </View>
         <View style={styles.actions}>
@@ -197,7 +197,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
   },
   navbar: {
-    paddingHorizontal: 12,
+    paddingLeft: 0,
+    paddingRight: 12,
     paddingBottom: 8,
     flexDirection: "row",
     alignItems: "center",
@@ -208,7 +209,7 @@ const styles = StyleSheet.create({
   logo: {
     width: 150,
     height: 46,
-    marginLeft: -40,
+    marginLeft: -16,
   },
   actions: {
     flexDirection: "row",
