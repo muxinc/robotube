@@ -1,7 +1,6 @@
 ![robotube logo](./assets/images/robotube-logo.png)
 
-
-This is a video streaming app built with Expo and React Native. 
+This is a video streaming app built with Expo and React Native.
 
 We use Mux + Convex + RN to bring a video streaming experience to your fingertips that are for you and your AI agent. Use Mux AI to analyze videos, and more!
 
@@ -39,5 +38,3 @@ npm run reset-project
 ```
 
 This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-![kirbutt](./assets/images/kirbutt.png)
