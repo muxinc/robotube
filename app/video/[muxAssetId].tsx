@@ -1,7 +1,6 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "convex/react";
 import { StatusBar } from "expo-status-bar";
-import { Stack, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
@@ -78,7 +77,6 @@ function FullVideoPlayer({
 
 export default function VideoDetailPage() {
   const router = useRouter();
-  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { muxAssetId: rawMuxAssetId, startAt: rawStartAt } =
     useLocalSearchParams<{
@@ -129,14 +127,6 @@ export default function VideoDetailPage() {
     setCurrentTimeSeconds(startAtSeconds ?? 0);
     setSeekToSeconds(null);
   }, [selectedVideo?.muxAssetId, startAtSeconds]);
-
-  const handleBack = () => {
-    if (navigation.canGoBack()) {
-      router.back();
-      return;
-    }
-    router.replace("/");
-  };
 
   if (!muxAssetId) {
     return (
@@ -198,12 +188,6 @@ export default function VideoDetailPage() {
                 onSeekHandled={() => setSeekToSeconds(null)}
                 onTimeUpdate={setCurrentTimeSeconds}
               />
-              <Pressable
-                style={[styles.backButton, { top: 8 }]}
-                onPress={handleBack}
-              >
-                <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
-              </Pressable>
             </View>
             <View style={styles.metaWrap}>
               <Text style={styles.title}>{selectedVideo.title}</Text>
@@ -292,16 +276,6 @@ const styles = StyleSheet.create({
   video: {
     width: "100%",
     height: "100%",
-  },
-  backButton: {
-    position: "absolute",
-    left: 12,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#00000099",
   },
   metaWrap: {
     paddingHorizontal: 14,

@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { getAuthUserId } from "@convex-dev/auth/server";
 
 import { components } from "./_generated/api";
 import { query } from "./_generated/server";
@@ -25,9 +26,13 @@ function asBoolean(value: unknown): boolean | undefined {
 export const getUploadModerationStatus = query({
   args: {
     uploadId: v.string(),
-    userId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) {
+      throw new Error("You must be signed in to view upload status.");
+    }
+
     const upload = await ctx.runQuery(components.mux.catalog.getUploadByMuxId, {
       muxUploadId: args.uploadId,
     });
@@ -69,7 +74,7 @@ export const getUploadModerationStatus = query({
 
     const video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
       muxAssetId,
-      userId: args.userId,
+      userId: authUserId,
     });
     const videoRecord = asRecord(video) ?? {};
     const metadataValue = videoRecord.metadata;
@@ -77,6 +82,17 @@ export const getUploadModerationStatus = query({
       ? asRecord(metadataValue[0])
       : asRecord(metadataValue);
     const custom = asRecord(metadataRecord?.custom) ?? {};
+    const metadataUserId = asString(metadataRecord?.userId);
+
+    if (metadataUserId && metadataUserId !== authUserId) {
+      return {
+        stage: "forbidden",
+        done: true,
+        passed: null,
+        progress: 100,
+        statusText: "This upload belongs to a different account.",
+      };
+    }
 
     const moderationCheckedAtMs = asNumber(custom.moderationCheckedAtMs);
     const moderationPassed = asBoolean(custom.moderationPassed);

@@ -52,6 +52,7 @@
           "photosPermission": "Allow Robotube to access your photos so you can upload videos."
         }
       ],
+      "expo-secure-store",
       "expo-video"
     ],
     "experiments": {

@@ -1,7 +1,8 @@
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 
 import { components } from "./_generated/api";
-import { query } from "./_generated/server";
+import { internalQuery, query } from "./_generated/server";
 
 type PlaybackId = {
   id?: string;
@@ -79,9 +80,26 @@ async function buildFeedVideoRow(ctx: any, asset: any): Promise<FeedBuildResult>
   const metadata = Array.isArray(metadataValue)
     ? metadataValue[0]
     : metadataValue ?? null;
+  const metadataUserId = asString(metadata?.userId);
 
-  if (metadata?.visibility === "private") {
-    return { row: null, hiddenReason: "private_visibility" };
+  let channelName = metadata?.custom?.channelName ?? "Robotube";
+  if (metadataUserId) {
+    try {
+      const uploader = await ctx.db.get(metadataUserId as Id<"users">);
+      const uploaderUsername = asString((uploader as any)?.username);
+      const uploaderName = asString((uploader as any)?.name);
+      const uploaderEmail = asString((uploader as any)?.email);
+
+      if (uploaderUsername) {
+        channelName = `@${uploaderUsername}`;
+      } else if (uploaderName) {
+        channelName = uploaderName;
+      } else if (uploaderEmail) {
+        channelName = uploaderEmail.split("@")[0] || channelName;
+      }
+    } catch {
+      // Keep metadata/custom fallback channel name.
+    }
   }
 
   return {
@@ -96,13 +114,27 @@ async function buildFeedVideoRow(ctx: any, asset: any): Promise<FeedBuildResult>
       summary: asString(metadata?.description),
       tags: asStringArray(metadata?.tags),
       chapters: asChapterArray(metadata?.custom?.aiChapters),
-      channelName: metadata?.custom?.channelName ?? "Robotube",
+      channelName,
       createdAtMs: asset.createdAtMs ?? Date.now(),
     },
   };
 }
 
 export const listFeedVideos = query({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const assets = await ctx.runQuery(components.mux.catalog.listAssets, {
+      limit: args.limit ?? 25,
+    });
+
+    const rows = await Promise.all(assets.map((asset: any) => buildFeedVideoRow(ctx, asset)));
+    const visibleRows = rows.flatMap((result) => (result.row ? [result.row] : []));
+    visibleRows.sort((a, b) => b.createdAtMs - a.createdAtMs);
+    return visibleRows;
+  },
+});
+
+export const listFeedVideosInternal = internalQuery({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const assets = await ctx.runQuery(components.mux.catalog.listAssets, {

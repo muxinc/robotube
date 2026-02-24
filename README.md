@@ -6,6 +6,39 @@ We use Mux + Convex + RN to bring a video streaming experience to your fingertip
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
+## Authentication (Convex Auth + OAuth)
+
+Robotube uses [Convex Auth](https://labs.convex.dev/auth) with Google and Apple OAuth.
+
+Install auth dependencies and initialize Convex Auth once:
+
+```bash
+npm install @convex-dev/auth @auth/core@0.37.0 expo-secure-store
+npx @convex-dev/auth
+```
+
+### Backend setup
+
+1. Add required Convex auth env vars:
+
+```bash
+npx convex env set SITE_URL robotube://
+npx convex env set AUTH_GOOGLE_ID <google-client-id>
+npx convex env set AUTH_GOOGLE_SECRET <google-client-secret>
+npx convex env set AUTH_APPLE_ID <apple-service-id>
+npx convex env set AUTH_APPLE_SECRET <apple-client-secret-jwt>
+```
+
+2. OAuth callback URLs (provider dashboards):
+
+- Google: `https://<your-deployment>.convex.site/api/auth/callback/google`
+- Apple: `https://<your-deployment>.convex.site/api/auth/callback/apple`
+
+Notes:
+
+- Apple OAuth requires a public HTTPS deployment (no localhost-only flow).
+- Apple client secret expires and must be rotated periodically.
+
 ## Mux AI features used in this app
 
 Robotube uses [`@mux/ai`](https://www.npmjs.com/package/@mux/ai) with Convex to enrich uploaded videos and power semantic search.
@@ -42,7 +75,15 @@ Note: This app is currently running the canary version of Expo. We need this to 
    npm install
    ```
 
-2. Start the app
+2. Create `.env.local` in the project root with your Convex deployment URL:
+
+   ```bash
+   EXPO_PUBLIC_CONVEX_URL=https://<your-deployment>.convex.cloud
+   ```
+
+   You can get this value from your Convex dashboard deployment settings (or from `npx convex dev` output).
+
+3. Start the app
 
    ```bash
    npx expo start

@@ -1,6 +1,7 @@
 "use node";
 
 import Mux from "@mux/mux-node";
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 
 import { components, internal } from "./_generated/api";
@@ -87,17 +88,21 @@ function getErrorMessage(error: unknown) {
 
 export const createMuxDirectUpload = action({
   args: {
-    userId: v.optional(v.string()),
     title: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) {
+      throw new Error("You must be signed in to upload videos.");
+    }
+
     const mux = createMuxClient();
-    const userId = args.userId ?? "mobile-user";
+    const userId = authUserId;
     const title = args.title?.trim() || undefined;
     const passthrough = JSON.stringify({
       userId,
       title,
-      visibility: "private",
+      visibility: "public",
     });
 
     const upload = await mux.video.uploads.create({

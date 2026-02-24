@@ -103,11 +103,7 @@ export const moderateAssetInternal = internalAction({
       });
 
       const moderationPassed = !result.exceedsThreshold;
-      const nextVisibility = moderationPassed
-        ? currentVisibility === "unlisted"
-          ? "unlisted"
-          : "public"
-        : "private";
+      const nextVisibility: "public" = "public";
 
       const latestVideo = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
         muxAssetId: args.muxAssetId,
@@ -189,7 +185,7 @@ export const moderateAssetInternal = internalAction({
             : Array.isArray(metadata.tags)
               ? (metadata.tags as string[])
               : undefined),
-          visibility: "private",
+          visibility: currentVisibility === "unlisted" ? "unlisted" : "public",
           custom: {
             ...latestCustom,
             moderationFailedAtMs: Date.now(),

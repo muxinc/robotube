@@ -9,6 +9,7 @@
  */
 
 import type * as aiMetadata from "../aiMetadata.js";
+import type * as auth from "../auth.js";
 import type * as captions from "../captions.js";
 import type * as feed from "../feed.js";
 import type * as http from "../http.js";
@@ -16,8 +17,10 @@ import type * as migrations from "../migrations.js";
 import type * as moderation from "../moderation.js";
 import type * as muxWebhook from "../muxWebhook.js";
 import type * as search from "../search.js";
+import type * as searchFast from "../searchFast.js";
 import type * as uploadStatus from "../uploadStatus.js";
 import type * as uploads from "../uploads.js";
+import type * as users from "../users.js";
 import type * as videoEmbeddings from "../videoEmbeddings.js";
 import type * as videoEmbeddingsNode from "../videoEmbeddingsNode.js";
 
@@ -29,6 +32,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   aiMetadata: typeof aiMetadata;
+  auth: typeof auth;
   captions: typeof captions;
   feed: typeof feed;
   http: typeof http;
@@ -36,8 +40,10 @@ declare const fullApi: ApiFromModules<{
   moderation: typeof moderation;
   muxWebhook: typeof muxWebhook;
   search: typeof search;
+  searchFast: typeof searchFast;
   uploadStatus: typeof uploadStatus;
   uploads: typeof uploads;
+  users: typeof users;
   videoEmbeddings: typeof videoEmbeddings;
   videoEmbeddingsNode: typeof videoEmbeddingsNode;
 }>;

@@ -11,6 +11,8 @@
     "lint": "expo lint"
   },
   "dependencies": {
+    "@auth/core": "^0.37.0",
+    "@convex-dev/auth": "^0.0.90",
     "@expo/metro-runtime": "^56.0.0-canary-20260212-4f61309",
     "@expo/vector-icons": "^15.0.3",
     "@mux/ai": "^0.7.5",
@@ -32,6 +34,7 @@
     "expo-image-picker": "^56.0.0-canary-20260212-4f61309",
     "expo-linking": "^56.0.0-canary-20260212-4f61309",
     "expo-router": "^56.0.0-canary-20260212-4f61309",
+    "expo-secure-store": "^15.0.8",
     "expo-splash-screen": "^56.0.0-canary-20260212-4f61309",
     "expo-status-bar": "^56.0.0-canary-20260212-4f61309",
     "expo-symbols": "^56.0.0-canary-20260212-4f61309",

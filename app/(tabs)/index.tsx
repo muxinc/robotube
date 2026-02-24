@@ -1,9 +1,8 @@
-import { FlashList, type ViewToken } from "@shopify/flash-list";
-import { Ionicons } from "@expo/vector-icons";
+import { FlashList } from "@shopify/flash-list";
+import {Bot} from "lucide-react-native";
 import { useIsFocused } from "@react-navigation/native";
 import { useQuery } from "convex/react";
 import { Image } from "expo-image";
-import { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -12,6 +11,7 @@ import {
   type FeedVideoItem,
 } from "@/components/feed-video-card";
 import { api } from "@/convex/_generated/api";
+import { useFeedFocusController } from "@/hooks/use-feed-focus-controller";
 
 export default function HomePage() {
   const insets = useSafeAreaInsets();
@@ -20,81 +20,17 @@ export default function HomePage() {
   const feedVideos = useQuery((api as any).feed.listFeedVideos, {
     limit: FEED_LIMIT,
   }) as FeedVideoItem[] | undefined;
-  const feedDebugStats = useQuery((api as any).feed.getFeedVisibilityDebugStats, {
-    scanLimit: FEED_LIMIT,
-  }) as
-    | {
-        scanned: number;
-        visible: number;
-        hiddenNotReadyOrDeleted: number;
-        hiddenNoPublicPlayback: number;
-        hiddenPrivateVisibility: number;
-        hiddenTotal: number;
-      }
-    | undefined;
-  const [focusedIndex, setFocusedIndex] = useState(0);
-  const [isScrollSettling, setIsScrollSettling] = useState(false);
-  const isScrollSettlingRef = useRef(false);
-  const pendingFocusedIndexRef = useRef(0);
-  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    isScrollSettlingRef.current = isScrollSettling;
-  }, [isScrollSettling]);
-
-  const clearSettleTimer = useCallback(() => {
-    if (settleTimerRef.current) {
-      clearTimeout(settleTimerRef.current);
-      settleTimerRef.current = null;
-    }
-  }, []);
-
-  const applyPendingFocus = useCallback(() => {
-    const nextFocusedIndex = pendingFocusedIndexRef.current;
-    setFocusedIndex((current) =>
-      current === nextFocusedIndex ? current : nextFocusedIndex,
-    );
-  }, []);
-
-  const scheduleFocusSettle = useCallback((delayMs: number) => {
-    clearSettleTimer();
-    settleTimerRef.current = setTimeout(() => {
-      setIsScrollSettling(false);
-      applyPendingFocus();
-      settleTimerRef.current = null;
-    }, delayMs);
-  }, [applyPendingFocus, clearSettleTimer]);
-
-  useEffect(
-    () => () => {
-      clearSettleTimer();
-    },
-    [clearSettleTimer],
-  );
-
-  const onViewableItemsChanged = useRef(
-    ({ viewableItems }: { viewableItems: ViewToken<FeedVideoItem>[] }) => {
-      const viewableIndexes = viewableItems
-        .map((token) => token.index)
-        .filter((index): index is number => index !== null)
-        .sort((a, b) => a - b);
-
-      if (viewableIndexes.length === 0) return;
-
-      const nextFocusedIndex = viewableIndexes[0];
-      pendingFocusedIndexRef.current = nextFocusedIndex;
-      if (!isScrollSettlingRef.current) {
-        setFocusedIndex((current) =>
-          current === nextFocusedIndex ? current : nextFocusedIndex,
-        );
-      }
-    },
-  );
-
-  const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 65,
-    minimumViewTime: 100,
-  });
+  const {
+    focusedIndex,
+    isScrollSettling,
+    onViewableItemsChanged,
+    viewabilityConfig,
+    onScrollBeginDrag,
+    onScrollEndDrag,
+    onMomentumScrollBegin,
+    onMomentumScrollEnd,
+    onScroll,
+  } = useFeedFocusController<FeedVideoItem>();
 
   return (
     <View style={styles.container}>
@@ -116,13 +52,7 @@ export default function HomePage() {
         </View>
         <View style={styles.actions}>
           <Pressable style={styles.iconButton}>
-            <Ionicons name="tv-outline" size={22} color="#111111" />
-          </Pressable>
-          <Pressable style={styles.iconButton}>
-            <Ionicons name="notifications-outline" size={22} color="#111111" />
-          </Pressable>
-          <Pressable style={styles.iconButton}>
-            <Ionicons name="search-outline" size={22} color="#111111" />
+            <Bot size={22} color="#111111" />
           </Pressable>
         </View>
       </View>
@@ -130,22 +60,14 @@ export default function HomePage() {
       <FlashList
         data={feedVideos ?? []}
         keyExtractor={(item) => item.muxAssetId}
-        onViewableItemsChanged={onViewableItemsChanged.current}
-        onScrollBeginDrag={() => {
-          clearSettleTimer();
-          setIsScrollSettling(true);
-        }}
-        onScrollEndDrag={() => {
-          scheduleFocusSettle(140);
-        }}
-        onMomentumScrollBegin={() => {
-          clearSettleTimer();
-          setIsScrollSettling(true);
-        }}
-        onMomentumScrollEnd={() => {
-          scheduleFocusSettle(80);
-        }}
-        viewabilityConfig={viewabilityConfig.current}
+        onViewableItemsChanged={onViewableItemsChanged}
+        onScrollBeginDrag={onScrollBeginDrag}
+        onScrollEndDrag={onScrollEndDrag}
+        onMomentumScrollBegin={onMomentumScrollBegin}
+        onMomentumScrollEnd={onMomentumScrollEnd}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+        viewabilityConfig={viewabilityConfig}
         renderItem={({ item, index, target }) => {
           const isCellTarget = target === "Cell";
           const isFocused =

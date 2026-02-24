@@ -84,7 +84,6 @@ export default function HomeScreen() {
     lastUploadId
       ? {
           uploadId: lastUploadId,
-          userId: "mobile-user",
         }
       : "skip",
   ) as
@@ -178,7 +177,6 @@ export default function HomeScreen() {
       setUploadProgress(12);
       setStatus("Creating Mux upload URL...");
       const { uploadId, uploadUrl } = await createMuxDirectUpload({
-        userId: "mobile-user",
         title: title.trim() || undefined,
       });
 
