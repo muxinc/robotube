@@ -1,133 +1,84 @@
-import { Tabs } from "expo-router";
-import React from "react";
-import { Platform, StyleSheet, View } from "react-native";
-import { BlurView } from "expo-blur";
-import { House, Search, Upload, User } from "lucide-react-native";
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
+import { NativeTabs } from "expo-router/unstable-native-tabs";
+import { Platform } from "react-native";
 
-import { HapticTab } from "@/components/haptic-tab";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
 export default function TabLayout() {
   const colorScheme = useColorScheme() === "dark" ? "dark" : "light";
   const isDark = colorScheme === "dark";
+  const isIOS = Platform.OS === "ios";
 
   return (
-    <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme].tint,
-        tabBarInactiveTintColor: Colors[colorScheme].tabIconDefault,
-        headerShown: false,
-        tabBarButton: HapticTab,
-        tabBarShowLabel: false,
-        tabBarStyle: {
-          position: "absolute",
-          left: 22,
-          right: 22,
-          bottom: 28,
-          height: 56,
-          paddingTop: 8,
-          paddingBottom: 8,
-          borderRadius: 28,
-          borderTopWidth: 0,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: isDark
-            ? "rgba(255,255,255,0.22)"
-            : "rgba(255,255,255,0.95)",
-          backgroundColor: "transparent",
-          overflow: "hidden",
-          shadowColor: "#000",
-          shadowOpacity: isDark ? 0.34 : 0.16,
-          shadowRadius: 24,
-          shadowOffset: { width: 0, height: 12 },
-          elevation: 8,
-        },
-        tabBarBackground: () => (
-          <View style={StyleSheet.absoluteFill}>
-            <BlurView
-              tint={
-                isDark
-                  ? "systemChromeMaterialDark"
-                  : "systemChromeMaterialLight"
-              }
-              intensity={72}
-              style={StyleSheet.absoluteFill}
-              experimentalBlurMethod={
-                Platform.OS === "android" ? "dimezisBlurView" : undefined
-              }
-            />
-            <View
-              pointerEvents="none"
-              style={[
-                StyleSheet.absoluteFill,
-                {
-                  backgroundColor: isDark
-                    ? "rgba(24,24,28,0.2)"
-                    : "rgba(255,255,255,0.16)",
-                },
-              ]}
-            />
-            <View
-              pointerEvents="none"
-              style={[
-                styles.topHighlight,
-                {
-                  backgroundColor: isDark
-                    ? "rgba(255,255,255,0.15)"
-                    : "rgba(255,255,255,0.95)",
-                },
-              ]}
-            />
-          </View>
-        ),
+    <NativeTabs
+      tintColor={Colors[colorScheme].tint}
+      iconColor={{
+        default: Colors[colorScheme].tabIconDefault,
+        selected: Colors[colorScheme].tabIconSelected,
       }}
+      labelStyle={{
+        default: { color: Colors[colorScheme].tabIconDefault },
+        selected: { color: Colors[colorScheme].tabIconSelected },
+      }}
+      labelVisibilityMode="unlabeled"
+      backgroundColor={isDark ? "rgba(24,24,28,0.9)" : "rgba(255,255,255,0.95)"}
+      blurEffect={isDark ? "systemChromeMaterialDark" : "systemChromeMaterialLight"}
+      shadowColor={isDark ? "rgba(0,0,0,0.34)" : "rgba(0,0,0,0.16)"}
+      disableTransparentOnScrollEdge
     >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: "Home",
-          tabBarIcon: ({ color, size }) => (
-            <House size={size} color={color} strokeWidth={2.25} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="upload"
-        options={{
-          title: "Upload",
-          tabBarIcon: ({ color, size }) => (
-            <Upload size={size} color={color} strokeWidth={2.25} />
-          ),
-        }}
-      />
-      <Tabs.Screen
+      <NativeTabs.Trigger name="index">
+        <NativeTabs.Trigger.Icon
+          src={
+            <NativeTabs.Trigger.VectorIcon
+              family={MaterialCommunityIcons}
+              name="home-outline"
+            />
+          }
+        />
+        <NativeTabs.Trigger.Label hidden>Home</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="upload">
+        <NativeTabs.Trigger.Icon
+          src={
+            <NativeTabs.Trigger.VectorIcon
+              family={MaterialCommunityIcons}
+              name="upload-outline"
+            />
+          }
+        />
+        <NativeTabs.Trigger.Label hidden>Upload</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger
         name="explore"
-        options={{
-          title: "Explore",
-          tabBarIcon: ({ color, size }) => (
-            <Search size={size} color={color} strokeWidth={2.25} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: "Profile",
-          tabBarIcon: ({ color, size }) => (
-            <User size={size} color={color} strokeWidth={2.25} />
-          ),
-        }}
-      />
-    </Tabs>
+        role={isIOS ? "search" : undefined}
+      >
+        <NativeTabs.Trigger.Icon
+          src={
+            <NativeTabs.Trigger.VectorIcon
+              family={MaterialCommunityIcons}
+              name={isIOS ? "magnify" : "compass-outline"}
+            />
+          }
+        />
+        <NativeTabs.Trigger.Label hidden>
+          {isIOS ? "Search" : "Explore"}
+        </NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="profile">
+        <NativeTabs.Trigger.Icon
+          src={
+            <NativeTabs.Trigger.VectorIcon
+              family={MaterialCommunityIcons}
+              name="account-outline"
+            />
+          }
+        />
+        <NativeTabs.Trigger.Label hidden>Profile</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+    </NativeTabs>
   );
 }
-
-const styles = StyleSheet.create({
-  topHighlight: {
-    position: "absolute",
-    top: 0,
-    left: 10,
-    right: 10,
-    height: StyleSheet.hairlineWidth,
-  },
-});

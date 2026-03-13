@@ -1,8 +1,7 @@
 import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
@@ -17,13 +16,13 @@ const SEARCH_CATEGORIES = [
   { label: "Tech", query: "technology", color: "#178A7E" },
 ];
 
-export default function TabTwoScreen() {
+export default function ExploreScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [queryText, setQueryText] = useState("");
 
-  const handleSubmitSearch = () => {
-    const trimmed = queryText.trim();
+  const submitSearch = (rawText: string) => {
+    const trimmed = rawText.trim();
     if (trimmed.length < 2) return;
 
     router.push({
@@ -36,11 +35,23 @@ export default function TabTwoScreen() {
 
   return (
     <ThemedView style={styles.screen}>
+      <Stack.Screen options={{ title: "Search" }} />
+      <Stack.SearchBar
+        placement="automatic"
+        placeholder="Search videos, tags, or topics"
+        onChangeText={(event) => {
+          setQueryText(event.nativeEvent.text);
+        }}
+        onSearchButtonPress={(event) => {
+          submitSearch(event.nativeEvent.text || queryText);
+        }}
+      />
+
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
           {
-            paddingTop: insets.top + 10,
+            paddingTop: 10,
             paddingBottom: insets.bottom + 110,
           },
         ]}
@@ -51,21 +62,6 @@ export default function TabTwoScreen() {
             contentFit="contain"
             style={styles.exploreLogo}
           />
-
-          <View style={styles.searchWrap}>
-            <Pressable onPress={handleSubmitSearch} hitSlop={8}>
-              <Ionicons name="search" size={18} color="#7A7A7A" />
-            </Pressable>
-            <TextInput
-              placeholder="Search videos, tags, or topics"
-              placeholderTextColor="#8F95A1"
-              returnKeyType="search"
-              value={queryText}
-              onChangeText={setQueryText}
-              onSubmitEditing={handleSubmitSearch}
-              style={styles.searchInput}
-            />
-          </View>
 
           <View style={styles.categoriesWrap}>
             <ThemedText style={styles.categoriesHeading}>Browse categories</ThemedText>
@@ -118,24 +114,6 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     marginLeft: -92,
     transform: [{ scale: 1.2 }],
-  },
-  searchWrap: {
-    marginTop: -4,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    borderWidth: 1,
-    borderColor: "#D5DDE8",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    height: 46,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 15,
-    color: "#1E1E1E",
-    paddingVertical: 0,
   },
   categoriesWrap: {
     marginTop: 6,

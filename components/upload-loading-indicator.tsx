@@ -25,9 +25,18 @@ export function UploadLoadingIndicator({
     { light: "#FFE7F5", dark: "#3D1E33" },
     "background",
   );
-  const statusColor = useThemeColor({ light: "#1F2937", dark: "#E5E7EB" }, "text");
-  const percentColor = useThemeColor({ light: "#5B6472", dark: "#AAB3C2" }, "text");
-  const trackColor = useThemeColor({ light: "#E7EDF5", dark: "#2B3240" }, "icon");
+  const statusColor = useThemeColor(
+    { light: "#1F2937", dark: "#E5E7EB" },
+    "text",
+  );
+  const percentColor = useThemeColor(
+    { light: "#5B6472", dark: "#AAB3C2" },
+    "text",
+  );
+  const trackColor = useThemeColor(
+    { light: "#E7EDF5", dark: "#2B3240" },
+    "icon",
+  );
 
   useEffect(() => {
     if (!isActive) {
@@ -59,11 +68,14 @@ export function UploadLoadingIndicator({
       <Animated.View
         style={[
           styles.iconWrap,
-          { transform: [{ rotate: spin }], backgroundColor: iconWrapBackground },
+          {
+            transform: [{ rotate: spin }],
+            backgroundColor: iconWrapBackground,
+          },
         ]}
       >
         <Image
-          source={require("../assets/images/kirbutt.png")}
+          source={require("../assets/images/react-logo.png")}
           contentFit="contain"
           style={styles.icon}
         />
@@ -79,7 +91,11 @@ export function UploadLoadingIndicator({
 
         <View
           accessibilityRole="progressbar"
-          accessibilityValue={{ min: 0, max: 100, now: Math.round(clampedProgress) }}
+          accessibilityValue={{
+            min: 0,
+            max: 100,
+            now: Math.round(clampedProgress),
+          }}
           style={[styles.track, { backgroundColor: trackColor }]}
         >
           <View style={[styles.fill, { width: `${clampedProgress}%` }]} />

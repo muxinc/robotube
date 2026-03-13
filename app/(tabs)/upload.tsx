@@ -131,6 +131,9 @@ export default function HomeScreen() {
         mediaTypes: ["videos"],
         allowsEditing: false,
         quality: 1,
+        shouldDownloadFromNetwork: true,
+        preferredAssetRepresentationMode:
+          ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
       });
 
       if (picked.canceled || picked.assets.length === 0) {
@@ -154,8 +157,14 @@ export default function HomeScreen() {
       setUploadProgress(0);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not select video";
-      setStatus(`Selection failed: ${message}`);
-      Alert.alert("Video Selection Failed", message);
+      const isICloudDownloadError =
+        message.includes("PHPhotosErrorDomain") && message.includes("3164");
+      const displayMessage = isICloudDownloadError
+        ? "That video is in iCloud and could not be downloaded right now. Please open it in Photos first or try again on a stronger network."
+        : message;
+
+      setStatus(`Selection failed: ${displayMessage}`);
+      Alert.alert("Video Selection Failed", displayMessage);
     }
   };
 

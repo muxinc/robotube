@@ -4,6 +4,7 @@ import {
   ThemeProvider,
 } from "@react-navigation/native";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
+import { ConvexProvider } from "convex/react";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { Platform } from "react-native";
@@ -21,23 +22,27 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   return (
-    <ConvexAuthProvider
-      client={convex}
-      storage={authTokenStorage}
-      shouldHandleCode={Platform.OS === "web"}
-    >
-      <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="modal" options={{ presentation: "modal" }} />
-          <Stack.Screen name="category/[category]" />
-          <Stack.Screen name="search/[query]" />
-          <Stack.Screen name="video/[muxAssetId]" />
-          <Stack.Screen name="sign-in" />
-        </Stack>
+    <ConvexProvider client={convex}>
+      <ConvexAuthProvider
+        client={convex}
+        storage={authTokenStorage}
+        shouldHandleCode={Platform.OS === "web"}
+      >
+        <ThemeProvider
+          value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
+        >
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="modal" options={{ presentation: "modal" }} />
+            <Stack.Screen name="category/[category]" />
+            <Stack.Screen name="search/[query]" />
+            <Stack.Screen name="video/[muxAssetId]" />
+            <Stack.Screen name="sign-in" />
+          </Stack>
 
-        <StatusBar style="auto" />
-      </ThemeProvider>
-    </ConvexAuthProvider>
+          <StatusBar style="auto" />
+        </ThemeProvider>
+      </ConvexAuthProvider>
+    </ConvexProvider>
   );
 }

@@ -67,7 +67,7 @@ npx convex run migrations:backfillModerationForReadyAssets '{"maxAssets":500,"de
 
 ## Get started
 
-Note: This app is currently running the canary version of Expo. We need this to use the <Activity> Component from React 19.2.
+Note: This app is running stable Expo SDK 55 with React 19.2, and the `<Activity>` component is supported.
 
 1. Install dependencies
 
@@ -80,7 +80,12 @@ Note: This app is currently running the canary version of Expo. We need this to 
    ```bash
    EXPO_PUBLIC_CONVEX_URL=https://<your-deployment>.convex.cloud
    ```
-
+   ```bash
+   EXPO_PUBLIC_CONVEX_SITE_URL=https://<your-conve-site-url>.convex.site
+   ```
+   ```bash
+   CONVEX_DEPLOYMENT=dev:<your-convex-deployment>
+   ```
    You can get this value from your Convex dashboard deployment settings (or from `npx convex dev` output).
 
 3. Start the app
