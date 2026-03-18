@@ -67,7 +67,7 @@ export default function SearchResultsPage() {
       return;
     }
 
-    router.replace("/explore");
+    router.replace("/search");
   }, [navigation, router]);
 
   return (
@@ -135,7 +135,7 @@ export default function SearchResultsPage() {
             <Text style={styles.emptySubtitle}>
               {routeQuery.length < 2
                 ? "Try a broader topic like action, music, or interview."
-                : "Try a different keyword or browse categories in Explore."}
+                : "Try a different keyword or browse categories in Search."}
             </Text>
           </View>
         }

@@ -1,9 +1,19 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "convex/react";
 import { StatusBar } from "expo-status-bar";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  FlatList,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
@@ -78,6 +88,7 @@ function FullVideoPlayer({
 export default function VideoDetailPage() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const { muxAssetId: rawMuxAssetId, startAt: rawStartAt } =
     useLocalSearchParams<{
       muxAssetId?: string | string[];
@@ -105,10 +116,24 @@ export default function VideoDetailPage() {
     [feedVideos, muxAssetId],
   );
   const summary = selectedVideo?.summary ?? null;
-  const tags = selectedVideo?.tags ?? [];
+  const tags = useMemo(() => selectedVideo?.tags ?? [], [selectedVideo?.tags]);
+  const previewTags = useMemo(() => tags.slice(0, 3), [tags]);
   const chapters = useMemo(() => selectedVideo?.chapters ?? [], [selectedVideo?.chapters]);
   const [seekToSeconds, setSeekToSeconds] = useState<number | null>(null);
   const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
+  const [isDetailsSheetVisible, setIsDetailsSheetVisible] = useState(false);
+  const summaryPreview = useMemo(
+    () => summary ?? "AI summary is being generated for this video.",
+    [summary],
+  );
+  const playerSectionHeight = useMemo(
+    () => insets.top + (windowWidth * 9) / 16,
+    [insets.top, windowWidth],
+  );
+  const sheetHeight = useMemo(
+    () => Math.max(windowHeight - playerSectionHeight, 240),
+    [playerSectionHeight, windowHeight],
+  );
 
   const activeChapterStartTime = useMemo(() => {
     if (chapters.length === 0) return null;
@@ -127,6 +152,10 @@ export default function VideoDetailPage() {
     setCurrentTimeSeconds(startAtSeconds ?? 0);
     setSeekToSeconds(null);
   }, [selectedVideo?.muxAssetId, startAtSeconds]);
+
+  useEffect(() => {
+    setIsDetailsSheetVisible(false);
+  }, [selectedVideo?.muxAssetId]);
 
   if (!muxAssetId) {
     return (
@@ -195,22 +224,32 @@ export default function VideoDetailPage() {
                 {selectedVideo.channelName} ·{" "}
                 {formatPublished(selectedVideo.createdAtMs)}
               </Text>
-              {summary ? (
-                <Text style={styles.summary}>{summary}</Text>
-              ) : (
-                <Text style={styles.summaryPending}>
-                  AI summary is being generated for this video.
-                </Text>
-              )}
-              {tags.length > 0 ? (
-                <View style={styles.tagsWrap}>
-                  {tags.map((tag) => (
-                    <View key={`${selectedVideo.muxAssetId}-${tag}`} style={styles.tagPill}>
-                      <Text style={styles.tagText}>#{tag}</Text>
-                    </View>
-                  ))}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open video details"
+                onPress={() => setIsDetailsSheetVisible(true)}
+                style={({ pressed }) => [
+                  styles.detailsCard,
+                  pressed && styles.detailsCardPressed,
+                ]}
+              >
+                <View style={styles.detailsCardHeader}>
+                  <Text style={styles.detailsCardTitle}>Description</Text>
+                  <Text style={styles.detailsCardMore}>more</Text>
                 </View>
-              ) : null}
+                <Text numberOfLines={2} style={summary ? styles.summary : styles.summaryPending}>
+                  {summaryPreview}
+                </Text>
+                {previewTags.length > 0 ? (
+                  <View style={styles.tagsWrap}>
+                    {previewTags.map((tag) => (
+                      <View key={`${selectedVideo.muxAssetId}-${tag}`} style={styles.tagPill}>
+                        <Text style={styles.tagText}>#{tag}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+              </Pressable>
 
               {chapters.length > 0 ? (
                 <View style={styles.chaptersWrap}>
@@ -255,6 +294,75 @@ export default function VideoDetailPage() {
           { paddingBottom: insets.bottom + 90 },
         ]}
       />
+
+      <Modal
+        transparent
+        animationType="slide"
+        presentationStyle="overFullScreen"
+        statusBarTranslucent
+        visible={isDetailsSheetVisible}
+        onRequestClose={() => setIsDetailsSheetVisible(false)}
+      >
+        <View style={styles.sheetOverlay}>
+          <Pressable
+            style={[styles.sheetBackdrop, { height: playerSectionHeight }]}
+            onPress={() => setIsDetailsSheetVisible(false)}
+          />
+          <View
+            style={[
+              styles.sheetCard,
+              {
+                height: sheetHeight,
+                paddingBottom: Math.max(insets.bottom, 18),
+              },
+            ]}
+          >
+            <View style={styles.sheetHandle} />
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetHeadingBlock}>
+                <Text style={styles.sheetTitle}>Description</Text>
+                <Text style={styles.sheetVideoTitle}>{selectedVideo.title}</Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close video details"
+                onPress={() => setIsDetailsSheetVisible(false)}
+                style={({ pressed }) => [
+                  styles.sheetCloseButton,
+                  pressed && styles.sheetCloseButtonPressed,
+                ]}
+              >
+                <Ionicons name="close" size={20} color="#162033" />
+              </Pressable>
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.sheetContent}
+            >
+              <Text style={styles.sheetMeta}>
+                {selectedVideo.channelName} · {formatPublished(selectedVideo.createdAtMs)}
+              </Text>
+              <Text style={summary ? styles.sheetSummary : styles.summaryPending}>
+                {summaryPreview}
+              </Text>
+
+              {tags.length > 0 ? (
+                <View style={styles.sheetSection}>
+                  <Text style={styles.sheetSectionTitle}>Tags</Text>
+                  <View style={styles.tagsWrap}>
+                    {tags.map((tag) => (
+                      <View key={`${selectedVideo.muxAssetId}-${tag}`} style={styles.tagPill}>
+                        <Text style={styles.tagText}>#{tag}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -280,7 +388,7 @@ const styles = StyleSheet.create({
   metaWrap: {
     paddingHorizontal: 14,
     paddingTop: 12,
-    gap: 6,
+    gap: 10,
   },
   title: {
     fontSize: 18,
@@ -293,19 +401,43 @@ const styles = StyleSheet.create({
     color: "#606060",
   },
   summary: {
-    marginTop: 2,
     fontSize: 14,
     lineHeight: 20,
     color: "#232323",
   },
   summaryPending: {
-    marginTop: 2,
     fontSize: 13,
     lineHeight: 18,
     color: "#7D7D7D",
   },
+  detailsCard: {
+    backgroundColor: "#F5F7FB",
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  detailsCardPressed: {
+    opacity: 0.86,
+  },
+  detailsCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  detailsCardTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#202B3D",
+  },
+  detailsCardMore: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#202B3D",
+    textTransform: "lowercase",
+  },
   tagsWrap: {
-    marginTop: 2,
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
@@ -383,6 +515,84 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 14,
     color: "#666",
+  },
+  sheetOverlay: {
+    flex: 1,
+    justifyContent: "flex-start",
+  },
+  sheetBackdrop: {
+    backgroundColor: "transparent",
+  },
+  sheetCard: {
+    flexShrink: 0,
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 10,
+  },
+  sheetHandle: {
+    width: 42,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: "#D6DDE8",
+    alignSelf: "center",
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 10,
+  },
+  sheetHeadingBlock: {
+    flex: 1,
+    paddingRight: 12,
+    gap: 4,
+  },
+  sheetTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#121A2A",
+  },
+  sheetVideoTitle: {
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: "600",
+    color: "#1A2332",
+  },
+  sheetCloseButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F3F6FB",
+  },
+  sheetCloseButtonPressed: {
+    opacity: 0.8,
+  },
+  sheetContent: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    gap: 14,
+  },
+  sheetMeta: {
+    fontSize: 13,
+    color: "#5A6475",
+  },
+  sheetSummary: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: "#1A2332",
+  },
+  sheetSection: {
+    gap: 10,
+  },
+  sheetSectionTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#344055",
   },
   stateContainer: {
     flex: 1,

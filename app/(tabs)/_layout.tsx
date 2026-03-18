@@ -44,7 +44,7 @@ export default function TabLayout() {
           src={
             <NativeTabs.Trigger.VectorIcon
               family={MaterialCommunityIcons}
-              name="upload-outline"
+              name="plus-circle"
             />
           }
         />
@@ -52,20 +52,18 @@ export default function TabLayout() {
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger
-        name="explore"
+        name="search"
         role={isIOS ? "search" : undefined}
       >
         <NativeTabs.Trigger.Icon
           src={
             <NativeTabs.Trigger.VectorIcon
               family={MaterialCommunityIcons}
-              name={isIOS ? "magnify" : "compass-outline"}
+              name="magnify"
             />
           }
         />
-        <NativeTabs.Trigger.Label hidden>
-          {isIOS ? "Search" : "Explore"}
-        </NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label hidden>Search</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="profile">

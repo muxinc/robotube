@@ -1,8 +1,16 @@
 import { Image } from "expo-image";
-import { Stack, useRouter } from "expo-router";
-import { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Stack, useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useRef, useState } from "react";
+import {
+  InteractionManager,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import type { SearchBarCommands } from "react-native-screens";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
@@ -16,10 +24,29 @@ const SEARCH_CATEGORIES = [
   { label: "Tech", query: "technology", color: "#178A7E" },
 ];
 
-export default function ExploreScreen() {
+export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [queryText, setQueryText] = useState("");
+  const searchBarRef = useRef<SearchBarCommands | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== "ios") {
+        return;
+      }
+
+      const task = InteractionManager.runAfterInteractions(() => {
+        requestAnimationFrame(() => {
+          searchBarRef.current?.focus?.();
+        });
+      });
+
+      return () => {
+        task.cancel();
+      };
+    }, []),
+  );
 
   const submitSearch = (rawText: string) => {
     const trimmed = rawText.trim();
@@ -37,8 +64,11 @@ export default function ExploreScreen() {
     <ThemedView style={styles.screen}>
       <Stack.Screen options={{ title: "Search" }} />
       <Stack.SearchBar
-        placement="automatic"
+        ref={searchBarRef}
+        placement={Platform.OS === "ios" ? "integrated" : "automatic"}
         placeholder="Search videos, tags, or topics"
+        hideNavigationBar={false}
+        allowToolbarIntegration={Platform.OS === "ios"}
         onChangeText={(event) => {
           setQueryText(event.nativeEvent.text);
         }}
@@ -48,6 +78,8 @@ export default function ExploreScreen() {
       />
 
       <ScrollView
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={[
           styles.scrollContent,
           {
