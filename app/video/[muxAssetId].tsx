@@ -122,6 +122,7 @@ export default function VideoDetailPage() {
   const [seekToSeconds, setSeekToSeconds] = useState<number | null>(null);
   const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
   const [isDetailsSheetVisible, setIsDetailsSheetVisible] = useState(false);
+  const [isChaptersSheetVisible, setIsChaptersSheetVisible] = useState(false);
   const summaryPreview = useMemo(
     () => summary ?? "AI summary is being generated for this video.",
     [summary],
@@ -155,6 +156,7 @@ export default function VideoDetailPage() {
 
   useEffect(() => {
     setIsDetailsSheetVisible(false);
+    setIsChaptersSheetVisible(false);
   }, [selectedVideo?.muxAssetId]);
 
   if (!muxAssetId) {
@@ -188,112 +190,116 @@ export default function VideoDetailPage() {
     <View style={styles.screen}>
       <StatusBar style="light" backgroundColor="#000000" translucent={false} />
       <Stack.Screen options={{ headerShown: false }} />
-      <FlatList
-        data={relatedVideos}
-        keyExtractor={(item) => item.muxAssetId}
-        renderItem={({ item }) => (
-          <FeedVideoCard
-            item={item}
-            onPress={(video, startAt) =>
-              router.replace({
-                pathname: "/video/[muxAssetId]",
-                params: {
-                  muxAssetId: video.muxAssetId,
-                  startAt: String(startAt ?? 0),
-                },
-              })
-            }
-          />
-        )}
-        ListHeaderComponent={
-          <View>
-            <View style={{ height: insets.top, backgroundColor: "#000" }} />
-            <View style={styles.videoWrap}>
-              <FullVideoPlayer
-                key={selectedVideo.muxAssetId}
-                playbackUrl={selectedVideo.playbackUrl}
-                startAtSeconds={startAtSeconds}
-                seekToSeconds={seekToSeconds}
-                onSeekHandled={() => setSeekToSeconds(null)}
-                onTimeUpdate={setCurrentTimeSeconds}
-              />
-            </View>
-            <View style={styles.metaWrap}>
-              <Text style={styles.title}>{selectedVideo.title}</Text>
-              <Text style={styles.meta}>
-                {selectedVideo.channelName} ·{" "}
-                {formatPublished(selectedVideo.createdAtMs)}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Open video details"
-                onPress={() => setIsDetailsSheetVisible(true)}
-                style={({ pressed }) => [
-                  styles.detailsCard,
-                  pressed && styles.detailsCardPressed,
-                ]}
-              >
-                <View style={styles.detailsCardHeader}>
-                  <Text style={styles.detailsCardTitle}>Description</Text>
-                  <Text style={styles.detailsCardMore}>more</Text>
-                </View>
-                <Text numberOfLines={2} style={summary ? styles.summary : styles.summaryPending}>
-                  {summaryPreview}
-                </Text>
-                {previewTags.length > 0 ? (
-                  <View style={styles.tagsWrap}>
-                    {previewTags.map((tag) => (
-                      <View key={`${selectedVideo.muxAssetId}-${tag}`} style={styles.tagPill}>
-                        <Text style={styles.tagText}>#{tag}</Text>
-                      </View>
-                    ))}
-                  </View>
-                ) : null}
-              </Pressable>
+      <View style={{ height: insets.top, backgroundColor: "#000" }} />
+      <View style={styles.videoWrap}>
+        <FullVideoPlayer
+          key={selectedVideo.muxAssetId}
+          playbackUrl={selectedVideo.playbackUrl}
+          startAtSeconds={startAtSeconds}
+          seekToSeconds={seekToSeconds}
+          onSeekHandled={() => setSeekToSeconds(null)}
+          onTimeUpdate={setCurrentTimeSeconds}
+        />
+      </View>
 
-              {chapters.length > 0 ? (
-                <View style={styles.chaptersWrap}>
-                  <Text style={styles.chaptersTitle}>Chapters</Text>
-                  {chapters.map((chapter) => {
-                    const isActive = activeChapterStartTime === chapter.startTime;
-                    const timeLabel = formatDuration(chapter.startTime) ?? "0:00";
-
-                    return (
-                      <Pressable
-                        key={`${selectedVideo.muxAssetId}-${chapter.startTime}-${chapter.title}`}
-                        onPress={() => setSeekToSeconds(chapter.startTime)}
-                        style={({ pressed }) => [
-                          styles.chapterRow,
-                          isActive && styles.chapterRowActive,
-                          pressed && styles.chapterRowPressed,
-                        ]}
-                      >
-                        <Text style={styles.chapterTime}>{timeLabel}</Text>
-                        <Text style={styles.chapterLabel}>{chapter.title}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              ) : null}
-            </View>
-            <Text style={styles.upNextTitle}>Up next</Text>
-          </View>
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyWrap}>
-            <Text style={styles.emptyText}>
-              {feedVideos === undefined
-                ? "Loading recommendations..."
-                : "No more videos right now"}
-            </Text>
-          </View>
-        }
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={[
-          styles.content,
-          { paddingBottom: insets.bottom + 90 },
+      <View
+        style={[
+          styles.mainSheet,
+          {
+            height: sheetHeight,
+            paddingBottom: Math.max(insets.bottom, 18),
+          },
         ]}
-      />
+      >
+        <FlatList
+          data={relatedVideos}
+          keyExtractor={(item) => item.muxAssetId}
+          renderItem={({ item }) => (
+            <FeedVideoCard
+              item={item}
+              onPress={(video, startAt) =>
+                router.replace({
+                  pathname: "/video/[muxAssetId]",
+                  params: {
+                    muxAssetId: video.muxAssetId,
+                    startAt: String(startAt ?? 0),
+                  },
+                })
+              }
+            />
+          )}
+          ListHeaderComponent={
+            <View>
+              <View style={styles.metaWrap}>
+                <View style={styles.titleRow}>
+                  <Text style={styles.title}>{selectedVideo.title}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Open video chapters"
+                    disabled={chapters.length === 0}
+                    onPress={() => {
+                      setIsDetailsSheetVisible(false);
+                      setIsChaptersSheetVisible(true);
+                    }}
+                    style={({ pressed }) => [
+                      styles.chaptersButton,
+                      chapters.length === 0 && styles.chaptersButtonDisabled,
+                      pressed && chapters.length > 0 && styles.chaptersButtonPressed,
+                    ]}
+                  >
+                    <Ionicons name="book-outline" size={18} color="#1A2332" />
+                  </Pressable>
+                </View>
+                <Text style={styles.meta}>
+                  {selectedVideo.channelName} ·{" "}
+                  {formatPublished(selectedVideo.createdAtMs)}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Open video details"
+                  onPress={() => {
+                    setIsChaptersSheetVisible(false);
+                    setIsDetailsSheetVisible(true);
+                  }}
+                  style={({ pressed }) => [
+                    styles.detailsCard,
+                    pressed && styles.detailsCardPressed,
+                  ]}
+                >
+                  <View style={styles.detailsCardHeader}>
+                    <Text style={styles.detailsCardTitle}>Description</Text>
+                    <Text style={styles.detailsCardMore}>more</Text>
+                  </View>
+                  <Text numberOfLines={2} style={summary ? styles.summary : styles.summaryPending}>
+                    {summaryPreview}
+                  </Text>
+                  {previewTags.length > 0 ? (
+                    <View style={styles.tagsWrap}>
+                      {previewTags.map((tag) => (
+                        <View key={`${selectedVideo.muxAssetId}-${tag}`} style={styles.tagPill}>
+                          <Text style={styles.tagText}>#{tag}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                </Pressable>
+              </View>
+              <Text style={styles.upNextTitle}>Up next</Text>
+            </View>
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyWrap}>
+              <Text style={styles.emptyText}>
+                {feedVideos === undefined
+                  ? "Loading recommendations..."
+                  : "No more videos right now"}
+              </Text>
+            </View>
+          }
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.mainSheetContent}
+        />
+      </View>
 
       <Modal
         transparent
@@ -363,6 +369,90 @@ export default function VideoDetailPage() {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        transparent
+        animationType="slide"
+        presentationStyle="overFullScreen"
+        statusBarTranslucent
+        visible={isChaptersSheetVisible}
+        onRequestClose={() => setIsChaptersSheetVisible(false)}
+      >
+        <View style={styles.sheetOverlay}>
+          <Pressable
+            style={[styles.sheetBackdrop, { height: playerSectionHeight }]}
+            onPress={() => setIsChaptersSheetVisible(false)}
+          />
+          <View
+            style={[
+              styles.sheetCard,
+              {
+                height: sheetHeight,
+                paddingBottom: Math.max(insets.bottom, 18),
+              },
+            ]}
+          >
+            <View style={styles.sheetHandle} />
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetHeadingBlock}>
+                <Text style={styles.sheetTitle}>Chapters</Text>
+                <Text style={styles.sheetVideoTitle}>{selectedVideo.title}</Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close video chapters"
+                onPress={() => setIsChaptersSheetVisible(false)}
+                style={({ pressed }) => [
+                  styles.sheetCloseButton,
+                  pressed && styles.sheetCloseButtonPressed,
+                ]}
+              >
+                <Ionicons name="close" size={20} color="#162033" />
+              </Pressable>
+            </View>
+
+            <View style={styles.chapterSheetBody}>
+              {chapters.length > 0 ? (
+                <View style={styles.chapterSheetCard}>
+                  <ScrollView
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={styles.chapterSheetScrollContent}
+                  >
+                    {chapters.map((chapter) => {
+                      const isActive = activeChapterStartTime === chapter.startTime;
+                      const timeLabel = formatDuration(chapter.startTime) ?? "0:00";
+
+                      return (
+                        <Pressable
+                          key={`${selectedVideo.muxAssetId}-${chapter.startTime}-${chapter.title}`}
+                          onPress={() => {
+                            setSeekToSeconds(chapter.startTime);
+                            setIsChaptersSheetVisible(false);
+                          }}
+                          style={({ pressed }) => [
+                            styles.chapterRow,
+                            isActive && styles.chapterRowActive,
+                            pressed && styles.chapterRowPressed,
+                          ]}
+                        >
+                          <Text style={styles.chapterTime}>{timeLabel}</Text>
+                          <Text style={styles.chapterLabel}>{chapter.title}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              ) : (
+                <View style={styles.chapterSheetEmptyState}>
+                  <Text style={styles.summaryPending}>
+                    Chapters are still being generated for this video.
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -372,7 +462,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#FFFFFF",
   },
-  content: {
+  mainSheet: {
+    flexShrink: 0,
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 10,
+  },
+  mainSheetContent: {
     paddingBottom: 24,
   },
   videoWrap: {
@@ -390,11 +487,31 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     gap: 10,
   },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
   title: {
+    flex: 1,
     fontSize: 18,
     lineHeight: 24,
     fontWeight: "700",
     color: "#111111",
+  },
+  chaptersButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F3F6FB",
+  },
+  chaptersButtonDisabled: {
+    opacity: 0.45,
+  },
+  chaptersButtonPressed: {
+    opacity: 0.8,
   },
   meta: {
     fontSize: 14,
@@ -461,22 +578,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
     color: "#151515",
-  },
-  chaptersWrap: {
-    marginTop: 10,
-    borderWidth: 1,
-    borderColor: "#E5EAF2",
-    borderRadius: 12,
-    overflow: "hidden",
-  },
-  chaptersTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#344055",
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 8,
-    backgroundColor: "#F7FAFF",
   },
   chapterRow: {
     flexDirection: "row",
@@ -593,6 +694,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     color: "#344055",
+  },
+  chapterSheetBody: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 6,
+  },
+  chapterSheetCard: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#E5EAF2",
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    overflow: "hidden",
+  },
+  chapterSheetScrollContent: {
+    paddingBottom: 12,
+  },
+  chapterSheetEmptyState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
   },
   stateContainer: {
     flex: 1,

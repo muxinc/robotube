@@ -1,17 +1,16 @@
-import { Image } from "expo-image";
-import { Stack, useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useRef, useState } from "react";
+import { HeaderSearchBarRef } from "@react-navigation/elements";
+import { useIsFocused } from "@react-navigation/native";
+import { Stack, useRouter } from "expo-router";
+import { useEffect, useRef, useState } from "react";
 import {
-  InteractionManager,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import type { SearchBarCommands } from "react-native-screens";
 
+import { TabPageLogo } from "@/components/tab-page-logo";
+import { TabPageScrollLayout } from "@/components/tab-page-scroll-layout";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 
@@ -25,28 +24,22 @@ const SEARCH_CATEGORIES = [
 ];
 
 export default function SearchScreen() {
-  const insets = useSafeAreaInsets();
+  const isFocused = useIsFocused();
   const router = useRouter();
+  const searchBarRef = useRef<HeaderSearchBarRef>(null);
   const [queryText, setQueryText] = useState("");
-  const searchBarRef = useRef<SearchBarCommands | null>(null);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (Platform.OS !== "ios") {
-        return;
-      }
+  useEffect(() => {
+    if (!isFocused) return;
 
-      const task = InteractionManager.runAfterInteractions(() => {
-        requestAnimationFrame(() => {
-          searchBarRef.current?.focus?.();
-        });
-      });
+    const timeoutId = setTimeout(() => {
+      searchBarRef.current?.focus();
+    }, 100);
 
-      return () => {
-        task.cancel();
-      };
-    }, []),
-  );
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [isFocused]);
 
   const submitSearch = (rawText: string) => {
     const trimmed = rawText.trim();
@@ -62,9 +55,15 @@ export default function SearchScreen() {
 
   return (
     <ThemedView style={styles.screen}>
-      <Stack.Screen options={{ title: "Search" }} />
+      <Stack.Screen
+        options={{
+          title: "",
+          headerShadowVisible: false,
+        }}
+      />
       <Stack.SearchBar
         ref={searchBarRef}
+        autoFocus
         placement={Platform.OS === "ios" ? "integrated" : "automatic"}
         placeholder="Search videos, tags, or topics"
         hideNavigationBar={false}
@@ -77,52 +76,45 @@ export default function SearchScreen() {
         }}
       />
 
-      <ScrollView
+      <TabPageScrollLayout
+        contentInsetAdjustmentBehavior="never"
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={[
-          styles.scrollContent,
-          {
-            paddingTop: 10,
-            paddingBottom: insets.bottom + 110,
-          },
-        ]}
+        containerStyle={styles.container}
       >
-        <ThemedView style={styles.container}>
-          <Image
-            source={require("@/assets/images/explore-logo.png")}
-            contentFit="contain"
-            style={styles.exploreLogo}
-          />
+        <TabPageLogo
+          source={require("@/assets/images/search-logo.png")}
+          width={276}
+          height={102}
+        />
 
-          <View style={styles.categoriesWrap}>
-            <ThemedText style={styles.categoriesHeading}>Browse categories</ThemedText>
-            <View style={styles.categoriesGrid}>
-              {SEARCH_CATEGORIES.map((category) => {
-                return (
-                  <Pressable
-                    key={category.label}
-                    style={[styles.categoryCard, { backgroundColor: category.color }]}
-                    onPress={() => {
-                      router.push({
-                        pathname: "/category/[category]",
-                        params: {
-                          category: category.label.toLowerCase(),
-                          label: category.label,
-                          query: category.query,
-                          color: category.color,
-                        },
-                      });
-                    }}
-                  >
-                    <ThemedText style={styles.categoryLabel}>{category.label}</ThemedText>
-                  </Pressable>
-                );
-              })}
-            </View>
+        <View style={styles.categoriesWrap}>
+          <ThemedText style={styles.categoriesHeading}>Browse categories</ThemedText>
+          <View style={styles.categoriesGrid}>
+            {SEARCH_CATEGORIES.map((category) => {
+              return (
+                <Pressable
+                  key={category.label}
+                  style={[styles.categoryCard, { backgroundColor: category.color }]}
+                  onPress={() => {
+                    router.push({
+                      pathname: "/search/category/[category]",
+                      params: {
+                        category: category.label.toLowerCase(),
+                        label: category.label,
+                        query: category.query,
+                        color: category.color,
+                      },
+                    });
+                  }}
+                >
+                  <ThemedText style={styles.categoryLabel}>{category.label}</ThemedText>
+                </Pressable>
+              );
+            })}
           </View>
-        </ThemedView>
-      </ScrollView>
+        </View>
+      </TabPageScrollLayout>
     </ThemedView>
   );
 }
@@ -131,24 +123,11 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
   },
-  scrollContent: {
-    paddingHorizontal: 20,
-  },
   container: {
     gap: 14,
-    width: "100%",
-    maxWidth: 760,
-    alignSelf: "center",
-  },
-  exploreLogo: {
-    width: 280,
-    height: 106,
-    alignSelf: "flex-start",
-    marginLeft: -92,
-    transform: [{ scale: 1.2 }],
   },
   categoriesWrap: {
-    marginTop: 6,
+    marginTop: 0,
     gap: 10,
   },
   categoriesHeading: {

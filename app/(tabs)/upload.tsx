@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import {
   Alert,
   Pressable,
-  ScrollView,
   StyleSheet,
   TextInput,
   View,
@@ -16,9 +15,10 @@ import {
 } from "expo-file-system/legacy";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useAction, useQuery } from "convex/react";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { api } from "@/convex/_generated/api";
+import { TabPageLogo } from "@/components/tab-page-logo";
+import { TabPageScrollLayout } from "@/components/tab-page-scroll-layout";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { UploadLoadingIndicator } from "@/components/upload-loading-indicator";
@@ -69,7 +69,6 @@ export default function HomeScreen() {
   const createMuxDirectUpload = useAction(
     (api as any).uploads.createMuxDirectUpload,
   );
-  const insets = useSafeAreaInsets();
   const [isUploading, setIsUploading] = useState(false);
   const [status, setStatus] = useState("Add a title, pick a video, then upload.");
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -242,97 +241,86 @@ export default function HomeScreen() {
 
   return (
     <ThemedView style={styles.screen}>
-      <ScrollView
-        contentContainerStyle={[
-          styles.scrollContent,
-          {
-            paddingTop: insets.top + 10,
-            paddingBottom: insets.bottom + 110,
-          },
-        ]}
+      <TabPageScrollLayout
+        containerStyle={styles.container}
       >
-        <ThemedView style={styles.container}>
-          <Image
-            source={require("../../assets/images/upload-logo.png")}
-            contentFit="contain"
-            style={styles.uploadLogo}
+        <TabPageLogo
+          source={require("../../assets/images/upload-logo.png")}
+          width={276}
+          height={102}
+        />
+
+        <ThemedView style={styles.inputWrap}>
+          <ThemedText type="defaultSemiBold">Title</ThemedText>
+          <TextInput
+            value={title}
+            onChangeText={setTitle}
+            placeholder="Give your video a title"
+            autoCapitalize="sentences"
+            maxLength={120}
+            style={styles.input}
           />
-
-          <ThemedView style={styles.inputWrap}>
-            <ThemedText type="defaultSemiBold">Title</ThemedText>
-            <TextInput
-              value={title}
-              onChangeText={setTitle}
-              placeholder="Give your video a title"
-              autoCapitalize="sentences"
-              maxLength={120}
-              style={styles.input}
-            />
-          </ThemedView>
-
-          <Pressable
-            disabled={isUploading || (Boolean(selectedVideo) && !title.trim())}
-            onPress={selectedVideo ? handleUpload : handlePickVideo}
-            style={({ pressed }) => [
-              styles.button,
-              pressed && !isUploading && (!selectedVideo || title.trim())
-                ? styles.buttonPressed
-                : undefined,
-              isUploading || (Boolean(selectedVideo) && !title.trim())
-                ? styles.buttonDisabled
-                : undefined,
-            ]}
-          >
-            <ThemedText type="defaultSemiBold">
-              {isUploading
-                ? "Uploading..."
-                : selectedVideo
-                  ? "Upload selected video"
-                  : "Pick a video"}
-            </ThemedText>
-          </Pressable>
-
-          {selectedVideo ? (
-            <SelectedVideoThumbnail
-              uri={selectedVideo.uri}
-              disabled={isUploading}
-              onClear={() => {
-                setSelectedVideo(null);
-                setUploadProgress(0);
-                setStatus("Video selection cleared.");
-              }}
-            />
-          ) : null}
-
-          <ThemedView style={styles.statusCard}>
-            <ThemedText type="defaultSemiBold">Status</ThemedText>
-            {uploadComplete ? (
-              <View style={styles.doneBadge}>
-                <Image
-                  source={require("../../assets/images/robo-kirbutt.png")}
-                  contentFit="contain"
-                  style={styles.doneBadgeIcon}
-                />
-                <ThemedText style={styles.doneBadgeText}>
-                  Upload complete{moderationPending ? " - moderation in progress" : ""}
-                </ThemedText>
-              </View>
-            ) : null}
-            {isUploading || moderationPending ? (
-              <UploadLoadingIndicator
-                isActive={isUploading || moderationPending}
-                status={status}
-                progress={uploadProgress}
-              />
-            ) : (
-              <ThemedText>{status}</ThemedText>
-            )}
-            {lastUploadId ? (
-              <ThemedText>Last upload ID: {lastUploadId}</ThemedText>
-            ) : null}
-          </ThemedView>
         </ThemedView>
-      </ScrollView>
+
+        <Pressable
+          disabled={isUploading || (Boolean(selectedVideo) && !title.trim())}
+          onPress={selectedVideo ? handleUpload : handlePickVideo}
+          style={({ pressed }) => [
+            styles.button,
+            pressed && !isUploading && (!selectedVideo || title.trim())
+              ? styles.buttonPressed
+              : undefined,
+            isUploading || (Boolean(selectedVideo) && !title.trim())
+              ? styles.buttonDisabled
+              : undefined,
+          ]}
+        >
+          <ThemedText type="defaultSemiBold">
+            {isUploading
+              ? "Uploading..."
+              : selectedVideo
+                ? "Upload selected video"
+                : "Pick a video"}
+          </ThemedText>
+        </Pressable>
+
+        {selectedVideo ? (
+          <SelectedVideoThumbnail
+            uri={selectedVideo.uri}
+            disabled={isUploading}
+            onClear={() => {
+              setSelectedVideo(null);
+              setUploadProgress(0);
+              setStatus("Video selection cleared.");
+            }}
+          />
+        ) : null}
+
+        <ThemedView style={styles.statusCard}>
+          <ThemedText type="defaultSemiBold">Status</ThemedText>
+          {uploadComplete ? (
+            <View style={styles.doneBadge}>
+              <Image
+                source={require("../../assets/images/app-icon.png")}
+                contentFit="contain"
+                style={styles.doneBadgeIcon}
+              />
+              <ThemedText style={styles.doneBadgeText}>
+                Upload complete{moderationPending ? " - moderation in progress" : ""}
+              </ThemedText>
+            </View>
+          ) : null}
+          {isUploading || moderationPending ? (
+            <UploadLoadingIndicator
+              isActive={isUploading || moderationPending}
+              status={status}
+              progress={uploadProgress}
+            />
+          ) : (
+            <ThemedText>{status}</ThemedText>
+          )}
+        </ThemedView>
+      </TabPageScrollLayout>
     </ThemedView>
   );
 }
@@ -341,21 +329,8 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
   },
-  scrollContent: {
-    paddingHorizontal: 20,
-  },
   container: {
     gap: 14,
-    width: "100%",
-    maxWidth: 760,
-    alignSelf: "center",
-  },
-  uploadLogo: {
-    width: 240,
-    height: 88,
-    alignSelf: "flex-start",
-    marginLeft: -70,
-    transform: [{ scale: 1.15 }],
   },
   button: {
     borderRadius: 12,

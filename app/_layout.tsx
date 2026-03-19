@@ -34,7 +34,6 @@ export default function RootLayout() {
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="modal" options={{ presentation: "modal" }} />
-            <Stack.Screen name="category/[category]" />
             <Stack.Screen name="search/[query]" />
             <Stack.Screen name="video/[muxAssetId]" />
             <Stack.Screen name="sign-in" />
