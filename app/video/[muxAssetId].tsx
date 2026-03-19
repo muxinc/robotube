@@ -3,10 +3,12 @@ import { useQuery } from "convex/react";
 import { StatusBar } from "expo-status-bar";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
   FlatList,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -82,6 +84,165 @@ function FullVideoPlayer({
       allowsVideoFrameAnalysis={false}
       style={styles.video}
     />
+  );
+}
+
+function DraggableSheetModal({
+  visible,
+  title,
+  subtitle,
+  closeAccessibilityLabel,
+  playerSectionHeight,
+  sheetHeight,
+  bottomInset,
+  onClose,
+  children,
+}: {
+  visible: boolean;
+  title: string;
+  subtitle: string;
+  closeAccessibilityLabel: string;
+  playerSectionHeight: number;
+  sheetHeight: number;
+  bottomInset: number;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const translateY = useRef(new Animated.Value(sheetHeight)).current;
+  const isClosingRef = useRef(false);
+
+  const snapOpen = useCallback(() => {
+    translateY.stopAnimation();
+    translateY.setValue(sheetHeight);
+    Animated.spring(translateY, {
+      toValue: 0,
+      damping: 24,
+      stiffness: 260,
+      mass: 0.9,
+      useNativeDriver: true,
+    }).start();
+  }, [sheetHeight, translateY]);
+
+  const snapClosed = useCallback(() => {
+    if (isClosingRef.current) return;
+
+    isClosingRef.current = true;
+    translateY.stopAnimation();
+    Animated.timing(translateY, {
+      toValue: sheetHeight,
+      duration: 180,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      isClosingRef.current = false;
+      if (finished) {
+        onClose();
+      }
+    });
+  }, [onClose, sheetHeight, translateY]);
+
+  const resetPosition = useCallback(() => {
+    translateY.stopAnimation();
+    Animated.spring(translateY, {
+      toValue: 0,
+      damping: 24,
+      stiffness: 260,
+      mass: 0.9,
+      useNativeDriver: true,
+    }).start();
+  }, [translateY]);
+
+  useEffect(() => {
+    if (!visible) return;
+    snapOpen();
+  }, [snapOpen, visible]);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponderCapture: () => true,
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: (_, gestureState) =>
+          gestureState.dy > 4 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+        onMoveShouldSetPanResponder: (_, gestureState) =>
+          gestureState.dy > 4 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+        onPanResponderGrant: () => {
+          translateY.stopAnimation();
+        },
+        onPanResponderMove: (_, gestureState) => {
+          translateY.setValue(Math.max(0, gestureState.dy));
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          const shouldClose =
+            gestureState.dy > Math.min(120, sheetHeight * 0.2) || gestureState.vy > 1;
+
+          if (shouldClose) {
+            snapClosed();
+            return;
+          }
+
+          resetPosition();
+        },
+        onPanResponderTerminate: () => {
+          resetPosition();
+        },
+      }),
+    [resetPosition, sheetHeight, snapClosed, translateY],
+  );
+
+  if (!visible) {
+    return null;
+  }
+
+  return (
+    <Modal
+      transparent
+      animationType="fade"
+      presentationStyle="overFullScreen"
+      statusBarTranslucent
+      visible={visible}
+      onRequestClose={snapClosed}
+    >
+      <View style={styles.sheetOverlay}>
+        <Pressable
+          style={[styles.sheetBackdrop, { height: playerSectionHeight }]}
+          onPress={snapClosed}
+        />
+        <Animated.View
+          style={[
+            styles.sheetCard,
+            {
+              height: sheetHeight,
+              paddingBottom: bottomInset,
+              transform: [{ translateY }],
+            },
+          ]}
+        >
+          <View style={styles.sheetHeader}>
+            <View style={styles.sheetDragArea} {...panResponder.panHandlers}>
+              <View style={styles.sheetHandle} />
+              <View style={styles.sheetHeadingBlock}>
+                <Text style={styles.sheetTitle}>{title}</Text>
+                <Text style={styles.sheetVideoTitle}>{subtitle}</Text>
+              </View>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={closeAccessibilityLabel}
+              onPress={snapClosed}
+              style={({ pressed }) => [
+                styles.sheetCloseButton,
+                styles.sheetCloseButtonFloating,
+                pressed && styles.sheetCloseButtonPressed,
+              ]}
+            >
+              <Ionicons name="close" size={20} color="#162033" />
+            </Pressable>
+          </View>
+
+          {children}
+        </Animated.View>
+      </View>
+    </Modal>
   );
 }
 
@@ -301,158 +462,91 @@ export default function VideoDetailPage() {
         />
       </View>
 
-      <Modal
-        transparent
-        animationType="slide"
-        presentationStyle="overFullScreen"
-        statusBarTranslucent
+      <DraggableSheetModal
         visible={isDetailsSheetVisible}
-        onRequestClose={() => setIsDetailsSheetVisible(false)}
+        title="Description"
+        subtitle={selectedVideo.title}
+        closeAccessibilityLabel="Close video details"
+        playerSectionHeight={playerSectionHeight}
+        sheetHeight={sheetHeight}
+        bottomInset={Math.max(insets.bottom, 18)}
+        onClose={() => setIsDetailsSheetVisible(false)}
       >
-        <View style={styles.sheetOverlay}>
-          <Pressable
-            style={[styles.sheetBackdrop, { height: playerSectionHeight }]}
-            onPress={() => setIsDetailsSheetVisible(false)}
-          />
-          <View
-            style={[
-              styles.sheetCard,
-              {
-                height: sheetHeight,
-                paddingBottom: Math.max(insets.bottom, 18),
-              },
-            ]}
-          >
-            <View style={styles.sheetHandle} />
-            <View style={styles.sheetHeader}>
-              <View style={styles.sheetHeadingBlock}>
-                <Text style={styles.sheetTitle}>Description</Text>
-                <Text style={styles.sheetVideoTitle}>{selectedVideo.title}</Text>
-              </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Close video details"
-                onPress={() => setIsDetailsSheetVisible(false)}
-                style={({ pressed }) => [
-                  styles.sheetCloseButton,
-                  pressed && styles.sheetCloseButtonPressed,
-                ]}
-              >
-                <Ionicons name="close" size={20} color="#162033" />
-              </Pressable>
-            </View>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.sheetContent}
+        >
+          <Text style={styles.sheetMeta}>
+            {selectedVideo.channelName} · {formatPublished(selectedVideo.createdAtMs)}
+          </Text>
+          <Text style={summary ? styles.sheetSummary : styles.summaryPending}>
+            {summaryPreview}
+          </Text>
 
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={styles.sheetContent}
-            >
-              <Text style={styles.sheetMeta}>
-                {selectedVideo.channelName} · {formatPublished(selectedVideo.createdAtMs)}
-              </Text>
-              <Text style={summary ? styles.sheetSummary : styles.summaryPending}>
-                {summaryPreview}
-              </Text>
-
-              {tags.length > 0 ? (
-                <View style={styles.sheetSection}>
-                  <Text style={styles.sheetSectionTitle}>Tags</Text>
-                  <View style={styles.tagsWrap}>
-                    {tags.map((tag) => (
-                      <View key={`${selectedVideo.muxAssetId}-${tag}`} style={styles.tagPill}>
-                        <Text style={styles.tagText}>#{tag}</Text>
-                      </View>
-                    ))}
+          {tags.length > 0 ? (
+            <View style={styles.sheetSection}>
+              <Text style={styles.sheetSectionTitle}>Tags</Text>
+              <View style={styles.tagsWrap}>
+                {tags.map((tag) => (
+                  <View key={`${selectedVideo.muxAssetId}-${tag}`} style={styles.tagPill}>
+                    <Text style={styles.tagText}>#{tag}</Text>
                   </View>
-                </View>
-              ) : null}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        transparent
-        animationType="slide"
-        presentationStyle="overFullScreen"
-        statusBarTranslucent
-        visible={isChaptersSheetVisible}
-        onRequestClose={() => setIsChaptersSheetVisible(false)}
-      >
-        <View style={styles.sheetOverlay}>
-          <Pressable
-            style={[styles.sheetBackdrop, { height: playerSectionHeight }]}
-            onPress={() => setIsChaptersSheetVisible(false)}
-          />
-          <View
-            style={[
-              styles.sheetCard,
-              {
-                height: sheetHeight,
-                paddingBottom: Math.max(insets.bottom, 18),
-              },
-            ]}
-          >
-            <View style={styles.sheetHandle} />
-            <View style={styles.sheetHeader}>
-              <View style={styles.sheetHeadingBlock}>
-                <Text style={styles.sheetTitle}>Chapters</Text>
-                <Text style={styles.sheetVideoTitle}>{selectedVideo.title}</Text>
+                ))}
               </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Close video chapters"
-                onPress={() => setIsChaptersSheetVisible(false)}
-                style={({ pressed }) => [
-                  styles.sheetCloseButton,
-                  pressed && styles.sheetCloseButtonPressed,
-                ]}
+            </View>
+          ) : null}
+        </ScrollView>
+      </DraggableSheetModal>
+
+      <DraggableSheetModal
+        visible={isChaptersSheetVisible}
+        title="Chapters"
+        subtitle={selectedVideo.title}
+        closeAccessibilityLabel="Close video chapters"
+        playerSectionHeight={playerSectionHeight}
+        sheetHeight={sheetHeight}
+        bottomInset={Math.max(insets.bottom, 18)}
+        onClose={() => setIsChaptersSheetVisible(false)}
+      >
+        <View style={styles.chapterSheetBody}>
+          {chapters.length > 0 ? (
+            <View style={styles.chapterSheetCard}>
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.chapterSheetScrollContent}
               >
-                <Ionicons name="close" size={20} color="#162033" />
-              </Pressable>
-            </View>
+                {chapters.map((chapter) => {
+                  const isActive = activeChapterStartTime === chapter.startTime;
+                  const timeLabel = formatDuration(chapter.startTime) ?? "0:00";
 
-            <View style={styles.chapterSheetBody}>
-              {chapters.length > 0 ? (
-                <View style={styles.chapterSheetCard}>
-                  <ScrollView
-                    showsVerticalScrollIndicator={false}
-                    contentContainerStyle={styles.chapterSheetScrollContent}
-                  >
-                    {chapters.map((chapter) => {
-                      const isActive = activeChapterStartTime === chapter.startTime;
-                      const timeLabel = formatDuration(chapter.startTime) ?? "0:00";
-
-                      return (
-                        <Pressable
-                          key={`${selectedVideo.muxAssetId}-${chapter.startTime}-${chapter.title}`}
-                          onPress={() => {
-                            setSeekToSeconds(chapter.startTime);
-                            setIsChaptersSheetVisible(false);
-                          }}
-                          style={({ pressed }) => [
-                            styles.chapterRow,
-                            isActive && styles.chapterRowActive,
-                            pressed && styles.chapterRowPressed,
-                          ]}
-                        >
-                          <Text style={styles.chapterTime}>{timeLabel}</Text>
-                          <Text style={styles.chapterLabel}>{chapter.title}</Text>
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
-                </View>
-              ) : (
-                <View style={styles.chapterSheetEmptyState}>
-                  <Text style={styles.summaryPending}>
-                    Chapters are still being generated for this video.
-                  </Text>
-                </View>
-              )}
+                  return (
+                    <Pressable
+                      key={`${selectedVideo.muxAssetId}-${chapter.startTime}-${chapter.title}`}
+                      onPress={() => {
+                        setSeekToSeconds(chapter.startTime);
+                      }}
+                      style={({ pressed }) => [
+                        styles.chapterRow,
+                        isActive && styles.chapterRowActive,
+                        pressed && styles.chapterRowPressed,
+                      ]}
+                    >
+                      <Text style={styles.chapterTime}>{timeLabel}</Text>
+                      <Text style={styles.chapterLabel}>{chapter.title}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
             </View>
-          </View>
+          ) : (
+            <View style={styles.chapterSheetEmptyState}>
+              <Text style={styles.summaryPending}>
+                Chapters are still being generated for this video.
+              </Text>
+            </View>
+          )}
         </View>
-      </Modal>
+      </DraggableSheetModal>
     </View>
   );
 }
@@ -639,17 +733,18 @@ const styles = StyleSheet.create({
     alignSelf: "center",
   },
   sheetHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
+    position: "relative",
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 10,
   },
+  sheetDragArea: {
+    width: "100%",
+    minHeight: 56,
+  },
   sheetHeadingBlock: {
-    flex: 1,
-    paddingRight: 12,
     gap: 4,
+    paddingRight: 52,
   },
   sheetTitle: {
     fontSize: 18,
@@ -669,6 +764,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#F3F6FB",
+  },
+  sheetCloseButtonFloating: {
+    position: "absolute",
+    top: 12,
+    right: 16,
   },
   sheetCloseButtonPressed: {
     opacity: 0.8,
