@@ -75,7 +75,7 @@ export function UploadLoadingIndicator({
         ]}
       >
         <Image
-          source={require("../assets/images/react-logo.png")}
+          source={require("../assets/images/app-icon.png")}
           contentFit="contain"
           style={styles.icon}
         />

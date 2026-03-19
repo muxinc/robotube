@@ -13,7 +13,9 @@
       "bundleIdentifier": "com.muxinc.robotube",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSPhotoLibraryUsageDescription": "Allow Robotube to access your photos so you can upload videos."
+        "NSPhotoLibraryUsageDescription": "Allow Robotube to access your photos so you can upload videos.",
+        "NSCameraUsageDescription": "Allow Robotube to record videos you want to upload.",
+        "NSMicrophoneUsageDescription": "Allow Robotube to record audio with your videos."
       }
     },
     "android": {
@@ -46,7 +48,9 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Robotube to access your photos so you can upload videos."
+          "photosPermission": "Allow Robotube to access your photos so you can upload videos.",
+          "cameraPermission": "Allow Robotube to record videos you want to upload.",
+          "microphonePermission": "Allow Robotube to record audio with your videos."
         }
       ],
       "expo-secure-store",

@@ -25,10 +25,12 @@ import { UploadLoadingIndicator } from "@/components/upload-loading-indicator";
 
 function SelectedVideoThumbnail({
   uri,
+  sourceLabel,
   onClear,
   disabled,
 }: {
   uri: string;
+  sourceLabel: string;
   onClear: () => void;
   disabled?: boolean;
 }) {
@@ -60,7 +62,7 @@ function SelectedVideoThumbnail({
           <Ionicons name="close" size={16} color="#FFFFFF" />
         </Pressable>
       </View>
-      <ThemedText style={styles.selectedVideoLabel}>Selected video ready</ThemedText>
+      <ThemedText style={styles.selectedVideoLabel}>{sourceLabel}</ThemedText>
     </View>
   );
 }
@@ -70,13 +72,14 @@ export default function HomeScreen() {
     (api as any).uploads.createMuxDirectUpload,
   );
   const [isUploading, setIsUploading] = useState(false);
-  const [status, setStatus] = useState("Add a title, pick a video, then upload.");
+  const [status, setStatus] = useState("Add a title, record or pick a video, then upload.");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [lastUploadId, setLastUploadId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [selectedVideo, setSelectedVideo] = useState<{
     uri: string;
     mimeType: string | null;
+    source: "library" | "camera";
   } | null>(null);
   const moderationStatus = useQuery(
     (api as any).uploadStatus.getUploadModerationStatus,
@@ -113,6 +116,34 @@ export default function HomeScreen() {
     setUploadProgress(moderationStatus.progress);
   }, [isUploading, lastUploadId, moderationStatus]);
 
+  const handleSelectedAsset = ({
+    uri,
+    mimeType,
+    source,
+  }: {
+    uri: string;
+    mimeType: string | null;
+    source: "library" | "camera";
+  }) => {
+    if (!uri.startsWith("file://")) {
+      throw new Error(
+        "Selected video is not accessible as a local file. Please try another video.",
+      );
+    }
+
+    setSelectedVideo({
+      uri,
+      mimeType,
+      source,
+    });
+    setStatus(
+      source === "camera"
+        ? "Recorded video ready to upload."
+        : "Video selected. Ready to upload.",
+    );
+    setUploadProgress(0);
+  };
+
   const handlePickVideo = async () => {
     try {
       const permission =
@@ -136,24 +167,18 @@ export default function HomeScreen() {
       });
 
       if (picked.canceled || picked.assets.length === 0) {
-        setStatus("No video selected.");
-        setSelectedVideo(null);
+        if (!selectedVideo) {
+          setStatus("No video selected.");
+        }
         return;
       }
 
       const asset = picked.assets[0];
-      if (!asset.uri.startsWith("file://")) {
-        throw new Error(
-          "Selected video is not accessible as a local file. Please try another video.",
-        );
-      }
-
-      setSelectedVideo({
+      handleSelectedAsset({
         uri: asset.uri,
         mimeType: asset.mimeType ?? null,
+        source: "library",
       });
-      setStatus("Video selected. Ready to upload.");
-      setUploadProgress(0);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not select video";
       const isICloudDownloadError =
@@ -167,6 +192,46 @@ export default function HomeScreen() {
     }
   };
 
+  const handleRecordVideo = async () => {
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        setStatus("Camera permission is required.");
+        Alert.alert(
+          "Permission Required",
+          "Enable Camera access to record and upload a video.",
+        );
+        return;
+      }
+
+      const recorded = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["videos"],
+        allowsEditing: false,
+        quality: 1,
+        videoQuality: ImagePicker.UIImagePickerControllerQualityType.High,
+        cameraType: ImagePicker.CameraType.back,
+      });
+
+      if (recorded.canceled || recorded.assets.length === 0) {
+        if (!selectedVideo) {
+          setStatus("Recording canceled.");
+        }
+        return;
+      }
+
+      const asset = recorded.assets[0];
+      handleSelectedAsset({
+        uri: asset.uri,
+        mimeType: asset.mimeType ?? null,
+        source: "camera",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not record video";
+      setStatus(`Recording failed: ${message}`);
+      Alert.alert("Video Recording Failed", message);
+    }
+  };
+
   const handleUpload = async () => {
     if (!title.trim()) {
       setStatus("A title is required before upload.");
@@ -175,8 +240,8 @@ export default function HomeScreen() {
     }
 
     if (!selectedVideo) {
-      setStatus("Pick a video before uploading.");
-      Alert.alert("Video Required", "Please pick a video before uploading.");
+      setStatus("Record or pick a video before uploading.");
+      Alert.alert("Video Required", "Please record or pick a video before uploading.");
       return;
     }
 
@@ -262,31 +327,60 @@ export default function HomeScreen() {
           />
         </ThemedView>
 
+        <View style={styles.mediaActions}>
+          <Pressable
+            disabled={isUploading}
+            onPress={handleRecordVideo}
+            style={({ pressed }) => [
+              styles.mediaActionButton,
+              pressed && !isUploading ? styles.buttonPressed : undefined,
+              isUploading ? styles.buttonDisabled : undefined,
+            ]}
+          >
+            <Ionicons name="videocam" size={18} color="#1E4F89" />
+            <ThemedText type="defaultSemiBold">Record video</ThemedText>
+          </Pressable>
+
+          <Pressable
+            disabled={isUploading}
+            onPress={handlePickVideo}
+            style={({ pressed }) => [
+              styles.mediaActionButton,
+              pressed && !isUploading ? styles.buttonPressed : undefined,
+              isUploading ? styles.buttonDisabled : undefined,
+            ]}
+          >
+            <Ionicons name="images" size={18} color="#1E4F89" />
+            <ThemedText type="defaultSemiBold">Pick from library</ThemedText>
+          </Pressable>
+        </View>
+
         <Pressable
-          disabled={isUploading || (Boolean(selectedVideo) && !title.trim())}
-          onPress={selectedVideo ? handleUpload : handlePickVideo}
+          disabled={isUploading || !selectedVideo || !title.trim()}
+          onPress={handleUpload}
           style={({ pressed }) => [
             styles.button,
-            pressed && !isUploading && (!selectedVideo || title.trim())
+            pressed && !isUploading && selectedVideo && title.trim()
               ? styles.buttonPressed
               : undefined,
-            isUploading || (Boolean(selectedVideo) && !title.trim())
+            isUploading || !selectedVideo || !title.trim()
               ? styles.buttonDisabled
               : undefined,
           ]}
         >
           <ThemedText type="defaultSemiBold">
-            {isUploading
-              ? "Uploading..."
-              : selectedVideo
-                ? "Upload selected video"
-                : "Pick a video"}
+            {isUploading ? "Uploading..." : "Upload video"}
           </ThemedText>
         </Pressable>
 
         {selectedVideo ? (
           <SelectedVideoThumbnail
             uri={selectedVideo.uri}
+            sourceLabel={
+              selectedVideo.source === "camera"
+                ? "Recorded video ready"
+                : "Library video ready"
+            }
             disabled={isUploading}
             onClear={() => {
               setSelectedVideo(null);
@@ -331,6 +425,21 @@ const styles = StyleSheet.create({
   },
   container: {
     gap: 14,
+  },
+  mediaActions: {
+    gap: 10,
+  },
+  mediaActionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#B8DCFF",
+    backgroundColor: "#F6FAFF",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
   },
   button: {
     borderRadius: 12,

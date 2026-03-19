@@ -32,4 +32,12 @@ export default defineSchema({
       dimensions: 1536,
       filterFields: ["muxAssetId", "userId"],
     }),
+  videoChatThreads: defineTable({
+    userId: v.string(),
+    muxAssetId: v.string(),
+    threadId: v.string(),
+    createdAtMs: v.number(),
+  })
+    .index("by_user_video", ["userId", "muxAssetId"])
+    .index("by_thread", ["threadId"]),
 });

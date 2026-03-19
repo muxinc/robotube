@@ -1,18 +1,24 @@
-import { Ionicons } from "@expo/vector-icons";
-import { useQuery } from "convex/react";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { useUIMessages } from "@convex-dev/agent/react";
+import { useMutation, useQuery } from "convex/react";
 import { StatusBar } from "expo-status-bar";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Animated,
   FlatList,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useWindowDimensions,
 } from "react-native";
@@ -246,6 +252,172 @@ function DraggableSheetModal({
   );
 }
 
+function getMessageText(message: any) {
+  if (Array.isArray(message?.parts)) {
+    const text = message.parts
+      .map((part: any) => {
+        if (part?.type === "text" && typeof part.text === "string") {
+          return part.text;
+        }
+        return "";
+      })
+      .join("")
+      .trim();
+
+    if (text) {
+      return text;
+    }
+  }
+
+  return typeof message?.content === "string" ? message.content : "";
+}
+
+function VideoAssistantThread({ threadId }: { threadId: string }) {
+  const sendMessage = useMutation((api as any).videoChat.sendMessage);
+  const { results, status, loadMore } = useUIMessages(
+    (api as any).videoChat.listThreadMessages,
+    { threadId },
+    { initialNumItems: 20 },
+  );
+  const scrollRef = useRef<ScrollView | null>(null);
+  const [draft, setDraft] = useState("");
+  const [isSending, setIsSending] = useState(false);
+
+  const scrollToLatestMessage = useCallback((animated = true) => {
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollToEnd({ animated });
+    });
+  }, []);
+
+  useEffect(() => {
+    if (results.length === 0) {
+      return;
+    }
+
+    scrollToLatestMessage(false);
+  }, [results.length, scrollToLatestMessage]);
+
+  const handleSend = useCallback(async () => {
+    const prompt = draft.trim();
+    if (!prompt || isSending) {
+      return;
+    }
+
+    try {
+      setIsSending(true);
+      setDraft("");
+      await sendMessage({ threadId, prompt });
+    } catch (error) {
+      setDraft(prompt);
+      const message =
+        error instanceof Error ? error.message : "Could not send chat message.";
+      Alert.alert("Chat Unavailable", message);
+    } finally {
+      setIsSending(false);
+    }
+  }, [draft, isSending, sendMessage, threadId]);
+
+  return (
+    <View style={styles.chatSheetBody}>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.chatMessagesScroll}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.chatMessagesContent}
+        onContentSizeChange={() => {
+          if (draft.length > 0 || isSending) {
+            scrollToLatestMessage(false);
+          }
+        }}
+      >
+        {status === "CanLoadMore" || status === "LoadingMore" ? (
+          <Pressable
+            onPress={() => loadMore(12)}
+            disabled={status === "LoadingMore"}
+            style={({ pressed }) => [
+              styles.chatLoadMoreButton,
+              pressed && status !== "LoadingMore" ? styles.chapterRowPressed : undefined,
+            ]}
+          >
+            <Text style={styles.chatLoadMoreText}>
+              {status === "LoadingMore" ? "Loading earlier messages..." : "Load earlier messages"}
+            </Text>
+          </Pressable>
+        ) : null}
+
+        {status === "LoadingFirstPage" ? (
+          <View style={styles.chatEmptyState}>
+            <Text style={styles.summaryPending}>Loading chat...</Text>
+          </View>
+        ) : null}
+
+        {results.length === 0 && status !== "LoadingFirstPage" ? (
+          <View style={styles.chatEmptyState}>
+            <Text style={styles.sheetSummary}>
+              Ask about this video and Robotube will reply in this thread.
+            </Text>
+            <Text style={styles.summaryPending}>
+              For now the assistant knows the current video metadata, summary, tags, and chapters.
+            </Text>
+          </View>
+        ) : null}
+
+        {results.map((message: any, index) => {
+          const isUser = message.role === "user";
+          const text = getMessageText(message) || (isUser ? "Sent a message." : "Thinking...");
+
+          return (
+            <View
+              key={message.id ?? `${message.order}-${message.stepOrder}-${index}`}
+              style={[
+                styles.chatBubble,
+                isUser ? styles.chatBubbleUser : styles.chatBubbleAssistant,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.chatBubbleText,
+                  isUser ? styles.chatBubbleTextUser : styles.chatBubbleTextAssistant,
+                ]}
+              >
+                {text}
+              </Text>
+            </View>
+          );
+        })}
+      </ScrollView>
+
+      <View style={styles.chatComposer}>
+        <TextInput
+          value={draft}
+          onChangeText={setDraft}
+          onFocus={() => {
+            scrollToLatestMessage(true);
+          }}
+          placeholder="Ask about this video"
+          multiline
+          maxLength={600}
+          style={styles.chatInput}
+        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Send chat message"
+          disabled={!draft.trim() || isSending}
+          onPress={handleSend}
+          style={({ pressed }) => [
+            styles.chatSendButton,
+            (!draft.trim() || isSending) && styles.chatSendButtonDisabled,
+            pressed && draft.trim() && !isSending ? styles.buttonPressed : undefined,
+          ]}
+        >
+          <Ionicons name="send" size={18} color="#FFFFFF" />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 export default function VideoDetailPage() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -276,6 +448,7 @@ export default function VideoDetailPage() {
       (feedVideos ?? []).filter((video) => video.muxAssetId !== muxAssetId),
     [feedVideos, muxAssetId],
   );
+  const ensureVideoChatThread = useMutation((api as any).videoChat.ensureThreadForVideo);
   const summary = selectedVideo?.summary ?? null;
   const tags = useMemo(() => selectedVideo?.tags ?? [], [selectedVideo?.tags]);
   const previewTags = useMemo(() => tags.slice(0, 3), [tags]);
@@ -284,6 +457,10 @@ export default function VideoDetailPage() {
   const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
   const [isDetailsSheetVisible, setIsDetailsSheetVisible] = useState(false);
   const [isChaptersSheetVisible, setIsChaptersSheetVisible] = useState(false);
+  const [isAssistantSheetVisible, setIsAssistantSheetVisible] = useState(false);
+  const [assistantThreadId, setAssistantThreadId] = useState<string | null>(null);
+  const [isPreparingAssistantThread, setIsPreparingAssistantThread] = useState(false);
+  const [assistantKeyboardHeight, setAssistantKeyboardHeight] = useState(0);
   const summaryPreview = useMemo(
     () => summary ?? "AI summary is being generated for this video.",
     [summary],
@@ -295,6 +472,14 @@ export default function VideoDetailPage() {
   const sheetHeight = useMemo(
     () => Math.max(windowHeight - playerSectionHeight, 240),
     [playerSectionHeight, windowHeight],
+  );
+  const assistantSheetHeight = useMemo(
+    () =>
+      Math.max(
+        sheetHeight - Math.max(0, assistantKeyboardHeight - insets.bottom),
+        260,
+      ),
+    [assistantKeyboardHeight, insets.bottom, sheetHeight],
   );
 
   const activeChapterStartTime = useMemo(() => {
@@ -318,7 +503,64 @@ export default function VideoDetailPage() {
   useEffect(() => {
     setIsDetailsSheetVisible(false);
     setIsChaptersSheetVisible(false);
+    setIsAssistantSheetVisible(false);
+    setAssistantThreadId(null);
+    setIsPreparingAssistantThread(false);
+    setAssistantKeyboardHeight(0);
   }, [selectedVideo?.muxAssetId]);
+
+  useEffect(() => {
+    if (!isAssistantSheetVisible) {
+      setAssistantKeyboardHeight(0);
+      return;
+    }
+
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      setAssistantKeyboardHeight(event.endCoordinates.height);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setAssistantKeyboardHeight(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, [isAssistantSheetVisible]);
+
+  const openAssistantChat = useCallback(async () => {
+    if (!selectedVideo || isPreparingAssistantThread) {
+      return;
+    }
+
+    setIsDetailsSheetVisible(false);
+    setIsChaptersSheetVisible(false);
+    setIsAssistantSheetVisible(true);
+
+    if (assistantThreadId) {
+      return;
+    }
+
+    try {
+      setIsPreparingAssistantThread(true);
+      const result = await ensureVideoChatThread({
+        muxAssetId: selectedVideo.muxAssetId,
+      });
+      setAssistantThreadId(result.threadId);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not start the video assistant chat.";
+      setIsAssistantSheetVisible(false);
+      Alert.alert("Chat Unavailable", message);
+    } finally {
+      setIsPreparingAssistantThread(false);
+    }
+  }, [assistantThreadId, ensureVideoChatThread, isPreparingAssistantThread, selectedVideo]);
 
   if (!muxAssetId) {
     return (
@@ -394,6 +636,23 @@ export default function VideoDetailPage() {
               <View style={styles.metaWrap}>
                 <View style={styles.titleRow}>
                   <Text style={styles.title}>{selectedVideo.title}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Open video assistant chat"
+                    onPress={() => {
+                      void openAssistantChat();
+                    }}
+                    style={({ pressed }) => [
+                      styles.robotIconBadge,
+                      pressed ? styles.chaptersButtonPressed : undefined,
+                    ]}
+                  >
+                    <MaterialCommunityIcons
+                      name="robot-outline"
+                      size={18}
+                      color="#1A2332"
+                    />
+                  </Pressable>
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Open video chapters"
@@ -499,6 +758,35 @@ export default function VideoDetailPage() {
       </DraggableSheetModal>
 
       <DraggableSheetModal
+        visible={isAssistantSheetVisible}
+        title="Ask Robotube"
+        subtitle={selectedVideo.title}
+        closeAccessibilityLabel="Close video assistant"
+        playerSectionHeight={playerSectionHeight}
+        sheetHeight={assistantSheetHeight}
+        bottomInset={Math.max(insets.bottom, 18)}
+        onClose={() => setIsAssistantSheetVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.chatKeyboardAvoider}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={0}
+        >
+          {isPreparingAssistantThread && !assistantThreadId ? (
+            <View style={styles.chatLoadingState}>
+              <Text style={styles.summaryPending}>Starting chat...</Text>
+            </View>
+          ) : assistantThreadId ? (
+            <VideoAssistantThread threadId={assistantThreadId} />
+          ) : (
+            <View style={styles.chatLoadingState}>
+              <Text style={styles.summaryPending}>Chat is unavailable right now.</Text>
+            </View>
+          )}
+        </KeyboardAvoidingView>
+      </DraggableSheetModal>
+
+      <DraggableSheetModal
         visible={isChaptersSheetVisible}
         title="Chapters"
         subtitle={selectedVideo.title}
@@ -594,6 +882,14 @@ const styles = StyleSheet.create({
     color: "#111111",
   },
   chaptersButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F3F6FB",
+  },
+  robotIconBadge: {
     width: 36,
     height: 36,
     borderRadius: 18,
@@ -812,6 +1108,102 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   chapterSheetEmptyState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  chatSheetBody: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 6,
+    gap: 10,
+  },
+  chatKeyboardAvoider: {
+    flex: 1,
+  },
+  chatMessagesScroll: {
+    flex: 1,
+  },
+  chatMessagesContent: {
+    flexGrow: 1,
+    paddingTop: 4,
+    paddingBottom: 8,
+    gap: 10,
+  },
+  chatEmptyState: {
+    gap: 8,
+    paddingVertical: 12,
+  },
+  chatLoadMoreButton: {
+    alignSelf: "center",
+    borderRadius: 999,
+    backgroundColor: "#F3F6FB",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  chatLoadMoreText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#344055",
+  },
+  chatBubble: {
+    maxWidth: "88%",
+    flexShrink: 1,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  chatBubbleUser: {
+    alignSelf: "flex-end",
+    backgroundColor: "#FF33B7",
+  },
+  chatBubbleAssistant: {
+    alignSelf: "flex-start",
+    backgroundColor: "#F3F6FB",
+  },
+  chatBubbleText: {
+    fontSize: 14,
+    lineHeight: 20,
+    flexShrink: 1,
+  },
+  chatBubbleTextUser: {
+    color: "#FFFFFF",
+  },
+  chatBubbleTextAssistant: {
+    color: "#1A2332",
+  },
+  chatComposer: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 10,
+    paddingBottom: 4,
+  },
+  chatInput: {
+    flex: 1,
+    minHeight: 46,
+    maxHeight: 120,
+    borderWidth: 1,
+    borderColor: "#D5DDE8",
+    borderRadius: 18,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: "#1A2332",
+  },
+  chatSendButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1E4F89",
+  },
+  chatSendButtonDisabled: {
+    opacity: 0.45,
+  },
+  chatLoadingState: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
