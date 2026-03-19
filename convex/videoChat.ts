@@ -1,5 +1,5 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { createThread, listUIMessages, saveMessage } from "@convex-dev/agent";
+import { createThread, listMessages, saveMessage, toUIMessages } from "@convex-dev/agent";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 
@@ -105,10 +105,12 @@ export const listThreadMessages = query({
   },
   handler: async (ctx, args) => {
     await getAuthorizedVideoThreadByThreadId(ctx, args.threadId);
-    return await listUIMessages(ctx, (components as any).agent, {
+    const paginated = await listMessages(ctx, (components as any).agent, {
       threadId: args.threadId,
       paginationOpts: args.paginationOpts,
+      excludeToolMessages: true,
     });
+    return { ...paginated, page: toUIMessages(paginated.page) };
   },
 });
 

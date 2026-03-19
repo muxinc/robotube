@@ -1,6 +1,7 @@
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { useUIMessages } from "@convex-dev/agent/react";
 import { useMutation, useQuery } from "convex/react";
+import { Image } from "expo-image";
 import { StatusBar } from "expo-status-bar";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -116,6 +117,7 @@ function DraggableSheetModal({
 }) {
   const translateY = useRef(new Animated.Value(sheetHeight)).current;
   const isClosingRef = useRef(false);
+  const wasVisibleRef = useRef(visible);
 
   const snapOpen = useCallback(() => {
     translateY.stopAnimation();
@@ -158,9 +160,16 @@ function DraggableSheetModal({
   }, [translateY]);
 
   useEffect(() => {
-    if (!visible) return;
-    snapOpen();
-  }, [snapOpen, visible]);
+    if (visible && !wasVisibleRef.current) {
+      snapOpen();
+    }
+
+    if (!visible) {
+      translateY.setValue(sheetHeight);
+    }
+
+    wasVisibleRef.current = visible;
+  }, [sheetHeight, snapOpen, translateY, visible]);
 
   const panResponder = useMemo(
     () =>
@@ -647,10 +656,10 @@ export default function VideoDetailPage() {
                       pressed ? styles.chaptersButtonPressed : undefined,
                     ]}
                   >
-                    <MaterialCommunityIcons
-                      name="robot-outline"
-                      size={18}
-                      color="#1A2332"
+                    <Image
+                      source={require("../../assets/images/app-icon.png")}
+                      contentFit="contain"
+                      style={styles.robotIconImage}
                     />
                   </Pressable>
                   <Pressable
@@ -896,6 +905,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#F3F6FB",
+    overflow: "hidden",
+  },
+  robotIconImage: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
   },
   chaptersButtonDisabled: {
     opacity: 0.45,
