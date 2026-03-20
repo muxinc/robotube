@@ -5,6 +5,17 @@ import { v } from "convex/values";
 import { api, internal } from "./_generated/api";
 import { action } from "./_generated/server";
 
+const SEARCH_SCAN_MULTIPLIER = 4;
+const SEARCH_MIN_SCAN_LIMIT = 48;
+const SEARCH_MAX_SCAN_LIMIT = 120;
+
+function getSearchScanLimit(resultLimit: number) {
+  return Math.max(
+    SEARCH_MIN_SCAN_LIMIT,
+    Math.min(SEARCH_MAX_SCAN_LIMIT, resultLimit * SEARCH_SCAN_MULTIPLIER),
+  );
+}
+
 function requiredEnv(name: string, value: string | undefined): string {
   if (!value) throw new Error(`Missing env var: ${name}`);
   return value;
@@ -97,8 +108,9 @@ export const searchVideos = action({
     const queryTokens = tokenizeSearchText(normalizedQuery);
 
     const limit = Math.max(1, Math.min(20, Math.floor(args.limit ?? 12)));
+    const scanLimit = getSearchScanLimit(limit);
     const feedVideos = (await ctx.runQuery(api.feed.listFeedVideos, {
-      limit: 120,
+      limit: scanLimit,
     })) as any[];
 
     const byAssetId = new Map(feedVideos.map((video) => [video.muxAssetId, video]));

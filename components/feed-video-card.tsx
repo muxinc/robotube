@@ -15,9 +15,36 @@ export type FeedVideoItem = {
   summary: string | null;
   tags: string[];
   chapters: { title: string; startTime: number }[];
+  keyMoments: FeedVideoKeyMoment[];
+  keyMomentsGeneratedAtMs: number | null;
+  keyMomentsUnavailableReason: string | null;
   channelName: string;
   durationSeconds: number | null;
   createdAtMs: number;
+};
+
+export type FeedVideoKeyMomentCue = {
+  startMs: number;
+  endMs: number;
+  text: string;
+};
+
+export type FeedVideoKeyMomentVisualConcept = {
+  concept: string;
+  score: number;
+  rationale: string;
+};
+
+export type FeedVideoKeyMoment = {
+  startMs: number;
+  endMs: number;
+  cues: FeedVideoKeyMomentCue[];
+  overallScore: number | null;
+  title: string | null;
+  audibleNarrative: string | null;
+  notableAudibleConcepts: string[];
+  visualNarrative: string | null;
+  notableVisualConcepts: FeedVideoKeyMomentVisualConcept[];
 };
 
 export function formatDuration(durationSeconds: number | null) {

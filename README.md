@@ -1,3 +1,4 @@
+![app icon](./assets/images/app-icon.png)
 ![robotube logo](./assets/images/robotube-logo.png)
 
 This is a video streaming app built with Expo and React Native.
@@ -41,11 +42,11 @@ Notes:
 
 ## Mux AI features used in this app
 
-Robotube uses [`@mux/ai`](https://www.npmjs.com/package/@mux/ai) with Convex to enrich uploaded videos and power semantic search.
+Robotube uses [`@mux/ai`](https://www.npmjs.com/package/@mux/ai) with Convex to enrich uploaded videos and power semantic search, and it uses the Mux Robots API for video moderation.
 
 - `getSummaryAndTags`: generates AI summary text (`description`) and tags for each ready video.
 - `generateEmbeddings`: generates transcript chunk embeddings used for vector search in Convex.
-- `getModerationScores`: runs moderation checks and updates visibility rules for feed inclusion.
+- `POST /robots/v1/jobs/moderate`: runs moderation checks and updates visibility rules for feed inclusion.
 
 ### How the pipeline works
 
@@ -80,12 +81,15 @@ Note: This app is running stable Expo SDK 55 with React 19.2, and the `<Activity
    ```bash
    EXPO_PUBLIC_CONVEX_URL=https://<your-deployment>.convex.cloud
    ```
+
    ```bash
    EXPO_PUBLIC_CONVEX_SITE_URL=https://<your-conve-site-url>.convex.site
    ```
+
    ```bash
    CONVEX_DEPLOYMENT=dev:<your-convex-deployment>
    ```
+
    You can get this value from your Convex dashboard deployment settings (or from `npx convex dev` output).
 
 3. Start the app

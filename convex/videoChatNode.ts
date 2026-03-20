@@ -41,6 +41,23 @@ type AskQuestionsJob = {
   }[];
 };
 
+function unwrapAskQuestionsJob(payload: unknown): AskQuestionsJob {
+  return ((payload as { data?: AskQuestionsJob } | undefined)?.data ?? payload) as AskQuestionsJob;
+}
+
+function requireAskQuestionsJobId(value: unknown) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error("Mux ask-questions job response did not include an id.");
+  }
+  return value;
+}
+
+function isTerminalAskQuestionsStatus(
+  value: unknown,
+): value is "completed" | "errored" | "cancelled" {
+  return value === "completed" || value === "errored" || value === "cancelled";
+}
+
 function requiredEnv(name: string, value: string | undefined): string {
   if (!value) {
     throw new Error(`Missing env var: ${name}`);
@@ -56,6 +73,15 @@ function createMuxBasicAuthHeader() {
 
 async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function readResponseTextSafe(response: Response) {
+  try {
+    const text = await response.text();
+    return text.trim();
+  } catch {
+    return "";
+  }
 }
 
 function formatAskQuestionsErrors(errors: AskQuestionsJob["errors"]) {
@@ -91,14 +117,18 @@ async function createAskQuestionsJob(args: {
   });
 
   if (!response.ok) {
-    throw new Error(`Mux ask-questions job creation failed (${response.status}).`);
+    const details = await readResponseTextSafe(response);
+    throw new Error(
+      `Mux ask-questions job creation failed (${response.status})${details ? `: ${details}` : ""}.`,
+    );
   }
 
-  return (await response.json()) as AskQuestionsJob;
+  return unwrapAskQuestionsJob(await response.json());
 }
 
 async function getAskQuestionsJob(jobId: string): Promise<AskQuestionsJob> {
-  const response = await fetch(`${MUX_ROBOTS_API_BASE_URL}/jobs/ask-questions/${jobId}`, {
+  const normalizedJobId = requireAskQuestionsJobId(jobId);
+  const response = await fetch(`${MUX_ROBOTS_API_BASE_URL}/jobs/ask-questions/${normalizedJobId}`, {
     method: "GET",
     headers: {
       Authorization: createMuxBasicAuthHeader(),
@@ -106,15 +136,20 @@ async function getAskQuestionsJob(jobId: string): Promise<AskQuestionsJob> {
   });
 
   if (!response.ok) {
-    throw new Error(`Mux ask-questions job lookup failed (${response.status}).`);
+    const details = await readResponseTextSafe(response);
+    throw new Error(
+      `Mux ask-questions job lookup failed (${response.status})${details ? `: ${details}` : ""}.`,
+    );
   }
 
-  return (await response.json()) as AskQuestionsJob;
+  return unwrapAskQuestionsJob(await response.json());
 }
 
 async function waitForAskQuestionsCompletion(jobId: string): Promise<AskQuestionsJob> {
+  const normalizedJobId = requireAskQuestionsJobId(jobId);
+
   for (let attempt = 0; attempt < ASK_QUESTIONS_MAX_POLL_ATTEMPTS; attempt += 1) {
-    const job = await getAskQuestionsJob(jobId);
+    const job = await getAskQuestionsJob(normalizedJobId);
     if (
       job.status === "completed" ||
       job.status === "errored" ||
@@ -186,12 +221,15 @@ function buildVideoAgent(video: VideoContext) {
           title: video.title,
         }),
       });
-      const job = await waitForAskQuestionsCompletion(createdJob.id);
+      const job = isTerminalAskQuestionsStatus(createdJob.status)
+        ? createdJob
+        : await waitForAskQuestionsCompletion(requireAskQuestionsJobId(createdJob.id));
+      const jobId = requireAskQuestionsJobId(job.id);
 
       if (job.status !== "completed") {
         return {
           ok: false,
-          jobId: job.id,
+          jobId,
           status: job.status,
           error: formatAskQuestionsErrors(job.errors),
         };
@@ -201,7 +239,7 @@ function buildVideoAgent(video: VideoContext) {
       if (!answer) {
         return {
           ok: false,
-          jobId: job.id,
+          jobId,
           status: job.status,
           error: "Mux completed the job without returning an answer.",
         };
@@ -209,7 +247,7 @@ function buildVideoAgent(video: VideoContext) {
 
       return {
         ok: true,
-        jobId: job.id,
+        jobId,
         status: job.status,
         question: answer.question,
         answer: answer.answer,
@@ -272,9 +310,10 @@ export const generateResponseAsync = internalAction({
     }
 
     const agent = buildVideoAgent(video);
-    await agent.generateText(ctx, { threadId: args.threadId }, {
+    const generationArgs = {
       promptMessageId: args.promptMessageId,
-    });
+    };
+    await agent.generateText(ctx, { threadId: args.threadId }, generationArgs as any);
 
     return { ok: true };
   },

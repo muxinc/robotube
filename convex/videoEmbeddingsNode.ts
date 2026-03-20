@@ -1,6 +1,5 @@
 "use node";
 
-import { generateEmbeddings } from "@mux/ai/workflows";
 import { v } from "convex/values";
 
 import { components, internal } from "./_generated/api";
@@ -79,6 +78,10 @@ function parseEmbeddingChunks(result: unknown): EmbeddingChunk[] {
   return chunks;
 }
 
+async function loadMuxAiWorkflows() {
+  return await import("@mux/ai/workflows");
+}
+
 export const generateAssetEmbeddingsInternal = internalAction({
   args: {
     muxAssetId: v.string(),
@@ -103,6 +106,7 @@ export const generateAssetEmbeddingsInternal = internalAction({
     }
 
     try {
+      const { generateEmbeddings } = await loadMuxAiWorkflows();
       const result = await generateEmbeddings(args.muxAssetId, {
         provider: "openai",
       });

@@ -1,7 +1,7 @@
 import { FlashList } from "@shopify/flash-list";
 import {Bot} from "lucide-react-native";
 import { useIsFocused } from "@react-navigation/native";
-import { useQuery } from "convex/react";
+import { usePaginatedQuery } from "convex/react";
 import { Image } from "expo-image";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -13,13 +13,25 @@ import {
 import { api } from "@/convex/_generated/api";
 import { useFeedFocusController } from "@/hooks/use-feed-focus-controller";
 
+const INITIAL_FEED_PAGE_SIZE = 16;
+const FEED_LOAD_MORE_COUNT = 12;
+
 export default function HomePage() {
   const insets = useSafeAreaInsets();
   const isTabFocused = useIsFocused();
-  const FEED_LIMIT = 200;
-  const feedVideos = useQuery((api as any).feed.listFeedVideos, {
-    limit: FEED_LIMIT,
-  }) as FeedVideoItem[] | undefined;
+  const {
+    results: feedVideos,
+    status: feedStatus,
+    loadMore,
+  } = usePaginatedQuery(
+    (api as any).feed.listFeedVideosPaginated,
+    {},
+    { initialNumItems: INITIAL_FEED_PAGE_SIZE },
+  ) as {
+    results: FeedVideoItem[];
+    status: "LoadingFirstPage" | "CanLoadMore" | "LoadingMore" | "Exhausted";
+    loadMore: (numItems: number) => void;
+  };
   const {
     focusedIndex,
     isScrollSettling,
@@ -31,6 +43,8 @@ export default function HomePage() {
     onMomentumScrollEnd,
     onScroll,
   } = useFeedFocusController<FeedVideoItem>();
+  const isFeedLoading = feedStatus === "LoadingFirstPage";
+  const isLoadingMore = feedStatus === "LoadingMore";
 
   return (
     <View style={styles.container}>
@@ -58,7 +72,7 @@ export default function HomePage() {
       </View>
 
       <FlashList
-        data={feedVideos ?? []}
+        data={feedVideos}
         keyExtractor={(item) => item.muxAssetId}
         onViewableItemsChanged={onViewableItemsChanged}
         onScrollBeginDrag={onScrollBeginDrag}
@@ -67,6 +81,12 @@ export default function HomePage() {
         onMomentumScrollEnd={onMomentumScrollEnd}
         onScroll={onScroll}
         scrollEventThrottle={16}
+        onEndReached={() => {
+          if (feedStatus === "CanLoadMore") {
+            loadMore(FEED_LOAD_MORE_COUNT);
+          }
+        }}
+        onEndReachedThreshold={0.6}
         viewabilityConfig={viewabilityConfig}
         renderItem={({ item, index, target }) => {
           const isCellTarget = target === "Cell";
@@ -109,12 +129,23 @@ export default function HomePage() {
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>
-              {feedVideos === undefined ? "Loading feed..." : "No videos yet"}
+              {isFeedLoading ? "Loading feed..." : "No videos yet"}
             </Text>
             <Text style={styles.emptySubtitle}>
               Upload a few videos from the Upload tab and they will show here.
             </Text>
           </View>
+        }
+        ListFooterComponent={
+          isLoadingMore ? (
+            <View style={styles.footerState}>
+              <Text style={styles.footerText}>Loading more videos...</Text>
+            </View>
+          ) : feedVideos.length > 0 && feedStatus === "Exhausted" ? (
+            <View style={styles.footerState}>
+              <Text style={styles.footerText}>You&apos;re all caught up.</Text>
+            </View>
+          ) : null
         }
       />
     </View>
@@ -193,5 +224,14 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 14,
     color: "#666666",
+  },
+  footerState: {
+    paddingVertical: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  footerText: {
+    fontSize: 13,
+    color: "#6B7280",
   },
 });

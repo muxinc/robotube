@@ -4,7 +4,7 @@ import { useMutation, useQuery } from "convex/react";
 import { Image } from "expo-image";
 import { StatusBar } from "expo-status-bar";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useVideoPlayer, VideoView } from "expo-video";
+import { type SubtitleTrack, useVideoPlayer, VideoView } from "expo-video";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -27,11 +27,17 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   FeedVideoCard,
+  type FeedVideoKeyMoment,
+  type FeedVideoKeyMomentCue,
   type FeedVideoItem,
   formatDuration,
   formatPublished,
 } from "@/components/feed-video-card";
 import { api } from "@/convex/_generated/api";
+
+function getPreferredSubtitleTrack(tracks: SubtitleTrack[]) {
+  return tracks.find((track) => track.isDefault || track.autoSelect) ?? tracks[0] ?? null;
+}
 
 function FullVideoPlayer({
   playbackUrl,
@@ -82,6 +88,38 @@ function FullVideoPlayer({
       subscription.remove();
     };
   }, [onTimeUpdate, player]);
+
+  useEffect(() => {
+    const ensureSubtitleTrack = (tracks: SubtitleTrack[]) => {
+      if (player.subtitleTrack || tracks.length === 0) {
+        return;
+      }
+
+      const nextTrack = getPreferredSubtitleTrack(tracks);
+      if (!nextTrack) {
+        return;
+      }
+
+      player.subtitleTrack = nextTrack;
+    };
+
+    ensureSubtitleTrack(player.availableSubtitleTracks);
+
+    const sourceLoadSubscription = player.addListener("sourceLoad", (event) => {
+      ensureSubtitleTrack(event.availableSubtitleTracks);
+    });
+    const availableSubtitleTracksSubscription = player.addListener(
+      "availableSubtitleTracksChange",
+      (event) => {
+        ensureSubtitleTrack(event.availableSubtitleTracks);
+      },
+    );
+
+    return () => {
+      sourceLoadSubscription.remove();
+      availableSubtitleTracksSubscription.remove();
+    };
+  }, [player]);
 
   return (
     <VideoView
@@ -281,6 +319,27 @@ function getMessageText(message: any) {
   return typeof message?.content === "string" ? message.content : "";
 }
 
+function formatMomentRange(startMs: number, endMs: number) {
+  const startLabel = formatDuration(startMs / 1000) ?? "0:00";
+  const endLabel = formatDuration(endMs / 1000) ?? startLabel;
+  return `${startLabel} - ${endLabel}`;
+}
+
+function getCuePreview(cues: FeedVideoKeyMomentCue[] | undefined) {
+  if (!cues || cues.length === 0) {
+    return null;
+  }
+
+  const text = cues
+    .map((cue) => cue.text?.trim())
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return text.length > 0 ? text : null;
+}
+
 function VideoAssistantThread({ threadId }: { threadId: string }) {
   const sendMessage = useMutation((api as any).videoChat.sendMessage);
   const { results, status, loadMore } = useUIMessages(
@@ -420,7 +479,7 @@ function VideoAssistantThread({ threadId }: { threadId: string }) {
             pressed && draft.trim() && !isSending ? styles.buttonPressed : undefined,
           ]}
         >
-          <Ionicons name="send" size={18} color="#FFFFFF" />
+          <Ionicons name="arrow-up" size={18} color="#FFFFFF" />
         </Pressable>
       </View>
     </View>
@@ -462,16 +521,18 @@ export default function VideoDetailPage() {
   const tags = useMemo(() => selectedVideo?.tags ?? [], [selectedVideo?.tags]);
   const previewTags = useMemo(() => tags.slice(0, 3), [tags]);
   const chapters = useMemo(() => selectedVideo?.chapters ?? [], [selectedVideo?.chapters]);
+  const keyMoments = useMemo(() => selectedVideo?.keyMoments ?? [], [selectedVideo?.keyMoments]);
   const [seekToSeconds, setSeekToSeconds] = useState<number | null>(null);
   const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
   const [isDetailsSheetVisible, setIsDetailsSheetVisible] = useState(false);
+  const [isKeyMomentsSheetVisible, setIsKeyMomentsSheetVisible] = useState(false);
   const [isChaptersSheetVisible, setIsChaptersSheetVisible] = useState(false);
   const [isAssistantSheetVisible, setIsAssistantSheetVisible] = useState(false);
   const [assistantThreadId, setAssistantThreadId] = useState<string | null>(null);
   const [isPreparingAssistantThread, setIsPreparingAssistantThread] = useState(false);
   const [assistantKeyboardHeight, setAssistantKeyboardHeight] = useState(0);
   const summaryPreview = useMemo(
-    () => summary ?? "AI summary is being generated for this video.",
+    () => summary ?? "AI summary is not ready yet for this video.",
     [summary],
   );
   const playerSectionHeight = useMemo(
@@ -511,6 +572,7 @@ export default function VideoDetailPage() {
 
   useEffect(() => {
     setIsDetailsSheetVisible(false);
+    setIsKeyMomentsSheetVisible(false);
     setIsChaptersSheetVisible(false);
     setIsAssistantSheetVisible(false);
     setAssistantThreadId(null);
@@ -546,6 +608,7 @@ export default function VideoDetailPage() {
     }
 
     setIsDetailsSheetVisible(false);
+    setIsKeyMomentsSheetVisible(false);
     setIsChaptersSheetVisible(false);
     setIsAssistantSheetVisible(true);
 
@@ -570,6 +633,13 @@ export default function VideoDetailPage() {
       setIsPreparingAssistantThread(false);
     }
   }, [assistantThreadId, ensureVideoChatThread, isPreparingAssistantThread, selectedVideo]);
+
+  const openKeyMomentsSheet = useCallback(() => {
+    setIsDetailsSheetVisible(false);
+    setIsChaptersSheetVisible(false);
+    setIsAssistantSheetVisible(false);
+    setIsKeyMomentsSheetVisible(true);
+  }, []);
 
   if (!muxAssetId) {
     return (
@@ -647,11 +717,23 @@ export default function VideoDetailPage() {
                   <Text style={styles.title}>{selectedVideo.title}</Text>
                   <Pressable
                     accessibilityRole="button"
+                    accessibilityLabel="Open key moments"
+                    onPress={openKeyMomentsSheet}
+                    style={({ pressed }) => [
+                      styles.iconPillButton,
+                      pressed ? styles.chaptersButtonPressed : undefined,
+                    ]}
+                  >
+                    <Ionicons name="key-outline" size={18} color="#1A2332" />
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
                     accessibilityLabel="Open video assistant chat"
                     onPress={() => {
                       void openAssistantChat();
                     }}
                     style={({ pressed }) => [
+                      styles.iconPillButton,
                       styles.robotIconBadge,
                       pressed ? styles.chaptersButtonPressed : undefined,
                     ]}
@@ -668,10 +750,11 @@ export default function VideoDetailPage() {
                     disabled={chapters.length === 0}
                     onPress={() => {
                       setIsDetailsSheetVisible(false);
+                      setIsKeyMomentsSheetVisible(false);
                       setIsChaptersSheetVisible(true);
                     }}
                     style={({ pressed }) => [
-                      styles.chaptersButton,
+                      styles.iconPillButton,
                       chapters.length === 0 && styles.chaptersButtonDisabled,
                       pressed && chapters.length > 0 && styles.chaptersButtonPressed,
                     ]}
@@ -687,6 +770,7 @@ export default function VideoDetailPage() {
                   accessibilityRole="button"
                   accessibilityLabel="Open video details"
                   onPress={() => {
+                    setIsKeyMomentsSheetVisible(false);
                     setIsChaptersSheetVisible(false);
                     setIsDetailsSheetVisible(true);
                   }}
@@ -767,6 +851,100 @@ export default function VideoDetailPage() {
       </DraggableSheetModal>
 
       <DraggableSheetModal
+        visible={isKeyMomentsSheetVisible}
+        title="Key Moments"
+        subtitle={selectedVideo.title}
+        closeAccessibilityLabel="Close key moments"
+        playerSectionHeight={playerSectionHeight}
+        sheetHeight={sheetHeight}
+        bottomInset={Math.max(insets.bottom, 18)}
+        onClose={() => setIsKeyMomentsSheetVisible(false)}
+      >
+        {selectedVideo.keyMomentsUnavailableReason ? (
+          <View style={styles.keyMomentsState}>
+            <Text style={styles.sheetSummary}>{selectedVideo.keyMomentsUnavailableReason}</Text>
+          </View>
+        ) : keyMoments.length > 0 ? (
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.keyMomentsScrollContent}
+          >
+            {keyMoments.map((moment: FeedVideoKeyMoment, index) => {
+              const cuePreview = getCuePreview(moment.cues);
+              const visualConcepts =
+                moment.notableVisualConcepts.slice(0, 2).map((item) => item.concept) ?? [];
+              const conceptPills = [
+                ...moment.notableAudibleConcepts.slice(0, 3),
+                ...visualConcepts,
+              ].slice(0, 4);
+
+              return (
+                <Pressable
+                  key={`${selectedVideo.muxAssetId}-${moment.startMs}-${index}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Jump to key moment ${index + 1}`}
+                  onPress={() => {
+                    setSeekToSeconds(moment.startMs / 1000);
+                  }}
+                  style={({ pressed }) => [
+                    styles.keyMomentCard,
+                    pressed ? styles.detailsCardPressed : undefined,
+                  ]}
+                >
+                  <View style={styles.keyMomentHeader}>
+                    <Text style={styles.keyMomentTime}>
+                      {formatMomentRange(moment.startMs, moment.endMs)}
+                    </Text>
+                    {typeof moment.overallScore === "number" ? (
+                      <View style={styles.keyMomentScorePill}>
+                        <Text style={styles.keyMomentScoreText}>
+                          {Math.round(moment.overallScore * 100)}%
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.keyMomentTitle}>
+                    {moment.title?.trim() || `Moment ${index + 1}`}
+                  </Text>
+                  {moment.audibleNarrative ? (
+                    <Text style={styles.keyMomentNarrative}>{moment.audibleNarrative}</Text>
+                  ) : null}
+                  {moment.visualNarrative ? (
+                    <Text style={styles.keyMomentVisual}>{moment.visualNarrative}</Text>
+                  ) : null}
+                  {cuePreview ? (
+                    <Text style={styles.keyMomentCuePreview} numberOfLines={3}>
+                      {cuePreview}
+                    </Text>
+                  ) : null}
+                  {conceptPills.length > 0 ? (
+                    <View style={styles.tagsWrap}>
+                      {conceptPills.map((concept) => (
+                        <View
+                          key={`${moment.startMs}-${concept}`}
+                          style={styles.keyMomentConceptPill}
+                        >
+                          <Text style={styles.keyMomentConceptText}>{concept}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        ) : (
+          <View style={styles.keyMomentsState}>
+            <Text style={styles.summaryPending}>
+              {selectedVideo.keyMomentsGeneratedAtMs
+                ? "No key moments were returned for this video."
+                : "Key moments are not ready yet for this video."}
+            </Text>
+          </View>
+        )}
+      </DraggableSheetModal>
+
+      <DraggableSheetModal
         visible={isAssistantSheetVisible}
         title="Ask Robotube"
         subtitle={selectedVideo.title}
@@ -838,7 +1016,7 @@ export default function VideoDetailPage() {
           ) : (
             <View style={styles.chapterSheetEmptyState}>
               <Text style={styles.summaryPending}>
-                Chapters are still being generated for this video.
+                Chapters are not ready yet for this video.
               </Text>
             </View>
           )}
@@ -890,7 +1068,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#111111",
   },
-  chaptersButton: {
+  iconPillButton: {
     width: 36,
     height: 36,
     borderRadius: 18,
@@ -899,12 +1077,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#F3F6FB",
   },
   robotIconBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#F3F6FB",
     overflow: "hidden",
   },
   robotIconImage: {
@@ -916,6 +1088,9 @@ const styles = StyleSheet.create({
     opacity: 0.45,
   },
   chaptersButtonPressed: {
+    opacity: 0.8,
+  },
+  buttonPressed: {
     opacity: 0.8,
   },
   meta: {
@@ -1128,6 +1303,86 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 24,
   },
+  keyMomentsState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    gap: 12,
+  },
+  keyMomentsScrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 6,
+    paddingBottom: 20,
+    gap: 12,
+  },
+  keyMomentCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E5EAF2",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    gap: 10,
+  },
+  keyMomentHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  keyMomentTime: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "700",
+    color: "#3966A8",
+  },
+  keyMomentScorePill: {
+    borderRadius: 999,
+    backgroundColor: "#EEF4FF",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  keyMomentScoreText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "700",
+    color: "#2558A8",
+  },
+  keyMomentTitle: {
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: "800",
+    color: "#121A2A",
+  },
+  keyMomentNarrative: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: "#1A2332",
+  },
+  keyMomentVisual: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#5A6475",
+  },
+  keyMomentCuePreview: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: "#435066",
+  },
+  keyMomentConceptPill: {
+    borderRadius: 999,
+    backgroundColor: "#F3F6FB",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  keyMomentConceptText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "600",
+    color: "#344055",
+  },
   chatSheetBody: {
     flex: 1,
     paddingHorizontal: 16,
@@ -1213,7 +1468,7 @@ const styles = StyleSheet.create({
     borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#1E4F89",
+    backgroundColor: "#FF8FD7",
   },
   chatSendButtonDisabled: {
     opacity: 0.45,

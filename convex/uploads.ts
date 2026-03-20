@@ -4,6 +4,7 @@ import Mux from "@mux/mux-node";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 
+import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-translation-languages";
 import { components, internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
 
@@ -51,6 +52,7 @@ function parseMetadataPassthrough(passthrough: unknown): {
   tags?: string[];
   visibility?: "private" | "unlisted" | "public";
   custom?: Record<string, unknown>;
+  audioTranslationLanguageCodes?: string[];
 } {
   const raw = asString(passthrough);
   if (!raw) return {};
@@ -67,6 +69,9 @@ function parseMetadataPassthrough(passthrough: unknown): {
       tags: asStringArray(parsedObj.tags),
       visibility: asVisibility(parsedObj.visibility),
       custom: asRecord(parsedObj.custom),
+      audioTranslationLanguageCodes: normalizeAudioTranslationLanguageCodes(
+        asStringArray(asRecord(parsedObj.custom)?.audioTranslationLanguageCodes) ?? [],
+      ),
     };
   } catch {
     return { userId: raw };
@@ -86,9 +91,14 @@ function getErrorMessage(error: unknown) {
   return String(error);
 }
 
+function isMuxRobotsPollingDisabled() {
+  return process.env.DISABLE_MUX_ROBOTS_POLLING === "true";
+}
+
 export const createMuxDirectUpload = action({
   args: {
     title: v.optional(v.string()),
+    audioTranslationLanguageCodes: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const authUserId = await getAuthUserId(ctx);
@@ -99,10 +109,17 @@ export const createMuxDirectUpload = action({
     const mux = createMuxClient();
     const userId = authUserId;
     const title = args.title?.trim() || undefined;
+    const audioTranslationLanguageCodes = normalizeAudioTranslationLanguageCodes(
+      args.audioTranslationLanguageCodes ?? [],
+    );
     const passthrough = JSON.stringify({
       userId,
       title,
       visibility: "public",
+      custom:
+        audioTranslationLanguageCodes.length > 0
+          ? { audioTranslationLanguageCodes }
+          : undefined,
     });
 
     const upload = await mux.video.uploads.create({
@@ -184,6 +201,9 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
       await ctx.runMutation(components.mux.sync.upsertAssetFromPayloadPublic, {
         asset: asset as unknown as Record<string, unknown>,
       });
+      await ctx.runMutation((internal as any).muxAssetCache.upsertFromPayloadInternal, {
+        asset,
+      });
 
       const metadata = parseMetadataPassthrough(asset.passthrough);
       const metadataArgs: {
@@ -212,27 +232,33 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
 
       await ctx.runMutation(components.mux.videos.upsertVideoMetadata, metadataArgs);
 
-      if (asString(asset.status) === "ready") {
-        await ctx.scheduler.runAfter(
-          0,
-          (internal as any).captions.ensureGeneratedCaptionsTrackInternal,
-          {
-            muxAssetId,
-            userId: metadataArgs.userId,
-            attempt: 0,
-          },
-        );
+      if (asString(asset.status) !== "ready") {
+        const nextAttempt = attempt + 1;
+        const shouldRetry = nextAttempt < MAX_UPLOAD_SYNC_ATTEMPTS;
+        if (shouldRetry) {
+          await ctx.scheduler.runAfter(
+            getUploadSyncDelayMs(nextAttempt),
+            (internal as any).uploads.syncUploadAssetAndMetadataInternal,
+            {
+              uploadId: args.uploadId,
+              userId: args.userId,
+              title: args.title,
+              attempt: nextAttempt,
+            },
+          );
+        }
 
-        await ctx.scheduler.runAfter(
-          5 * 1000,
-          (internal as any).aiMetadata.generateSummaryAndTagsForAssetInternal,
-          {
-            muxAssetId,
-            userId: metadataArgs.userId,
-            attempt: 0,
-          },
-        );
+        return {
+          ok: false,
+          skipped: true,
+          reason: "asset_processing",
+          retryScheduled: shouldRetry,
+          nextAttempt,
+          muxAssetId,
+        };
+      }
 
+      if (!isMuxRobotsPollingDisabled()) {
         await ctx.scheduler.runAfter(
           0,
           (internal as any).moderation.moderateAssetInternal,

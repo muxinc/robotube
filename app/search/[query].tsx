@@ -11,6 +11,9 @@ import { FeedVideoCard, type FeedVideoItem } from "@/components/feed-video-card"
 import { api } from "@/convex/_generated/api";
 import { useFeedFocusController } from "@/hooks/use-feed-focus-controller";
 
+const INITIAL_SEARCH_LIMIT = 16;
+const SEARCH_LOAD_MORE_COUNT = 12;
+
 function getSingleParam(value: string | string[] | undefined, fallback = "") {
   if (Array.isArray(value)) return value[0] ?? fallback;
   return value ?? fallback;
@@ -24,18 +27,23 @@ export default function SearchResultsPage() {
   const params = useLocalSearchParams<{ query?: string }>();
   const routeQuery = useMemo(() => getSingleParam(params.query).trim(), [params.query]);
   const [inputText, setInputText] = useState(routeQuery);
+  const [resultLimit, setResultLimit] = useState(INITIAL_SEARCH_LIMIT);
+
+  const hasSearchQuery = routeQuery.length >= 2;
 
   const results = useQuery(
     (api as any).searchFast.searchVideosFast,
-    routeQuery.length >= 2
+    hasSearchQuery
       ? {
           queryText: routeQuery,
-          limit: 40,
+          limit: resultLimit,
         }
       : "skip",
   ) as FeedVideoItem[] | undefined;
-  const isSearching = routeQuery.length >= 2 && results === undefined;
+  const isSearching = hasSearchQuery && results === undefined;
   const items = results ?? [];
+  const isLoadingMore = isSearching && resultLimit > INITIAL_SEARCH_LIMIT;
+  const canLoadMore = hasSearchQuery && !isSearching && items.length >= resultLimit;
 
   const {
     focusedIndex,
@@ -50,6 +58,10 @@ export default function SearchResultsPage() {
 
   useEffect(() => {
     setInputText(routeQuery);
+  }, [routeQuery]);
+
+  useEffect(() => {
+    setResultLimit(INITIAL_SEARCH_LIMIT);
   }, [routeQuery]);
 
   const handleSubmitSearch = () => {
@@ -110,6 +122,12 @@ export default function SearchResultsPage() {
         onMomentumScrollBegin={onMomentumScrollBegin}
         onMomentumScrollEnd={onMomentumScrollEnd}
         viewabilityConfig={viewabilityConfig}
+        onEndReached={() => {
+          if (canLoadMore) {
+            setResultLimit((current) => current + SEARCH_LOAD_MORE_COUNT);
+          }
+        }}
+        onEndReachedThreshold={0.6}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{
           paddingTop: 8,
@@ -119,7 +137,7 @@ export default function SearchResultsPage() {
           <View style={styles.resultsHeader}>
             <Text style={styles.resultsTitle}>Results for: {routeQuery}</Text>
             {!isSearching && items.length > 0 ? (
-              <Text style={styles.resultsCount}>{items.length} videos</Text>
+              <Text style={styles.resultsCount}>{items.length} videos shown</Text>
             ) : null}
           </View>
         }
@@ -138,6 +156,17 @@ export default function SearchResultsPage() {
                 : "Try a different keyword or browse categories in Search."}
             </Text>
           </View>
+        }
+        ListFooterComponent={
+          isLoadingMore ? (
+            <View style={styles.footerState}>
+              <Text style={styles.footerText}>Loading more results...</Text>
+            </View>
+          ) : items.length > 0 && !canLoadMore && !isSearching ? (
+            <View style={styles.footerState}>
+              <Text style={styles.footerText}>End of results.</Text>
+            </View>
+          ) : null
         }
         renderItem={({ item, index, target }) => {
           const isCellTarget = target === "Cell";
@@ -234,5 +263,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#666666",
     lineHeight: 20,
+  },
+  footerState: {
+    paddingVertical: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  footerText: {
+    fontSize: 13,
+    color: "#6B7280",
   },
 });

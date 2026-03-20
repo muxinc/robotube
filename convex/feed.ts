@@ -1,8 +1,15 @@
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
+
 import type { Id } from "./_generated/dataModel";
 
 import { components } from "./_generated/api";
 import { internalQuery, query } from "./_generated/server";
+import {
+  type CachedMuxAsset,
+  listRecentReadyCachedMuxAssets,
+  getCachedMuxAssetById,
+} from "./muxAssetCache";
 
 type PlaybackId = {
   id?: string;
@@ -19,6 +26,23 @@ type FeedVideoRow = {
   summary: string | null;
   tags: string[];
   chapters: Array<{ title: string; startTime: number }>;
+  keyMoments: Array<{
+    startMs: number;
+    endMs: number;
+    cues: Array<{ startMs: number; endMs: number; text: string }>;
+    overallScore: number | null;
+    title: string | null;
+    audibleNarrative: string | null;
+    notableAudibleConcepts: string[];
+    visualNarrative: string | null;
+    notableVisualConcepts: Array<{
+      concept: string;
+      score: number;
+      rationale: string;
+    }>;
+  }>;
+  keyMomentsGeneratedAtMs: number | null;
+  keyMomentsUnavailableReason: string | null;
   channelName: string;
   createdAtMs: number;
 };
@@ -33,6 +57,10 @@ type FeedBuildResult =
         | "private_visibility";
     };
 
+const FEED_SCAN_MULTIPLIER = 3;
+const FEED_PAGINATION_SCAN_MULTIPLIER = 1;
+const FEED_PAGINATION_MAX_PAGE_SIZE = 24;
+
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
@@ -40,6 +68,10 @@ function asString(value: unknown): string | null {
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string");
+}
+
+function asNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function asChapterArray(value: unknown): Array<{ title: string; startTime: number }> {
@@ -61,7 +93,71 @@ function asChapterArray(value: unknown): Array<{ title: string; startTime: numbe
     .sort((a, b) => a.startTime - b.startTime);
 }
 
-async function buildFeedVideoRow(ctx: any, asset: any): Promise<FeedBuildResult> {
+function asKeyMomentArray(value: unknown): FeedVideoRow["keyMoments"] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item) => {
+      if (typeof item !== "object" || item === null) {
+        return null;
+      }
+
+      const cues = Array.isArray((item as any).cues)
+        ? (item as any).cues
+            .filter(
+              (cue: unknown) =>
+                typeof cue === "object" &&
+                cue !== null &&
+                asNumber((cue as any).startMs) !== null &&
+                asNumber((cue as any).endMs) !== null &&
+                typeof (cue as any).text === "string",
+            )
+            .map((cue: any) => ({
+              startMs: Math.max(0, asNumber(cue.startMs) ?? 0),
+              endMs: Math.max(0, asNumber(cue.endMs) ?? 0),
+              text: cue.text.trim(),
+            }))
+        : [];
+
+      const notableVisualConcepts = Array.isArray((item as any).notableVisualConcepts)
+        ? (item as any).notableVisualConcepts
+            .filter(
+              (concept: unknown) =>
+                typeof concept === "object" &&
+                concept !== null &&
+                typeof (concept as any).concept === "string",
+            )
+            .map((concept: any) => ({
+              concept: concept.concept.trim(),
+              score: asNumber(concept.score) ?? 0,
+              rationale:
+                typeof concept.rationale === "string" ? concept.rationale.trim() : "",
+            }))
+        : [];
+
+      const startMs = asNumber((item as any).startMs);
+      const endMs = asNumber((item as any).endMs);
+      if (startMs === null || endMs === null) {
+        return null;
+      }
+
+      return {
+        startMs: Math.max(0, startMs),
+        endMs: Math.max(0, endMs),
+        cues,
+        overallScore: asNumber((item as any).overallScore),
+        title: asString((item as any).title),
+        audibleNarrative: asString((item as any).audibleNarrative),
+        notableAudibleConcepts: asStringArray((item as any).notableAudibleConcepts),
+        visualNarrative: asString((item as any).visualNarrative),
+        notableVisualConcepts,
+      };
+    })
+    .filter((item): item is FeedVideoRow["keyMoments"][number] => item !== null)
+    .sort((a, b) => a.startMs - b.startMs);
+}
+
+async function buildFeedVideoRow(ctx: any, asset: CachedMuxAsset): Promise<FeedBuildResult> {
   if (asset.deletedAtMs || asset.status !== "ready") {
     return { row: null, hiddenReason: "not_ready_or_deleted" };
   }
@@ -114,37 +210,81 @@ async function buildFeedVideoRow(ctx: any, asset: any): Promise<FeedBuildResult>
       summary: asString(metadata?.description),
       tags: asStringArray(metadata?.tags),
       chapters: asChapterArray(metadata?.custom?.aiChapters),
+      keyMoments: asKeyMomentArray(metadata?.custom?.aiKeyMoments),
+      keyMomentsGeneratedAtMs: asNumber(metadata?.custom?.aiKeyMomentsGeneratedAtMs),
+      keyMomentsUnavailableReason: asString(metadata?.custom?.aiKeyMomentsUnavailableReason),
       channelName,
       createdAtMs: asset.createdAtMs ?? Date.now(),
     },
   };
 }
 
+async function buildVisibleFeedRows(
+  ctx: any,
+  assets: CachedMuxAsset[],
+  requestedLimit: number,
+) {
+  const rows = await Promise.all(assets.map((asset) => buildFeedVideoRow(ctx, asset)));
+  const visibleRows = rows
+    .flatMap((result) => (result.row ? [result.row] : []))
+    .slice(0, requestedLimit);
+
+  visibleRows.sort((a, b) => b.createdAtMs - a.createdAtMs);
+  return visibleRows;
+}
+
 export const listFeedVideos = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    const assets = await ctx.runQuery(components.mux.catalog.listAssets, {
-      limit: args.limit ?? 25,
-    });
+    const requestedLimit = Math.max(1, Math.floor(args.limit ?? 25));
+    const assets = await listRecentReadyCachedMuxAssets(
+      ctx,
+      requestedLimit * FEED_SCAN_MULTIPLIER,
+    );
 
-    const rows = await Promise.all(assets.map((asset: any) => buildFeedVideoRow(ctx, asset)));
-    const visibleRows = rows.flatMap((result) => (result.row ? [result.row] : []));
-    visibleRows.sort((a, b) => b.createdAtMs - a.createdAtMs);
-    return visibleRows;
+    return await buildVisibleFeedRows(ctx, assets, requestedLimit);
   },
 });
 
 export const listFeedVideosInternal = internalQuery({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    const assets = await ctx.runQuery(components.mux.catalog.listAssets, {
-      limit: args.limit ?? 25,
-    });
+    const requestedLimit = Math.max(1, Math.floor(args.limit ?? 25));
+    const assets = await listRecentReadyCachedMuxAssets(
+      ctx,
+      requestedLimit * FEED_SCAN_MULTIPLIER,
+    );
 
-    const rows = await Promise.all(assets.map((asset: any) => buildFeedVideoRow(ctx, asset)));
-    const visibleRows = rows.flatMap((result) => (result.row ? [result.row] : []));
-    visibleRows.sort((a, b) => b.createdAtMs - a.createdAtMs);
-    return visibleRows;
+    return await buildVisibleFeedRows(ctx, assets, requestedLimit);
+  },
+});
+
+export const listFeedVideosPaginated = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
+    const requestedPageSize = Math.max(
+      1,
+      Math.min(FEED_PAGINATION_MAX_PAGE_SIZE, Math.floor(args.paginationOpts.numItems)),
+    );
+    const paginatedAssets = await (ctx.db as any)
+      .query("muxAssetCache")
+      .withIndex("by_ready_deleted_created", (q: any) =>
+        q.eq("isReady", true).eq("isDeleted", false),
+      )
+      .order("desc")
+      .paginate({
+        ...args.paginationOpts,
+        numItems: requestedPageSize * FEED_PAGINATION_SCAN_MULTIPLIER,
+      });
+
+    return {
+      ...paginatedAssets,
+      page: await buildVisibleFeedRows(
+        ctx,
+        paginatedAssets.page as CachedMuxAsset[],
+        requestedPageSize,
+      ),
+    };
   },
 });
 
@@ -191,9 +331,7 @@ export const getFeedVisibilityDebugStats = query({
 export const getFeedVideoByMuxAssetId = query({
   args: { muxAssetId: v.string() },
   handler: async (ctx, args) => {
-    const asset = await ctx.runQuery(components.mux.catalog.getAssetByMuxId, {
-      muxAssetId: args.muxAssetId,
-    });
+    const asset = await getCachedMuxAssetById(ctx, args.muxAssetId);
     if (!asset) return null;
     const result = await buildFeedVideoRow(ctx, asset);
     return result.row;

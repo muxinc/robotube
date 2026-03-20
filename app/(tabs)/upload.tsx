@@ -16,6 +16,7 @@ import {
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useAction, useQuery } from "convex/react";
 
+import { AUDIO_TRANSLATION_LANGUAGE_OPTIONS } from "@/constants/audio-translation-languages";
 import { api } from "@/convex/_generated/api";
 import { TabPageLogo } from "@/components/tab-page-logo";
 import { TabPageScrollLayout } from "@/components/tab-page-scroll-layout";
@@ -81,6 +82,10 @@ export default function HomeScreen() {
     mimeType: string | null;
     source: "library" | "camera";
   } | null>(null);
+  const [selectedAudioTranslationLanguageCodes, setSelectedAudioTranslationLanguageCodes] =
+    useState<string[]>([]);
+  const [lastRequestedAudioTranslationLanguageCodes, setLastRequestedAudioTranslationLanguageCodes] =
+    useState<string[]>([]);
   const moderationStatus = useQuery(
     (api as any).uploadStatus.getUploadModerationStatus,
     lastUploadId
@@ -246,11 +251,14 @@ export default function HomeScreen() {
     }
 
     try {
+      const requestedLanguageCodes = [...selectedAudioTranslationLanguageCodes];
       setIsUploading(true);
+      setLastRequestedAudioTranslationLanguageCodes(requestedLanguageCodes);
       setUploadProgress(12);
       setStatus("Creating Mux upload URL...");
       const { uploadId, uploadUrl } = await createMuxDirectUpload({
         title: title.trim() || undefined,
+        audioTranslationLanguageCodes: requestedLanguageCodes,
       });
 
       setUploadProgress(32);
@@ -292,7 +300,11 @@ export default function HomeScreen() {
 
       setUploadProgress(100);
       setLastUploadId(uploadId);
-      setStatus("Upload complete. Checking moderation status...");
+      setStatus(
+        requestedLanguageCodes.length > 0
+          ? "Upload complete. Checking moderation and queueing translated audio and subtitle tracks..."
+          : "Upload complete. Checking moderation status...",
+      );
       setSelectedVideo(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed";
@@ -302,6 +314,14 @@ export default function HomeScreen() {
     } finally {
       setIsUploading(false);
     }
+  };
+
+  const toggleAudioTranslationLanguage = (languageCode: string) => {
+    setSelectedAudioTranslationLanguageCodes((current) =>
+      current.includes(languageCode)
+        ? current.filter((code) => code !== languageCode)
+        : [...current, languageCode],
+    );
   };
 
   return (
@@ -327,6 +347,50 @@ export default function HomeScreen() {
           />
         </ThemedView>
 
+        <ThemedView style={styles.inputWrap}>
+          <ThemedText type="defaultSemiBold">Translated audio tracks</ThemedText>
+          <ThemedText style={styles.supportingText}>
+            Select the languages Robotube should prepare after Mux finishes processing the upload.
+            Matching translated subtitle tracks will be added to the player too.
+          </ThemedText>
+          <View style={styles.translationOptions}>
+            {AUDIO_TRANSLATION_LANGUAGE_OPTIONS.map((language) => {
+              const isSelected = selectedAudioTranslationLanguageCodes.includes(language.code);
+
+              return (
+                <Pressable
+                  key={language.code}
+                  disabled={isUploading}
+                  onPress={() => toggleAudioTranslationLanguage(language.code)}
+                  style={({ pressed }) => [
+                    styles.translationOption,
+                    isSelected ? styles.translationOptionActive : undefined,
+                    pressed && !isUploading ? styles.buttonPressed : undefined,
+                    isUploading ? styles.buttonDisabled : undefined,
+                  ]}
+                >
+                  <Ionicons
+                    name={isSelected ? "checkmark-circle" : "ellipse-outline"}
+                    size={16}
+                    color={isSelected ? "#FFFFFF" : "#CC4C99"}
+                  />
+                  <ThemedText
+                    style={[
+                      styles.translationOptionText,
+                      isSelected ? styles.translationOptionTextActive : undefined,
+                    ]}
+                  >
+                    {language.label}
+                  </ThemedText>
+                </Pressable>
+              );
+            })}
+          </View>
+          <ThemedText style={styles.supportingText}>
+            Leave this empty to upload without translated audio tracks.
+          </ThemedText>
+        </ThemedView>
+
         <View style={styles.mediaActions}>
           <Pressable
             disabled={isUploading}
@@ -337,7 +401,7 @@ export default function HomeScreen() {
               isUploading ? styles.buttonDisabled : undefined,
             ]}
           >
-            <Ionicons name="videocam" size={18} color="#1E4F89" />
+            <Ionicons name="videocam" size={18} color="#CC4C99" />
             <ThemedText type="defaultSemiBold">Record video</ThemedText>
           </Pressable>
 
@@ -350,7 +414,7 @@ export default function HomeScreen() {
               isUploading ? styles.buttonDisabled : undefined,
             ]}
           >
-            <Ionicons name="images" size={18} color="#1E4F89" />
+            <Ionicons name="images" size={18} color="#CC4C99" />
             <ThemedText type="defaultSemiBold">Pick from library</ThemedText>
           </Pressable>
         </View>
@@ -404,6 +468,17 @@ export default function HomeScreen() {
               </ThemedText>
             </View>
           ) : null}
+          {lastRequestedAudioTranslationLanguageCodes.length > 0 ? (
+            <ThemedText style={styles.supportingText}>
+              Requested translated audio:{" "}
+              {lastRequestedAudioTranslationLanguageCodes
+                .map((code) =>
+                  AUDIO_TRANSLATION_LANGUAGE_OPTIONS.find((language) => language.code === code)?.label ??
+                  code,
+                )
+                .join(", ")}
+            </ThemedText>
+          ) : null}
           {isUploading || moderationPending ? (
             <UploadLoadingIndicator
               isActive={isUploading || moderationPending}
@@ -429,6 +504,40 @@ const styles = StyleSheet.create({
   mediaActions: {
     gap: 10,
   },
+  supportingText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#5E6C82",
+  },
+  translationOptions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  translationOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#FFC3E8",
+    backgroundColor: "#FFF4FB",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  translationOptionActive: {
+    backgroundColor: "#FF8FD7",
+    borderColor: "#FF8FD7",
+  },
+  translationOptionText: {
+    fontSize: 13,
+    lineHeight: 16,
+    color: "#CC4C99",
+    fontWeight: "600",
+  },
+  translationOptionTextActive: {
+    color: "#FFFFFF",
+  },
   mediaActionButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -436,15 +545,15 @@ const styles = StyleSheet.create({
     gap: 8,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#B8DCFF",
-    backgroundColor: "#F6FAFF",
+    borderColor: "#FFC3E8",
+    backgroundColor: "#FFF4FB",
     paddingVertical: 14,
     paddingHorizontal: 16,
   },
   button: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#4AA8FF",
+    borderColor: "#FF8FD7",
     paddingVertical: 14,
     paddingHorizontal: 16,
     alignItems: "center",
@@ -469,9 +578,9 @@ const styles = StyleSheet.create({
     gap: 8,
     borderRadius: 999,
     alignSelf: "flex-start",
-    backgroundColor: "#EEF8FF",
+    backgroundColor: "#FFF0F9",
     borderWidth: 1,
-    borderColor: "#B8DCFF",
+    borderColor: "#FFC3E8",
     paddingHorizontal: 10,
     paddingVertical: 6,
     marginBottom: 2,
@@ -483,14 +592,14 @@ const styles = StyleSheet.create({
   doneBadgeText: {
     fontSize: 12,
     lineHeight: 16,
-    color: "#1E4F89",
+    color: "#CC4C99",
   },
   selectedVideoCard: {
     borderRadius: 12,
     overflow: "hidden",
     borderWidth: 1,
     borderColor: "#D5DDE8",
-    backgroundColor: "#F6F9FF",
+    backgroundColor: "#FFF7FC",
   },
   selectedVideoFrame: {
     position: "relative",
@@ -521,7 +630,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontSize: 13,
-    color: "#395272",
+    color: "#B24A88",
   },
   inputWrap: {
     gap: 8,

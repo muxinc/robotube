@@ -9,12 +9,20 @@
  */
 
 import type * as aiMetadata from "../aiMetadata.js";
+import type * as aiMetadataLocks from "../aiMetadataLocks.js";
+import type * as audioTranslations from "../audioTranslations.js";
+import type * as audioTranslationsNode from "../audioTranslationsNode.js";
 import type * as auth from "../auth.js";
+import type * as captionTranslations from "../captionTranslations.js";
+import type * as captionTranslationsNode from "../captionTranslationsNode.js";
 import type * as captions from "../captions.js";
 import type * as feed from "../feed.js";
 import type * as http from "../http.js";
+import type * as libraryReset from "../libraryReset.js";
 import type * as migrations from "../migrations.js";
 import type * as moderation from "../moderation.js";
+import type * as moderationLocks from "../moderationLocks.js";
+import type * as muxAssetCache from "../muxAssetCache.js";
 import type * as muxWebhook from "../muxWebhook.js";
 import type * as search from "../search.js";
 import type * as searchFast from "../searchFast.js";
@@ -34,12 +42,20 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   aiMetadata: typeof aiMetadata;
+  aiMetadataLocks: typeof aiMetadataLocks;
+  audioTranslations: typeof audioTranslations;
+  audioTranslationsNode: typeof audioTranslationsNode;
   auth: typeof auth;
+  captionTranslations: typeof captionTranslations;
+  captionTranslationsNode: typeof captionTranslationsNode;
   captions: typeof captions;
   feed: typeof feed;
   http: typeof http;
+  libraryReset: typeof libraryReset;
   migrations: typeof migrations;
   moderation: typeof moderation;
+  moderationLocks: typeof moderationLocks;
+  muxAssetCache: typeof muxAssetCache;
   muxWebhook: typeof muxWebhook;
   search: typeof search;
   searchFast: typeof searchFast;

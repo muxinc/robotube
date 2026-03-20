@@ -3,6 +3,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 
 import { components } from "./_generated/api";
 import { query } from "./_generated/server";
+import { getCachedMuxAssetById } from "./muxAssetCache";
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -21,6 +22,10 @@ function asNumber(value: unknown): number | undefined {
 
 function asBoolean(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
+}
+
+function isMuxRobotsPollingDisabled() {
+  return process.env.DISABLE_MUX_ROBOTS_POLLING === "true";
 }
 
 export const getUploadModerationStatus = query({
@@ -66,9 +71,7 @@ export const getUploadModerationStatus = query({
       };
     }
 
-    const asset = await ctx.runQuery(components.mux.catalog.getAssetByMuxId, {
-      muxAssetId,
-    });
+    const asset = await getCachedMuxAssetById(ctx, muxAssetId);
     const assetRecord = asRecord(asset) ?? {};
     const assetStatus = asString(assetRecord.status) ?? "";
 
@@ -127,6 +130,16 @@ export const getUploadModerationStatus = query({
         passed: null,
         progress: 97,
         statusText: "Processing video... moderation will run as soon as it is ready.",
+      };
+    }
+
+    if (isMuxRobotsPollingDisabled()) {
+      return {
+        stage: "moderation_disabled",
+        done: true,
+        passed: null,
+        progress: 100,
+        statusText: "Video processing is complete. Automated moderation is disabled for this deployment.",
       };
     }
 

@@ -11,6 +11,17 @@ type FastSearchVideo = {
   createdAtMs: number;
 };
 
+const SEARCH_SCAN_MULTIPLIER = 4;
+const SEARCH_MIN_SCAN_LIMIT = 48;
+const SEARCH_MAX_SCAN_LIMIT = 120;
+
+function getSearchScanLimit(resultLimit: number) {
+  return Math.max(
+    SEARCH_MIN_SCAN_LIMIT,
+    Math.min(SEARCH_MAX_SCAN_LIMIT, resultLimit * SEARCH_SCAN_MULTIPLIER),
+  );
+}
+
 function normalizeSearchText(value: string) {
   return value.trim().toLowerCase();
 }
@@ -63,9 +74,10 @@ export const searchVideosFast = query({
 
     const queryTokens = tokenizeSearchText(normalizedQuery);
     const limit = Math.max(1, Math.min(60, Math.floor(args.limit ?? 20)));
+    const scanLimit = getSearchScanLimit(limit);
 
     const feedVideos = (await ctx.runQuery(internal.feed.listFeedVideosInternal, {
-      limit: 240,
+      limit: scanLimit,
     })) as FastSearchVideo[];
 
     return feedVideos
@@ -76,7 +88,7 @@ export const searchVideosFast = query({
       .filter((item: { video: FastSearchVideo; score: number }) => item.score > 0)
       .sort(
         (a: { video: FastSearchVideo; score: number }, b: { video: FastSearchVideo; score: number }) =>
-          b.score - a.score,
+          b.score - a.score || b.video.createdAtMs - a.video.createdAtMs,
       )
       .slice(0, limit)
       .map((item: { video: FastSearchVideo; score: number }) => item.video);
