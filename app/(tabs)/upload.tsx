@@ -1,28 +1,22 @@
-import { useEffect, useState } from "react";
-import {
-  Alert,
-  Pressable,
-  StyleSheet,
-  TextInput,
-  View,
-} from "react-native";
-import * as ImagePicker from "expo-image-picker";
-import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
+import { useAction, useQuery } from "convex/react";
 import {
   createUploadTask,
   FileSystemUploadType,
 } from "expo-file-system/legacy";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { useAction, useQuery } from "convex/react";
+import { useEffect, useState } from "react";
+import { Alert, Pressable, StyleSheet, TextInput, View } from "react-native";
 
-import { AUDIO_TRANSLATION_LANGUAGE_OPTIONS } from "@/constants/audio-translation-languages";
-import { api } from "@/convex/_generated/api";
 import { TabPageLogo } from "@/components/tab-page-logo";
 import { TabPageScrollLayout } from "@/components/tab-page-scroll-layout";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { UploadLoadingIndicator } from "@/components/upload-loading-indicator";
+import { AUDIO_TRANSLATION_LANGUAGE_OPTIONS } from "@/constants/audio-translation-languages";
+import { api } from "@/convex/_generated/api";
 
 function SelectedVideoThumbnail({
   uri,
@@ -56,7 +50,9 @@ function SelectedVideoThumbnail({
           disabled={disabled}
           style={({ pressed }) => [
             styles.clearSelectedVideoButton,
-            pressed && !disabled ? styles.clearSelectedVideoButtonPressed : undefined,
+            pressed && !disabled
+              ? styles.clearSelectedVideoButtonPressed
+              : undefined,
             disabled ? styles.clearSelectedVideoButtonDisabled : undefined,
           ]}
         >
@@ -73,7 +69,9 @@ export default function HomeScreen() {
     (api as any).uploads.createMuxDirectUpload,
   );
   const [isUploading, setIsUploading] = useState(false);
-  const [status, setStatus] = useState("Add a title, record or pick a video, then upload.");
+  const [status, setStatus] = useState(
+    "Add a title, record or pick a video, then upload.",
+  );
   const [uploadProgress, setUploadProgress] = useState(0);
   const [lastUploadId, setLastUploadId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -82,10 +80,14 @@ export default function HomeScreen() {
     mimeType: string | null;
     source: "library" | "camera";
   } | null>(null);
-  const [selectedAudioTranslationLanguageCodes, setSelectedAudioTranslationLanguageCodes] =
-    useState<string[]>([]);
-  const [lastRequestedAudioTranslationLanguageCodes, setLastRequestedAudioTranslationLanguageCodes] =
-    useState<string[]>([]);
+  const [
+    selectedAudioTranslationLanguageCodes,
+    setSelectedAudioTranslationLanguageCodes,
+  ] = useState<string[]>([]);
+  const [
+    lastRequestedAudioTranslationLanguageCodes,
+    setLastRequestedAudioTranslationLanguageCodes,
+  ] = useState<string[]>([]);
   const moderationStatus = useQuery(
     (api as any).uploadStatus.getUploadModerationStatus,
     lastUploadId
@@ -185,7 +187,8 @@ export default function HomeScreen() {
         source: "library",
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not select video";
+      const message =
+        error instanceof Error ? error.message : "Could not select video";
       const isICloudDownloadError =
         message.includes("PHPhotosErrorDomain") && message.includes("3164");
       const displayMessage = isICloudDownloadError
@@ -231,7 +234,8 @@ export default function HomeScreen() {
         source: "camera",
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not record video";
+      const message =
+        error instanceof Error ? error.message : "Could not record video";
       setStatus(`Recording failed: ${message}`);
       Alert.alert("Video Recording Failed", message);
     }
@@ -246,7 +250,10 @@ export default function HomeScreen() {
 
     if (!selectedVideo) {
       setStatus("Record or pick a video before uploading.");
-      Alert.alert("Video Required", "Please record or pick a video before uploading.");
+      Alert.alert(
+        "Video Required",
+        "Please record or pick a video before uploading.",
+      );
       return;
     }
 
@@ -270,7 +277,8 @@ export default function HomeScreen() {
           httpMethod: "PUT",
           uploadType: FileSystemUploadType.BINARY_CONTENT,
           headers: {
-            "Content-Type": selectedVideo.mimeType || "application/octet-stream",
+            "Content-Type":
+              selectedVideo.mimeType || "application/octet-stream",
           },
         },
         (event) => {
@@ -306,6 +314,7 @@ export default function HomeScreen() {
           : "Upload complete. Checking moderation status...",
       );
       setSelectedVideo(null);
+      setTitle("");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed";
       setUploadProgress(0);
@@ -326,14 +335,52 @@ export default function HomeScreen() {
 
   return (
     <ThemedView style={styles.screen}>
-      <TabPageScrollLayout
-        containerStyle={styles.container}
-      >
+      <TabPageScrollLayout containerStyle={styles.container}>
         <TabPageLogo
           source={require("../../assets/images/upload-logo.png")}
           width={276}
           height={102}
         />
+
+        {isUploading || moderationPending ? (
+          <UploadLoadingIndicator
+            isActive={isUploading || moderationPending}
+            status={status}
+            progress={uploadProgress}
+          />
+        ) : null}
+
+        {uploadComplete ? (
+          <View style={styles.completionInfo}>
+            <View style={styles.doneBadge}>
+              <Image
+                source={require("../../assets/images/app-icon.png")}
+                contentFit="contain"
+                style={styles.doneBadgeIcon}
+              />
+              <ThemedText style={styles.doneBadgeText}>
+                Upload complete
+                {moderationPending ? " - moderation in progress" : ""}
+              </ThemedText>
+            </View>
+            {lastRequestedAudioTranslationLanguageCodes.length > 0 ? (
+              <ThemedText style={styles.supportingText}>
+                Requested translated audio:{" "}
+                {lastRequestedAudioTranslationLanguageCodes
+                  .map(
+                    (code) =>
+                      AUDIO_TRANSLATION_LANGUAGE_OPTIONS.find(
+                        (language) => language.code === code,
+                      )?.label ?? code,
+                  )
+                  .join(", ")}
+              </ThemedText>
+            ) : null}
+            {!moderationPending ? (
+              <ThemedText style={styles.completionStatus}>{status}</ThemedText>
+            ) : null}
+          </View>
+        ) : null}
 
         <ThemedView style={styles.inputWrap}>
           <ThemedText type="defaultSemiBold">Title</ThemedText>
@@ -348,14 +395,18 @@ export default function HomeScreen() {
         </ThemedView>
 
         <ThemedView style={styles.inputWrap}>
-          <ThemedText type="defaultSemiBold">Translated audio tracks</ThemedText>
-          <ThemedText style={styles.supportingText}>
+          <ThemedText type="defaultSemiBold">
+            Select translated audio tracks
+          </ThemedText>
+          {/* <ThemedText style={styles.supportingText}>
             Select the languages Robotube should prepare after Mux finishes processing the upload.
             Matching translated subtitle tracks will be added to the player too.
-          </ThemedText>
+          </ThemedText> */}
           <View style={styles.translationOptions}>
             {AUDIO_TRANSLATION_LANGUAGE_OPTIONS.map((language) => {
-              const isSelected = selectedAudioTranslationLanguageCodes.includes(language.code);
+              const isSelected = selectedAudioTranslationLanguageCodes.includes(
+                language.code,
+              );
 
               return (
                 <Pressable
@@ -377,7 +428,9 @@ export default function HomeScreen() {
                   <ThemedText
                     style={[
                       styles.translationOptionText,
-                      isSelected ? styles.translationOptionTextActive : undefined,
+                      isSelected
+                        ? styles.translationOptionTextActive
+                        : undefined,
                     ]}
                   >
                     {language.label}
@@ -386,9 +439,6 @@ export default function HomeScreen() {
               );
             })}
           </View>
-          <ThemedText style={styles.supportingText}>
-            Leave this empty to upload without translated audio tracks.
-          </ThemedText>
         </ThemedView>
 
         <View style={styles.mediaActions}>
@@ -419,24 +469,6 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
-        <Pressable
-          disabled={isUploading || !selectedVideo || !title.trim()}
-          onPress={handleUpload}
-          style={({ pressed }) => [
-            styles.button,
-            pressed && !isUploading && selectedVideo && title.trim()
-              ? styles.buttonPressed
-              : undefined,
-            isUploading || !selectedVideo || !title.trim()
-              ? styles.buttonDisabled
-              : undefined,
-          ]}
-        >
-          <ThemedText type="defaultSemiBold">
-            {isUploading ? "Uploading..." : "Upload video"}
-          </ThemedText>
-        </Pressable>
-
         {selectedVideo ? (
           <SelectedVideoThumbnail
             uri={selectedVideo.uri}
@@ -454,41 +486,23 @@ export default function HomeScreen() {
           />
         ) : null}
 
-        <ThemedView style={styles.statusCard}>
-          <ThemedText type="defaultSemiBold">Status</ThemedText>
-          {uploadComplete ? (
-            <View style={styles.doneBadge}>
-              <Image
-                source={require("../../assets/images/app-icon.png")}
-                contentFit="contain"
-                style={styles.doneBadgeIcon}
-              />
-              <ThemedText style={styles.doneBadgeText}>
-                Upload complete{moderationPending ? " - moderation in progress" : ""}
-              </ThemedText>
-            </View>
-          ) : null}
-          {lastRequestedAudioTranslationLanguageCodes.length > 0 ? (
-            <ThemedText style={styles.supportingText}>
-              Requested translated audio:{" "}
-              {lastRequestedAudioTranslationLanguageCodes
-                .map((code) =>
-                  AUDIO_TRANSLATION_LANGUAGE_OPTIONS.find((language) => language.code === code)?.label ??
-                  code,
-                )
-                .join(", ")}
-            </ThemedText>
-          ) : null}
-          {isUploading || moderationPending ? (
-            <UploadLoadingIndicator
-              isActive={isUploading || moderationPending}
-              status={status}
-              progress={uploadProgress}
-            />
-          ) : (
-            <ThemedText>{status}</ThemedText>
-          )}
-        </ThemedView>
+        {!isUploading ? (
+          <Pressable
+            disabled={!selectedVideo || !title.trim()}
+            onPress={handleUpload}
+            style={({ pressed }) => [
+              styles.button,
+              pressed && selectedVideo && title.trim()
+                ? styles.buttonPressed
+                : undefined,
+              !selectedVideo || !title.trim()
+                ? styles.buttonDisabled
+                : undefined,
+            ]}
+          >
+            <ThemedText type="defaultSemiBold">Upload video</ThemedText>
+          </Pressable>
+        ) : null}
       </TabPageScrollLayout>
     </ThemedView>
   );
@@ -564,13 +578,13 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.5,
   },
-  statusCard: {
-    marginTop: 8,
-    gap: 6,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#D5DDE8",
-    padding: 12,
+  completionInfo: {
+    gap: 8,
+  },
+  completionStatus: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#5E6C82",
   },
   doneBadge: {
     flexDirection: "row",

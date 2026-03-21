@@ -1,8 +1,9 @@
-import { FlashList } from "@shopify/flash-list";
-import {Bot} from "lucide-react-native";
-import { useIsFocused } from "@react-navigation/native";
+import { FlashList, type FlashListRef } from "@shopify/flash-list";
+import { Bot } from "lucide-react-native";
+import { useIsFocused, useScrollToTop } from "@react-navigation/native";
 import { usePaginatedQuery } from "convex/react";
 import { Image } from "expo-image";
+import { useRef } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -19,6 +20,7 @@ const FEED_LOAD_MORE_COUNT = 12;
 export default function HomePage() {
   const insets = useSafeAreaInsets();
   const isTabFocused = useIsFocused();
+  const feedListRef = useRef<FlashListRef<FeedVideoItem> | null>(null);
   const {
     results: feedVideos,
     status: feedStatus,
@@ -46,6 +48,8 @@ export default function HomePage() {
   const isFeedLoading = feedStatus === "LoadingFirstPage";
   const isLoadingMore = feedStatus === "LoadingMore";
 
+  useScrollToTop(feedListRef);
+
   return (
     <View style={styles.container}>
       <View
@@ -72,6 +76,7 @@ export default function HomePage() {
       </View>
 
       <FlashList
+        ref={feedListRef}
         data={feedVideos}
         keyExtractor={(item) => item.muxAssetId}
         onViewableItemsChanged={onViewableItemsChanged}
