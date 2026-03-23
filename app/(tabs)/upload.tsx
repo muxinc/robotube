@@ -10,7 +10,7 @@ import { useVideoPlayer, VideoView } from "expo-video";
 import { useEffect, useState } from "react";
 import { Alert, Pressable, StyleSheet, TextInput, View } from "react-native";
 
-import { TabPageLogo } from "@/components/tab-page-logo";
+import { TabPageLogoHeader } from "@/components/tab-page-logo-header";
 import { TabPageScrollLayout } from "@/components/tab-page-scroll-layout";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
@@ -335,12 +335,17 @@ export default function HomeScreen() {
 
   return (
     <ThemedView style={styles.screen}>
-      <TabPageScrollLayout containerStyle={styles.container}>
-        <TabPageLogo
-          source={require("../../assets/images/upload-logo.png")}
-          width={276}
-          height={102}
-        />
+      <TabPageLogoHeader
+        source={require("../../assets/images/upload-logo.png")}
+        width={250}
+        height={75}
+      />
+
+      <TabPageScrollLayout
+        containerStyle={styles.container}
+        includeTopInset={false}
+        topPaddingOffset={18}
+      >
 
         {isUploading || moderationPending ? (
           <UploadLoadingIndicator

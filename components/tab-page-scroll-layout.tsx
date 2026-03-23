@@ -12,6 +12,7 @@ type TabPageScrollLayoutProps = Omit<ScrollViewProps, "contentContainerStyle"> &
   children: React.ReactNode;
   containerStyle?: StyleProp<ViewStyle>;
   contentContainerStyle?: StyleProp<ViewStyle>;
+  includeTopInset?: boolean;
   topPaddingOffset?: number;
   bottomPaddingOffset?: number;
 };
@@ -20,6 +21,7 @@ export function TabPageScrollLayout({
   children,
   containerStyle,
   contentContainerStyle,
+  includeTopInset = true,
   topPaddingOffset = TAB_PAGE_TOP_PADDING,
   bottomPaddingOffset = TAB_PAGE_BOTTOM_PADDING,
   ...scrollViewProps
@@ -32,7 +34,7 @@ export function TabPageScrollLayout({
       contentContainerStyle={[
         styles.scrollContent,
         {
-          paddingTop: insets.top + topPaddingOffset,
+          paddingTop: (includeTopInset ? insets.top : 0) + topPaddingOffset,
           paddingBottom: insets.bottom + bottomPaddingOffset,
         },
         contentContainerStyle,

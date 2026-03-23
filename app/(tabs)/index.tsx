@@ -1,16 +1,14 @@
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
-import { Bot } from "lucide-react-native";
 import { useIsFocused, useScrollToTop } from "@react-navigation/native";
 import { usePaginatedQuery } from "convex/react";
-import { Image } from "expo-image";
 import { useRef } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { StyleSheet, Text, View } from "react-native";
 
 import {
   FeedVideoCard,
   type FeedVideoItem,
 } from "@/components/feed-video-card";
+import { TabPageLogoHeader } from "@/components/tab-page-logo-header";
 import { api } from "@/convex/_generated/api";
 import { useFeedFocusController } from "@/hooks/use-feed-focus-controller";
 
@@ -18,7 +16,6 @@ const INITIAL_FEED_PAGE_SIZE = 16;
 const FEED_LOAD_MORE_COUNT = 12;
 
 export default function HomePage() {
-  const insets = useSafeAreaInsets();
   const isTabFocused = useIsFocused();
   const feedListRef = useRef<FlashListRef<FeedVideoItem> | null>(null);
   const {
@@ -52,28 +49,11 @@ export default function HomePage() {
 
   return (
     <View style={styles.container}>
-      <View
-        style={[
-          styles.navbar,
-          {
-            height: 62 + insets.top,
-            paddingTop: insets.top + 6,
-          },
-        ]}
-      >
-        <View style={{ flex: 1 }}>
-          <Image
-            source={require("../../assets/images/robotube-logo.png")}
-            contentFit="contain"
-            style={styles.logo}
-          />
-        </View>
-        <View style={styles.actions}>
-          <Pressable style={styles.iconButton}>
-            <Bot size={22} color="#111111" />
-          </Pressable>
-        </View>
-      </View>
+      <TabPageLogoHeader
+        source={require("../../assets/images/robotube-logo.png")}
+        width={250}
+        height={75}
+      />
 
       <FlashList
         ref={feedListRef}
@@ -161,33 +141,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#ffffff",
-  },
-  navbar: {
-    paddingLeft: 0,
-    paddingRight: 12,
-    paddingBottom: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e5e5",
-  },
-  logo: {
-    width: 250,
-    height: 75,
-    marginLeft: -60,
-  },
-  actions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-  },
-  iconButton: {
-    width: 36,
-    height: 36,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 18,
   },
   feedContent: {
     paddingTop: 0,

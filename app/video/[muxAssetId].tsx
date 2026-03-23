@@ -1141,14 +1141,14 @@ const styles = StyleSheet.create({
   },
   tagPill: {
     borderRadius: 999,
-    backgroundColor: "#EEF4FF",
+    backgroundColor: "#FFE4F4",
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
   tagText: {
     fontSize: 12,
     lineHeight: 16,
-    color: "#2558A8",
+    color: "#FF33B7",
     fontWeight: "600",
   },
   upNextTitle: {
