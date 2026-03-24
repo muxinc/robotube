@@ -53,6 +53,7 @@ export default function HomePage() {
         source={require("../../assets/images/robotube-logo.png")}
         width={250}
         height={75}
+        transparentOnIOS
       />
 
       <FlashList

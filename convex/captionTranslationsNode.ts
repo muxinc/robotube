@@ -154,7 +154,8 @@ function normalizeLanguageCode(value: unknown) {
     return "";
   }
 
-  return value.trim().toLowerCase().split("-")[0] ?? "";
+  const normalized = value.trim().toLowerCase().split("-")[0] ?? "";
+  return normalized === "auto" || normalized === "und" ? "" : normalized;
 }
 
 function getTrackLanguageCode(track: any) {
@@ -449,6 +450,22 @@ export const ensureCaptionTranslationsForAssetInternal = internalAction({
       }
 
       try {
+        // Double-check for existing tracks right before creating the job
+        const finalAsset = await mux.video.assets.retrieve(args.muxAssetId);
+        const finalExistingTrack = findExistingTranslatedCaptionsTrack(finalAsset, item.languageCode);
+        if (finalExistingTrack) {
+          await ctx.runMutation((internal as any).captionTranslations.updateTranslationStatusInternal, {
+            muxAssetId: args.muxAssetId,
+            languageCode: item.languageCode,
+            status: "completed",
+            uploadedTrackId:
+              typeof finalExistingTrack.id === "string" && finalExistingTrack.id.length > 0
+                ? finalExistingTrack.id
+                : undefined,
+          });
+          continue;
+        }
+
         const passthrough = JSON.stringify({
           muxAssetId: args.muxAssetId,
           fromLanguageCode: sourceLanguageCode,

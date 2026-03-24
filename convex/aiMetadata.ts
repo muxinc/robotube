@@ -251,7 +251,8 @@ function asVisibility(
 
 function normalizeLanguageCode(value: unknown) {
   if (typeof value !== "string") return "";
-  return value.trim().toLowerCase().split("-")[0] ?? "";
+  const normalized = value.trim().toLowerCase().split("-")[0] ?? "";
+  return normalized === "auto" || normalized === "und" ? "" : normalized;
 }
 
 function getTrackLanguageCode(track: any) {

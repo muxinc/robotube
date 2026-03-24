@@ -1,13 +1,17 @@
+import { useHeaderHeight } from "@react-navigation/elements";
+import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useIsFocused } from "@react-navigation/native";
 import { Stack, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
+  Platform,
   Pressable,
   StyleSheet,
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { TabPageLogoHeader } from "@/components/tab-page-logo-header";
 import { TabPageScrollLayout } from "@/components/tab-page-scroll-layout";
@@ -24,23 +28,13 @@ const SEARCH_CATEGORIES = [
 ];
 
 export default function SearchScreen() {
+  const headerHeight = useHeaderHeight();
   const isFocused = useIsFocused();
+  const isIOS = Platform.OS === "ios";
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const searchInputRef = useRef<TextInput | null>(null);
   const [queryText, setQueryText] = useState("");
-
-  useEffect(() => {
-    if (!isFocused) return;
-
-    const timeoutId = setTimeout(() => {
-      searchInputRef.current?.focus();
-    }, 100);
-
-    return () => {
-      clearTimeout(timeoutId);
-    };
-  }, [isFocused]);
-
   const submitSearch = (rawText: string) => {
     const trimmed = rawText.trim();
     if (trimmed.length < 2) return;
@@ -53,15 +47,60 @@ export default function SearchScreen() {
     });
   };
 
+  useEffect(() => {
+    if (!isFocused || isIOS) return;
+
+    const timeoutId = setTimeout(() => {
+      searchInputRef.current?.focus();
+    }, 100);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [isFocused, isIOS]);
+
   return (
     <ThemedView style={styles.screen}>
-      <Stack.Screen options={{ headerShown: false }} />
+      {isIOS ? (
+        <>
+          <Stack.SearchBar
+            placement="automatic"
+            placeholder="Search videos, tags, or topics"
+            hideWhenScrolling={false}
+            onChangeText={(event) => {
+              setQueryText(event.nativeEvent.text ?? "");
+            }}
+            onSearchButtonPress={(event) => {
+              submitSearch(event.nativeEvent.text ?? queryText);
+            }}
+          />
 
-      <TabPageLogoHeader
-        source={require("@/assets/images/search-logo.png")}
-        width={250}
-        height={75}
-      />
+          <View
+            pointerEvents="none"
+            style={[
+              styles.iosHeaderLogoWrap,
+              {
+                top: insets.top + 6,
+              },
+            ]}
+          >
+            <Image
+              source={require("@/assets/images/search-logo.png")}
+              contentFit="contain"
+              contentPosition="left"
+              style={styles.iosHeaderLogo}
+            />
+          </View>
+        </>
+      ) : null}
+
+      {!isIOS ? (
+        <TabPageLogoHeader
+          source={require("@/assets/images/search-logo.png")}
+          width={250}
+          height={75}
+        />
+      ) : null}
 
       <TabPageScrollLayout
         contentInsetAdjustmentBehavior="never"
@@ -69,23 +108,25 @@ export default function SearchScreen() {
         keyboardShouldPersistTaps="handled"
         includeTopInset={false}
         containerStyle={styles.container}
-        topPaddingOffset={18}
+        topPaddingOffset={isIOS ? headerHeight + 18 : 18}
       >
-        <View style={styles.searchWrap}>
-          <Pressable onPress={() => submitSearch(queryText)} hitSlop={8}>
-            <Ionicons name="search" size={18} color="#7A7A7A" />
-          </Pressable>
-          <TextInput
-            ref={searchInputRef}
-            placeholder="Search videos, tags, or topics"
-            placeholderTextColor="#8F95A1"
-            returnKeyType="search"
-            value={queryText}
-            onChangeText={setQueryText}
-            onSubmitEditing={() => submitSearch(queryText)}
-            style={styles.searchInput}
-          />
-        </View>
+        {!isIOS ? (
+          <View style={styles.searchWrap}>
+            <Pressable onPress={() => submitSearch(queryText)} hitSlop={8}>
+              <Ionicons name="search" size={18} color="#7A7A7A" />
+            </Pressable>
+            <TextInput
+              ref={searchInputRef}
+              placeholder="Search videos, tags, or topics"
+              placeholderTextColor="#8F95A1"
+              returnKeyType="search"
+              value={queryText}
+              onChangeText={setQueryText}
+              onSubmitEditing={() => submitSearch(queryText)}
+              style={styles.searchInput}
+            />
+          </View>
+        ) : null}
 
         <View style={styles.categoriesWrap}>
           <ThemedText style={styles.categoriesHeading}>Browse categories</ThemedText>
@@ -124,6 +165,15 @@ const styles = StyleSheet.create({
   },
   container: {
     gap: 14,
+  },
+  iosHeaderLogoWrap: {
+    position: "absolute",
+    left: 12,
+    zIndex: 2,
+  },
+  iosHeaderLogo: {
+    width: 250,
+    height: 75,
   },
   searchWrap: {
     flexDirection: "row",

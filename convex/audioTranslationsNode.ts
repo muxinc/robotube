@@ -57,6 +57,10 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 function requireTranslateAudioJobId(value: unknown) {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error("Mux translate-audio job response did not include an id.");
@@ -98,7 +102,7 @@ type EnsureAudioTranslationsResult =
 type EnsureAudioTranslationsRetryResult = {
   ok: false;
   skipped: true;
-  reason: "asset_not_ready" | "audio_static_rendition_not_ready";
+  reason: "asset_not_ready" | "audio_static_rendition_not_ready" | "source_language_not_ready";
   retryScheduled: boolean;
   nextAttempt: number;
 };
@@ -164,6 +168,166 @@ function getAudioOnlyStaticRendition(asset: any) {
   );
 }
 
+function normalizeLanguageCode(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const normalized = value.trim().toLowerCase().split("-")[0] ?? "";
+  return normalized === "auto" || normalized === "und" ? "" : normalized;
+}
+
+function getTrackLanguageCode(track: any) {
+  return normalizeLanguageCode(track?.language_code ?? track?.languageCode ?? track?.language);
+}
+
+async function updateAssetTrack(args: {
+  assetId: string;
+  trackId: string;
+  languageCode: string;
+  name: string;
+}) {
+  const response = await fetch(
+    `https://api.mux.com/video/v1/assets/${args.assetId}/tracks/${args.trackId}`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: createMuxBasicAuthHeader(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        language_code: args.languageCode,
+        name: args.name,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    const details = await readResponseTextSafe(response);
+    throw new Error(
+      `Mux asset track update failed (${response.status})${details ? `: ${details}` : ""}.`,
+    );
+  }
+}
+
+function getLanguageDisplayLabel(languageCode: string) {
+  if (!languageCode) {
+    return "Original audio";
+  }
+
+  try {
+    const displayNames = new Intl.DisplayNames(["en"], { type: "language" });
+    return displayNames.of(languageCode) ?? "Original audio";
+  } catch {
+    return "Original audio";
+  }
+}
+
+function findExistingTranslatedAudioTrack(asset: any, languageCode: string) {
+  const normalizedLanguageCode = normalizeLanguageCode(languageCode);
+  if (!normalizedLanguageCode) {
+    return null;
+  }
+
+  return (asset?.tracks ?? []).find(
+    (track: any) =>
+      track?.type === "audio" &&
+      track?.status === "ready" &&
+      getTrackLanguageCode(track) === normalizedLanguageCode,
+  ) ?? null;
+}
+
+function findPrimaryAudioTrack(asset: any) {
+  return (asset?.tracks ?? []).find(
+    (track: any) =>
+      track?.type === "audio" &&
+      !track?.passthrough &&
+      !track?.generated_by &&
+      !track?.generatedBy,
+  ) ?? (asset?.tracks ?? []).find((track: any) => track?.type === "audio");
+}
+
+function findSourceCaptionsTrack(asset: any) {
+  const textTracks = (asset?.tracks ?? []).filter(
+    (track: any) =>
+      track?.type === "text" &&
+      track?.status === "ready" &&
+      getTrackLanguageCode(track) !== "" &&
+      getTrackLanguageCode(track) !== "auto",
+  );
+  if (textTracks.length === 0) {
+    return null;
+  }
+
+  for (const track of textTracks) {
+    const textSource = track?.text_source ?? track?.textSource;
+    const passthrough = track?.passthrough;
+    if (textSource !== "generated_vod" && passthrough !== "robotube:auto-generated") {
+      continue;
+    }
+
+    const languageCode = getTrackLanguageCode(track);
+    if (!languageCode || languageCode === "auto") {
+      continue;
+    }
+
+    return track;
+  }
+
+  const primaryAudioLanguageCode = getTrackLanguageCode(findPrimaryAudioTrack(asset));
+  if (primaryAudioLanguageCode) {
+    const matchingTrack = textTracks.find(
+      (track: any) => getTrackLanguageCode(track) === primaryAudioLanguageCode,
+    );
+    if (matchingTrack) {
+      return matchingTrack;
+    }
+  }
+
+  return textTracks[0] ?? null;
+}
+
+function getSourceLanguageCode(asset: any) {
+  const captionsLanguageCode = getTrackLanguageCode(findSourceCaptionsTrack(asset));
+  if (captionsLanguageCode) {
+    return captionsLanguageCode;
+  }
+
+  return getTrackLanguageCode(findPrimaryAudioTrack(asset));
+}
+
+async function syncPrimaryAudioTrackLanguage(args: {
+  assetId: string;
+  asset: any;
+  detectedLanguageCode: string;
+}) {
+  const primaryAudioTrack = findPrimaryAudioTrack(args.asset);
+  const normalizedLanguageCode = normalizeLanguageCode(args.detectedLanguageCode);
+  if (!primaryAudioTrack?.id || !normalizedLanguageCode) {
+    return false;
+  }
+
+  const currentLanguageCode = getTrackLanguageCode(primaryAudioTrack);
+  const nextName = getLanguageDisplayLabel(normalizedLanguageCode);
+  const currentName =
+    typeof primaryAudioTrack.name === "string" && primaryAudioTrack.name.length > 0
+      ? primaryAudioTrack.name
+      : "";
+
+  if (currentLanguageCode === normalizedLanguageCode && currentName === nextName) {
+    return false;
+  }
+
+  await updateAssetTrack({
+    assetId: args.assetId,
+    trackId: primaryAudioTrack.id,
+    languageCode: normalizedLanguageCode,
+    name: nextName,
+  });
+
+  return true;
+}
+
 function hasReadyAudioTrack(asset: any) {
   return (asset?.tracks ?? []).some(
     (track: any) => track?.type === "audio" && track?.status === "ready",
@@ -186,6 +350,53 @@ function isActiveAudioTranslationStatus(status: unknown) {
 
 function isQueuedAudioTranslationStatus(status: unknown) {
   return status === "requested" || status === undefined || status === null;
+}
+
+function shouldAbortRemainingAudioTranslations(errorMessage: string | undefined) {
+  if (!errorMessage) {
+    return false;
+  }
+
+  return /elevenlabs dubbing job failed/i.test(errorMessage);
+}
+
+async function cancelQueuedAudioTranslations(
+  ctx: any,
+  muxAssetId: string,
+  errorMessage: string,
+) {
+  const rows = await ctx.runQuery(
+    (internal as any).audioTranslations.listTranslationJobsForAssetInternal,
+    {
+      muxAssetId,
+    },
+  );
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { cancelled: 0 };
+  }
+
+  let cancelled = 0;
+  for (const row of rows) {
+    if (!isQueuedAudioTranslationStatus(row?.status)) {
+      continue;
+    }
+
+    const languageCode = typeof row?.languageCode === "string" ? row.languageCode : "";
+    if (!languageCode) {
+      continue;
+    }
+
+    await ctx.runMutation((internal as any).audioTranslations.updateTranslationStatusInternal, {
+      muxAssetId,
+      languageCode,
+      status: "cancelled",
+      errorMessage,
+    });
+    cancelled += 1;
+  }
+
+  return { cancelled };
 }
 
 async function scheduleNextQueuedAudioTranslation(ctx: any, muxAssetId: string) {
@@ -225,6 +436,7 @@ async function scheduleNextQueuedAudioTranslation(ctx: any, muxAssetId: string) 
       muxAssetId,
       userId,
       languageCodes: queuedLanguageCodes,
+      forceCreate: true,
       attempt: 0,
     },
   );
@@ -256,6 +468,14 @@ async function applyAudioTranslationJobUpdate(
   const jobId = requireTranslateAudioJobId(job.id);
   const errorMessage =
     job.status === "errored" ? formatTranslateAudioErrors(job.errors) : undefined;
+  
+  if (job.status === "errored") {
+    console.error(`Audio translation job ${job.id} failed for asset ${args.muxAssetId}, language ${args.languageCode}:`, {
+      errors: job.errors,
+      errorMessage,
+      passthrough: job.passthrough,
+    });
+  }
 
   await ctx.runMutation((internal as any).audioTranslations.updateTranslationStatusInternal, {
     muxAssetId: args.muxAssetId,
@@ -269,7 +489,9 @@ async function applyAudioTranslationJobUpdate(
     dubbingId: job.outputs?.dubbing_id,
   });
 
-  if (isTerminalTranslateAudioStatus(job.status)) {
+  if (job.status === "errored" && shouldAbortRemainingAudioTranslations(errorMessage)) {
+    await cancelQueuedAudioTranslations(ctx, args.muxAssetId, errorMessage ?? "Audio translation failed.");
+  } else if (isTerminalTranslateAudioStatus(job.status)) {
     await scheduleNextQueuedAudioTranslation(ctx, args.muxAssetId);
   }
 
@@ -279,6 +501,7 @@ async function applyAudioTranslationJobUpdate(
 async function createTranslateAudioJob(args: {
   assetId: string;
   languageCode: string;
+  fromLanguageCode?: string;
   passthrough?: string;
 }): Promise<TranslateAudioJob> {
   const response = await fetch(`${MUX_ROBOTS_API_BASE_URL}/jobs/translate-audio`, {
@@ -291,6 +514,11 @@ async function createTranslateAudioJob(args: {
       passthrough: args.passthrough,
       parameters: {
         asset_id: args.assetId,
+        ...(args.fromLanguageCode
+          ? {
+              from_language_code: args.fromLanguageCode,
+            }
+          : {}),
         to_language_code: args.languageCode,
         upload_to_mux: true,
       },
@@ -340,6 +568,7 @@ export const ensureAudioTranslationsForAssetInternal = internalAction({
     userId: v.string(),
     languageCodes: v.array(v.string()),
     title: v.optional(v.string()),
+    forceCreate: v.optional(v.boolean()),
     attempt: v.optional(v.number()),
   },
   handler: async (
@@ -348,6 +577,7 @@ export const ensureAudioTranslationsForAssetInternal = internalAction({
   ): Promise<EnsureAudioTranslationsResult | EnsureAudioTranslationsRetryResult> => {
     const attempt = Math.max(0, Math.floor(args.attempt ?? 0));
     const languageCodes = normalizeAudioTranslationLanguageCodes(args.languageCodes);
+    const forceCreate = args.forceCreate === true;
     if (languageCodes.length === 0) {
       return { ok: true, skipped: true, reason: "no_requested_languages" };
     }
@@ -381,6 +611,7 @@ export const ensureAudioTranslationsForAssetInternal = internalAction({
             userId: args.userId,
             languageCodes,
             title: args.title,
+            forceCreate,
             attempt: nextAttempt,
           },
         );
@@ -420,6 +651,7 @@ export const ensureAudioTranslationsForAssetInternal = internalAction({
             userId: args.userId,
             languageCodes,
             title: args.title,
+            forceCreate,
             attempt: nextAttempt,
           },
         );
@@ -450,6 +682,7 @@ export const ensureAudioTranslationsForAssetInternal = internalAction({
             userId: args.userId,
             languageCodes,
             title: args.title,
+            forceCreate,
             attempt: nextAttempt,
           },
         );
@@ -464,6 +697,103 @@ export const ensureAudioTranslationsForAssetInternal = internalAction({
       };
     }
 
+    const sourceLanguageCode =
+      normalizeLanguageCode(asString(custom.aiSourceLanguageCode)) || getSourceLanguageCode(asset);
+    if (!sourceLanguageCode) {
+      const nextAttempt = attempt + 1;
+      const shouldRetry = nextAttempt < TRANSLATE_AUDIO_MAX_ASSET_WAIT_ATTEMPTS;
+
+      await ctx.scheduler.runAfter(
+        0,
+        (internal as any).captions.ensureGeneratedCaptionsTrackInternal,
+        {
+          muxAssetId: args.muxAssetId,
+          userId: args.userId,
+          attempt,
+        },
+      );
+
+      if (shouldRetry) {
+        await ctx.scheduler.runAfter(
+          TRANSLATE_AUDIO_ASSET_WAIT_INTERVAL_MS,
+          (internal as any).audioTranslationsNode.ensureAudioTranslationsForAssetInternal,
+          {
+            muxAssetId: args.muxAssetId,
+            userId: args.userId,
+            languageCodes,
+            title: args.title,
+            forceCreate,
+            attempt: nextAttempt,
+          },
+        );
+      }
+
+      return {
+        ok: false,
+        skipped: true,
+        reason: "source_language_not_ready",
+        retryScheduled: shouldRetry,
+        nextAttempt,
+      };
+    }
+
+    await syncPrimaryAudioTrackLanguage({
+      assetId: args.muxAssetId,
+      asset,
+      detectedLanguageCode: sourceLanguageCode,
+    });
+
+    const refreshedAsset = await mux.video.assets.retrieve(args.muxAssetId);
+    const refreshedPrimaryAudioLanguageCode = getTrackLanguageCode(
+      findPrimaryAudioTrack(refreshedAsset),
+    );
+    if (refreshedPrimaryAudioLanguageCode !== sourceLanguageCode) {
+      const nextAttempt = attempt + 1;
+      const shouldRetry = nextAttempt < TRANSLATE_AUDIO_MAX_ASSET_WAIT_ATTEMPTS;
+      if (shouldRetry) {
+        await ctx.scheduler.runAfter(
+          TRANSLATE_AUDIO_ASSET_WAIT_INTERVAL_MS,
+          (internal as any).audioTranslationsNode.ensureAudioTranslationsForAssetInternal,
+          {
+            muxAssetId: args.muxAssetId,
+            userId: args.userId,
+            languageCodes,
+            title: args.title,
+            forceCreate,
+            attempt: nextAttempt,
+          },
+        );
+      }
+
+      return {
+        ok: false,
+        skipped: true,
+        reason: "source_language_not_ready",
+        retryScheduled: shouldRetry,
+        nextAttempt,
+      };
+    }
+
+    const requestedLanguageCodes = languageCodes.filter(
+      (languageCode) => languageCode !== sourceLanguageCode,
+    );
+
+    const skippedSourceLanguageCodes = languageCodes.filter(
+      (languageCode) => languageCode === sourceLanguageCode,
+    );
+    for (const languageCode of skippedSourceLanguageCodes) {
+      await ctx.runMutation((internal as any).audioTranslations.updateTranslationStatusInternal, {
+        muxAssetId: args.muxAssetId,
+        languageCode,
+        status: "cancelled",
+        errorMessage: "Target language matches the source audio language.",
+      });
+    }
+
+    if (requestedLanguageCodes.length === 0) {
+      return { ok: true, skipped: true, reason: "no_requested_languages" };
+    }
+
     if (isMuxRobotsPollingDisabled()) {
       return { ok: true, skipped: true, reason: "polling_disabled" };
     }
@@ -473,7 +803,8 @@ export const ensureAudioTranslationsForAssetInternal = internalAction({
       {
         muxAssetId: args.muxAssetId,
         userId: args.userId,
-        languageCodes,
+        languageCodes: requestedLanguageCodes,
+        forceCreate,
       },
     );
 
@@ -492,7 +823,30 @@ export const ensureAudioTranslationsForAssetInternal = internalAction({
       };
     }
 
-    const nextItem = claimed.find((item) => item.shouldCreate);
+    let nextItem: ClaimedTranslation | null = null;
+    for (const item of claimed) {
+      if (!item.shouldCreate) {
+        continue;
+      }
+
+      const existingTrack = findExistingTranslatedAudioTrack(refreshedAsset, item.languageCode);
+      if (existingTrack) {
+        await ctx.runMutation((internal as any).audioTranslations.updateTranslationStatusInternal, {
+          muxAssetId: args.muxAssetId,
+          languageCode: item.languageCode,
+          status: "completed",
+          uploadedTrackId:
+            typeof existingTrack.id === "string" && existingTrack.id.length > 0
+              ? existingTrack.id
+              : undefined,
+        });
+        continue;
+      }
+
+      nextItem = item;
+      break;
+    }
+
     if (!nextItem) {
       return {
         ok: true,
@@ -502,16 +856,54 @@ export const ensureAudioTranslationsForAssetInternal = internalAction({
     }
 
     try {
+      // Double-check for existing tracks right before creating the job
+      const finalAsset = await mux.video.assets.retrieve(args.muxAssetId);
+      
+      // Log all existing audio tracks
+      const audioTracks = (finalAsset?.tracks ?? []).filter((track: any) => track?.type === "audio");
+      console.log(`Existing audio tracks for asset ${args.muxAssetId}:`, audioTracks.map((track: any) => ({
+        id: track.id,
+        languageCode: track.language_code,
+        name: track.name,
+        status: track.status,
+        generatedBy: track.generated_by,
+      })));
+      
+      const finalExistingTrack = findExistingTranslatedAudioTrack(finalAsset, nextItem.languageCode);
+      if (finalExistingTrack) {
+        console.log(`Found existing track for language ${nextItem.languageCode}, skipping job creation`);
+        await ctx.runMutation((internal as any).audioTranslations.updateTranslationStatusInternal, {
+          muxAssetId: args.muxAssetId,
+          languageCode: nextItem.languageCode,
+          status: "completed",
+          uploadedTrackId:
+            typeof finalExistingTrack.id === "string" && finalExistingTrack.id.length > 0
+              ? finalExistingTrack.id
+              : undefined,
+        });
+        return {
+          ok: true,
+          skipped: false,
+          created: 0,
+        };
+      }
+
       const passthrough = JSON.stringify({
         muxAssetId: args.muxAssetId,
+        fromLanguageCode: sourceLanguageCode,
         languageCode: nextItem.languageCode,
         title: args.title,
       });
+      console.log(`Creating audio translation job for asset ${args.muxAssetId}, language ${nextItem.languageCode}`);
+      
       const job = await createTranslateAudioJob({
         assetId: args.muxAssetId,
+        fromLanguageCode: sourceLanguageCode || undefined,
         languageCode: nextItem.languageCode,
         passthrough,
       });
+      
+      console.log(`Audio translation job created: ${job.id}, status: ${job.status}`);
       const jobId = requireTranslateAudioJobId(job.id);
       const errorMessage =
         job.status === "errored" ? formatTranslateAudioErrors(job.errors) : undefined;

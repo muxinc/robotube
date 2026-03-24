@@ -4,12 +4,13 @@ import { useIsFocused } from "@react-navigation/native";
 import { useQuery } from "convex/react";
 import { Stack, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { FeedVideoCard, type FeedVideoItem } from "@/components/feed-video-card";
 import { api } from "@/convex/_generated/api";
 import { useFeedFocusController } from "@/hooks/use-feed-focus-controller";
+import { useNativeSearch } from "@/hooks/use-native-search";
 
 const INITIAL_SEARCH_LIMIT = 16;
 const SEARCH_LOAD_MORE_COUNT = 12;
@@ -23,6 +24,7 @@ export default function SearchResultsPage() {
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const isIOS = Platform.OS === "ios";
   const isTabFocused = useIsFocused();
   const params = useLocalSearchParams<{ query?: string }>();
   const routeQuery = useMemo(() => getSingleParam(params.query).trim(), [params.query]);
@@ -88,6 +90,7 @@ export default function SearchResultsPage() {
       <View
         style={[
           styles.searchHeader,
+          isIOS ? styles.searchHeaderIOS : null,
           {
             paddingTop: insets.top + 8,
           },
@@ -205,6 +208,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+  },
+  searchHeaderIOS: {
+    borderBottomWidth: 0,
+    backgroundColor: "transparent",
   },
   backButton: {
     width: 34,

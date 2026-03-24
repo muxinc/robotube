@@ -48,7 +48,8 @@ function asNumber(value: unknown): number | undefined {
 
 function normalizeLanguageCode(value: unknown) {
   if (typeof value !== "string") return "";
-  return value.trim().toLowerCase().split("-")[0] ?? "";
+  const normalized = value.trim().toLowerCase().split("-")[0] ?? "";
+  return normalized === "auto" || normalized === "und" ? "" : normalized;
 }
 
 function getLanguageDisplayLabel(languageCode: string) {
@@ -252,8 +253,7 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
       if (sourceCaptionsTrack) {
         const detectedLanguageCode = getTrackLanguageCode(sourceCaptionsTrack);
         const captionsReady = sourceCaptionsTrack.status === "ready";
-        const languageDetected =
-          detectedLanguageCode.length > 0 && detectedLanguageCode !== "auto";
+        const languageDetected = detectedLanguageCode.length > 0;
 
         if (!captionsReady || !languageDetected) {
           const shouldRetry = nextAttempt < MAX_ATTEMPTS;

@@ -1166,11 +1166,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#E5EAF2",
+    borderTopColor: "#F5D0E5",
     backgroundColor: "#FFFFFF",
   },
   chapterRowActive: {
-    backgroundColor: "#EEF4FF",
+    backgroundColor: "#FFF0F8",
   },
   chapterRowPressed: {
     opacity: 0.8,
@@ -1180,7 +1180,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     fontWeight: "700",
-    color: "#3966A8",
+    color: "#D6368B",
   },
   chapterLabel: {
     flex: 1,
@@ -1289,7 +1289,7 @@ const styles = StyleSheet.create({
   chapterSheetCard: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#E5EAF2",
+    borderColor: "#F5D0E5",
     borderRadius: 16,
     backgroundColor: "#FFFFFF",
     overflow: "hidden",
@@ -1319,7 +1319,7 @@ const styles = StyleSheet.create({
   keyMomentCard: {
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#E5EAF2",
+    borderColor: "#F5D0E5",
     backgroundColor: "#FFFFFF",
     paddingHorizontal: 14,
     paddingVertical: 14,
@@ -1336,11 +1336,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     fontWeight: "700",
-    color: "#3966A8",
+    color: "#D6368B",
   },
   keyMomentScorePill: {
     borderRadius: 999,
-    backgroundColor: "#EEF4FF",
+    backgroundColor: "#FFF0F8",
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
@@ -1348,7 +1348,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     fontWeight: "700",
-    color: "#2558A8",
+    color: "#D6368B",
   },
   keyMomentTitle: {
     fontSize: 16,
@@ -1373,7 +1373,7 @@ const styles = StyleSheet.create({
   },
   keyMomentConceptPill: {
     borderRadius: 999,
-    backgroundColor: "#F3F6FB",
+    backgroundColor: "#FFF0F8",
     paddingHorizontal: 10,
     paddingVertical: 4,
   },

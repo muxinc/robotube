@@ -68,6 +68,18 @@ export const claimRequestedTranslationsInternal = internalMutation({
         .unique();
 
       if (existing) {
+        // Skip if there's an active translation job (pending or processing)
+        if (existing.status === "pending" || existing.status === "processing") {
+          claimed.push({ languageCode, shouldCreate: false });
+          continue;
+        }
+
+        // Skip if the job is completed and has a track ID
+        if (existing.status === "completed" && existing.uploadedTrackId) {
+          claimed.push({ languageCode, shouldCreate: false });
+          continue;
+        }
+
         if (existing.status === "errored" || existing.status === "cancelled") {
           await (ctx.db as any).patch(existing._id, {
             status: "requested",

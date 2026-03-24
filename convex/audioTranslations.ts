@@ -54,10 +54,12 @@ export const claimRequestedTranslationsInternal = internalMutation({
     muxAssetId: v.string(),
     userId: v.string(),
     languageCodes: v.array(v.string()),
+    forceCreate: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const requestedAtMs = Date.now();
     const languageCodes = normalizeAudioTranslationLanguageCodes(args.languageCodes);
+    const forceCreate = args.forceCreate === true;
     const claimed: Array<{ languageCode: string; shouldCreate: boolean }> = [];
 
     for (const languageCode of languageCodes) {
@@ -69,6 +71,18 @@ export const claimRequestedTranslationsInternal = internalMutation({
         .unique();
 
       if (existing) {
+        // Skip if there's an active translation job (pending or processing)
+        if (existing.status === "pending" || existing.status === "processing") {
+          claimed.push({ languageCode, shouldCreate: false });
+          continue;
+        }
+
+        // Skip if the job is completed and has a track ID
+        if (existing.status === "completed" && existing.uploadedTrackId) {
+          claimed.push({ languageCode, shouldCreate: false });
+          continue;
+        }
+
         if (existing.status === "errored" || existing.status === "cancelled") {
           await (ctx.db as any).patch(existing._id, {
             status: "requested",
@@ -86,6 +100,7 @@ export const claimRequestedTranslationsInternal = internalMutation({
         }
 
         if (
+          !forceCreate &&
           existing.status === "requested" &&
           typeof existing.updatedAtMs === "number" &&
           requestedAtMs - existing.updatedAtMs < REQUEST_CLAIM_COOLDOWN_MS
@@ -239,5 +254,26 @@ export const repairMissingFieldsInternal = internalMutation({
     }
 
     return { scanned, repaired };
+  },
+});
+
+export const debugGetTranslationJobs = query({
+  args: {
+    muxAssetId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const jobs = await (ctx.db as any)
+      .query("audioTranslationJobs")
+      .withIndex("by_asset", (q: any) => q.eq("muxAssetId", args.muxAssetId))
+      .collect();
+    
+    return jobs.map((job: any) => ({
+      languageCode: job.languageCode,
+      status: job.status,
+      jobId: job.jobId,
+      errorMessage: job.errorMessage,
+      createdAt: job.createdAtMs,
+      updatedAt: job.updatedAtMs,
+    }));
   },
 });

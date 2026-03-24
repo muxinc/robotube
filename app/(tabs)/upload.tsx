@@ -339,6 +339,7 @@ export default function HomeScreen() {
         source={require("../../assets/images/upload-logo.png")}
         width={250}
         height={75}
+        transparentOnIOS
       />
 
       <TabPageScrollLayout

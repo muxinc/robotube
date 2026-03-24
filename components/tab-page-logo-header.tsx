@@ -1,35 +1,40 @@
 import { Image } from "expo-image";
-import { Bot } from "lucide-react-native";
 import { type ReactNode } from "react";
-import { StyleSheet, View, type ImageSourcePropType } from "react-native";
+import { Platform, StyleSheet, View, type ImageSourcePropType } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type TabPageLogoHeaderProps = {
   source: ImageSourcePropType;
   width: number;
   height: number;
+  headerHeight?: number;
   includeTopInset?: boolean;
   logoOffset?: number;
   rightAccessory?: ReactNode;
+  transparentOnIOS?: boolean;
 };
 
 export function TabPageLogoHeader({
   source,
   width,
   height,
+  headerHeight = 62,
   includeTopInset = true,
   logoOffset = -12,
   rightAccessory,
+  transparentOnIOS = false,
 }: TabPageLogoHeaderProps) {
   const insets = useSafeAreaInsets();
   const topInset = includeTopInset ? insets.top : 0;
+  const isIOS = Platform.OS === "ios";
 
   return (
     <View
       style={[
         styles.header,
+        isIOS && transparentOnIOS ? styles.headerIOS : null,
         {
-          height: 62 + topInset,
+          height: headerHeight + topInset,
           paddingTop: topInset + 6,
         },
       ]}
@@ -46,7 +51,11 @@ export function TabPageLogoHeader({
       <View style={styles.actions}>
         {rightAccessory ?? (
           <View style={styles.iconButton}>
-            <Bot size={22} color="#111111" />
+            <Image
+              source={require("../assets/images/app-icon.png")}
+              contentFit="contain"
+              style={styles.iconImage}
+            />
           </View>
         )}
       </View>
@@ -66,6 +75,10 @@ const styles = StyleSheet.create({
     borderBottomColor: "#e5e5e5",
     backgroundColor: "#FFFFFF",
   },
+  headerIOS: {
+    borderBottomWidth: 0,
+    backgroundColor: "transparent",
+  },
   logoWrap: {
     flex: 1,
   },
@@ -83,5 +96,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 18,
+  },
+  iconImage: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
   },
 });
