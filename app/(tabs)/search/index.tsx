@@ -11,12 +11,20 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { TabPageLogoHeader } from "@/components/tab-page-logo-header";
+import {
+  TAB_PAGE_LOGO_HEADER_BOTTOM_PADDING,
+  TAB_PAGE_LOGO_HEADER_HEIGHT,
+  TAB_PAGE_LOGO_HEADER_HORIZONTAL_PADDING,
+  TAB_PAGE_LOGO_HEADER_ICON_SIZE,
+  TAB_PAGE_LOGO_HEADER_TOP_PADDING,
+  TAB_PAGE_LOGO_OFFSET,
+} from "@/components/tab-page-logo-header";
 import { TabPageScrollLayout } from "@/components/tab-page-scroll-layout";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const SEARCH_CATEGORIES = [
   { label: "Action", query: "action", color: "#F05B4A" },
@@ -78,18 +86,22 @@ export default function SearchScreen() {
           <View
             pointerEvents="none"
             style={[
-              styles.iosHeaderLogoWrap,
+              styles.iosHeaderSection,
               {
-                top: insets.top + 6,
+                height: TAB_PAGE_LOGO_HEADER_HEIGHT + insets.top,
+                paddingTop: insets.top + TAB_PAGE_LOGO_HEADER_TOP_PADDING,
               },
             ]}
           >
-            <Image
-              source={require("@/assets/images/search-logo.png")}
-              contentFit="contain"
-              contentPosition="left"
-              style={styles.iosHeaderLogo}
-            />
+            <View style={styles.iosHeaderRow}>
+              <Image
+                source={require("@/assets/images/search-logo.png")}
+                contentFit="contain"
+                contentPosition="left"
+                style={styles.iosHeaderLogo}
+              />
+              <View style={styles.iosHeaderSpacer} />
+            </View>
           </View>
         </>
       ) : null}
@@ -103,6 +115,7 @@ export default function SearchScreen() {
       ) : null}
 
       <TabPageScrollLayout
+        style={styles.scrollArea}
         contentInsetAdjustmentBehavior="never"
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
@@ -166,14 +179,33 @@ const styles = StyleSheet.create({
   container: {
     gap: 14,
   },
-  iosHeaderLogoWrap: {
+  scrollArea: {
+    flex: 1,
+  },
+  iosHeaderSection: {
     position: "absolute",
-    left: 12,
+    top: 0,
+    left: 0,
+    right: 0,
     zIndex: 2,
+    paddingHorizontal: TAB_PAGE_LOGO_HEADER_HORIZONTAL_PADDING,
+    paddingBottom: TAB_PAGE_LOGO_HEADER_BOTTOM_PADDING,
+    overflow: "hidden",
+    backgroundColor: "#FFFFFF",
+  },
+  iosHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   iosHeaderLogo: {
     width: 250,
     height: 75,
+    marginLeft: TAB_PAGE_LOGO_OFFSET,
+  },
+  iosHeaderSpacer: {
+    width: TAB_PAGE_LOGO_HEADER_ICON_SIZE,
+    height: TAB_PAGE_LOGO_HEADER_ICON_SIZE,
   },
   searchWrap: {
     flexDirection: "row",
