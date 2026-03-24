@@ -1,5 +1,4 @@
 ![app icon](./assets/images/app-icon.png)
-![robotube logo](./assets/images/robotube-logo.png)
 
 This is a video streaming app built with Expo and React Native.
 
