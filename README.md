@@ -1,6 +1,8 @@
 ![app icon](./assets/images/app-icon.png)
 
-This is robotube, a video streaming app built with Mux, Convex, Expo, React Native.
+![demo gif](./assets/images/demo-robotube.gif)
+
+This is robotube, a video streaming app built with Mux, Convex, Expo and React Native.
 
 This applicaiton uses Mux Robots, the latest video intelligence API by Mux.
 
