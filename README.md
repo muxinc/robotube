@@ -1,6 +1,6 @@
 ![app icon](./assets/images/app-icon.png)
 
-![demo gif](./assets/images/demo-robotube.gif)
+![demo gif](./assets/images/robotube-demo.gif)
 
 This is robotube, a video streaming app built with Mux, Convex, Expo and React Native.
 
