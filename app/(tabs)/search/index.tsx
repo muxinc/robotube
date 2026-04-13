@@ -37,6 +37,12 @@ const SEARCH_CATEGORIES = [
 
 export default function SearchScreen() {
   const headerHeight = useHeaderHeight();
+  const stableHeaderHeight = useRef(headerHeight);
+  // Capture the initial header height so it doesn't shift when the
+  // iOS native search bar animates into its focused state.
+  if (stableHeaderHeight.current === 0 && headerHeight > 0) {
+    stableHeaderHeight.current = headerHeight;
+  }
   const isFocused = useIsFocused();
   const isIOS = Platform.OS === "ios";
   const insets = useSafeAreaInsets();
@@ -121,7 +127,7 @@ export default function SearchScreen() {
         keyboardShouldPersistTaps="handled"
         includeTopInset={false}
         containerStyle={styles.container}
-        topPaddingOffset={isIOS ? headerHeight + 18 : 18}
+        topPaddingOffset={isIOS ? (stableHeaderHeight.current || headerHeight) + 18 : 18}
       >
         {!isIOS ? (
           <View style={styles.searchWrap}>

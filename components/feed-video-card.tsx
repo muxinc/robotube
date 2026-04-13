@@ -19,6 +19,7 @@ export type FeedVideoItem = {
   keyMomentsGeneratedAtMs: number | null;
   keyMomentsUnavailableReason: string | null;
   channelName: string;
+  channelAvatarUrl: string | null;
   durationSeconds: number | null;
   createdAtMs: number;
 };
@@ -156,9 +157,17 @@ export function FeedVideoCard({
 
       <View style={styles.metaRow}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>
-            {item.channelName.trim().charAt(0).toUpperCase() || "R"}
-          </Text>
+          {item.channelAvatarUrl ? (
+            <Image
+              source={{ uri: item.channelAvatarUrl }}
+              contentFit="cover"
+              style={styles.avatarImage}
+            />
+          ) : (
+            <Text style={styles.avatarText}>
+              {item.channelName.trim().charAt(0).toUpperCase() || "R"}
+            </Text>
+          )}
         </View>
         <View style={styles.metaTextWrap}>
           <Text numberOfLines={2} style={styles.title}>
@@ -231,6 +240,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#FF4FA7",
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
+  },
+  avatarImage: {
+    width: "100%",
+    height: "100%",
   },
   avatarText: {
     color: "#fff",

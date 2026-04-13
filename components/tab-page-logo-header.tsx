@@ -1,6 +1,6 @@
 import { Image } from "expo-image";
 import { type ReactNode } from "react";
-import { Platform, StyleSheet, View, type ImageSourcePropType } from "react-native";
+import { Platform, Pressable, StyleSheet, View, type ImageSourcePropType } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export const TAB_PAGE_LOGO_HEADER_HORIZONTAL_PADDING = 12;
@@ -19,6 +19,7 @@ type TabPageLogoHeaderProps = {
   includeTopInset?: boolean;
   logoOffset?: number;
   rightAccessory?: ReactNode;
+  onIconPress?: () => void;
   transparentOnIOS?: boolean;
 };
 
@@ -30,6 +31,7 @@ export function TabPageLogoHeader({
   includeTopInset = true,
   logoOffset = TAB_PAGE_LOGO_OFFSET,
   rightAccessory,
+  onIconPress,
   transparentOnIOS = false,
 }: TabPageLogoHeaderProps) {
   const insets = useSafeAreaInsets();
@@ -58,13 +60,17 @@ export function TabPageLogoHeader({
 
       <View style={styles.actions}>
         {rightAccessory ?? (
-          <View style={styles.iconButton}>
+          <Pressable
+            style={styles.iconButton}
+            onPress={onIconPress}
+            hitSlop={8}
+          >
             <Image
               source={require("../assets/images/app-icon.png")}
               contentFit="contain"
               style={styles.iconImage}
             />
-          </View>
+          </Pressable>
         )}
       </View>
     </View>

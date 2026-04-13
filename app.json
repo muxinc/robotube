@@ -14,8 +14,8 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSPhotoLibraryUsageDescription": "Allow Robotube to access your photos so you can upload videos.",
-        "NSCameraUsageDescription": "Allow Robotube to record videos you want to upload.",
-        "NSMicrophoneUsageDescription": "Allow Robotube to record audio with your videos."
+        "NSCameraUsageDescription": "Allow Robotube to use your camera for uploads and live streaming.",
+        "NSMicrophoneUsageDescription": "Allow Robotube to use your microphone for uploads and live streaming."
       }
     },
     "android": {
@@ -24,6 +24,11 @@
         "foregroundImage": "./assets/images/app-icon.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
       "predictiveBackGestureEnabled": false,
       "package": "com.joshmux.robotube"
     },
@@ -49,10 +54,12 @@
         "expo-image-picker",
         {
           "photosPermission": "Allow Robotube to access your photos so you can upload videos.",
-          "cameraPermission": "Allow Robotube to record videos you want to upload.",
-          "microphonePermission": "Allow Robotube to record audio with your videos."
+          "cameraPermission": "Allow Robotube to use your camera for uploads and live streaming.",
+          "microphonePermission": "Allow Robotube to use your microphone for uploads and live streaming."
         }
       ],
+      "@livekit/react-native-expo-plugin",
+      "@config-plugins/react-native-webrtc",
       "expo-secure-store",
       "expo-video",
       "expo-font",

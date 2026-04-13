@@ -9,12 +9,50 @@ function normalizeUsername(input: string) {
   return input.trim().toLowerCase();
 }
 
+async function resolveAvatarUrl(
+  ctx: any,
+  avatarStorageId: unknown,
+  fallbackImage: unknown,
+) {
+  if (typeof avatarStorageId === "string" && avatarStorageId.length > 0) {
+    const storageUrl = await ctx.storage.getUrl(avatarStorageId);
+    if (storageUrl) {
+      return storageUrl;
+    }
+  }
+
+  return typeof fallbackImage === "string" && fallbackImage.length > 0
+    ? fallbackImage
+    : null;
+}
+
 export const currentUser = query({
   args: {},
   handler: async (ctx) => {
     const userId = await getAuthUserId(ctx);
     if (!userId) return null;
-    return await ctx.db.get(userId);
+
+    const user = await ctx.db.get(userId);
+    if (!user) return null;
+
+    return {
+      ...user,
+      avatarUrl: await resolveAvatarUrl(ctx, (user as any).avatarStorageId, user.image),
+    };
+  },
+});
+
+export const generateAvatarUploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      throw new Error("You must be signed in to change your profile picture.");
+    }
+
+    return {
+      uploadUrl: await ctx.storage.generateUploadUrl(),
+    };
   },
 });
 
@@ -91,6 +129,41 @@ export const updateUsername = mutation({
     return {
       ok: true,
       username,
+    };
+  },
+});
+
+export const updateProfileImage = mutation({
+  args: {
+    storageId: v.id("_storage"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      throw new Error("You must be signed in to change your profile picture.");
+    }
+
+    const user = await ctx.db.get(userId);
+    if (!user) {
+      throw new Error("Could not find your user profile.");
+    }
+
+    const previousAvatarStorageId = (user as any).avatarStorageId;
+    if (
+      typeof previousAvatarStorageId === "string" &&
+      previousAvatarStorageId.length > 0 &&
+      previousAvatarStorageId !== args.storageId
+    ) {
+      await ctx.storage.delete(previousAvatarStorageId);
+    }
+
+    await ctx.db.patch(userId, {
+      avatarStorageId: args.storageId,
+    });
+
+    return {
+      ok: true,
+      avatarUrl: await ctx.storage.getUrl(args.storageId),
     };
   },
 });

@@ -3,11 +3,13 @@ import { useIsFocused, useScrollToTop } from "@react-navigation/native";
 import { usePaginatedQuery } from "convex/react";
 import { useRef } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { useRouter } from "expo-router";
 
 import {
   FeedVideoCard,
   type FeedVideoItem,
 } from "@/components/feed-video-card";
+import { LiveNowSection } from "@/components/live-now-section";
 import { TabPageLogoHeader } from "@/components/tab-page-logo-header";
 import { api } from "@/convex/_generated/api";
 import { useFeedFocusController } from "@/hooks/use-feed-focus-controller";
@@ -16,6 +18,7 @@ const INITIAL_FEED_PAGE_SIZE = 16;
 const FEED_LOAD_MORE_COUNT = 12;
 
 export default function HomePage() {
+  const router = useRouter();
   const isTabFocused = useIsFocused();
   const feedListRef = useRef<FlashListRef<FeedVideoItem> | null>(null);
   const {
@@ -54,6 +57,7 @@ export default function HomePage() {
         width={250}
         height={75}
         transparentOnIOS
+        onIconPress={() => router.push("/live/go-live" as never)}
       />
 
       <FlashList
@@ -95,23 +99,7 @@ export default function HomePage() {
         }}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.feedContent}
-        ListHeaderComponent={
-          // Debug visibility card (kept for future troubleshooting)
-          // feedDebugStats && feedDebugStats.hiddenTotal > 0 ? (
-          //   <View style={styles.debugCard}>
-          //     <Text style={styles.debugTitle}>Some videos are hidden from Home</Text>
-          //     <Text style={styles.debugText}>
-          //       Showing {feedDebugStats.visible} of {feedDebugStats.scanned} scanned.
-          //     </Text>
-          //     <Text style={styles.debugText}>
-          //       Private: {feedDebugStats.hiddenPrivateVisibility} | Not ready/deleted: {" "}
-          //       {feedDebugStats.hiddenNotReadyOrDeleted} | Missing playback: {" "}
-          //       {feedDebugStats.hiddenNoPublicPlayback}
-          //     </Text>
-          //   </View>
-          // ) : null
-          null
-        }
+        ListHeaderComponent={<LiveNowSection />}
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>

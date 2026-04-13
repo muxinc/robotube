@@ -11,8 +11,11 @@ import { Platform } from "react-native";
 import "react-native-reanimated";
 
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { registerGlobals } from "@/lib/livekit";
 import { authTokenStorage } from "@/lib/auth-token-storage";
 import { convex } from "@/lib/convex";
+
+registerGlobals();
 
 export const unstable_settings = {
   anchor: "(tabs)",
@@ -36,6 +39,11 @@ export default function RootLayout() {
             <Stack.Screen name="modal" options={{ presentation: "modal" }} />
             <Stack.Screen name="search/[query]" />
             <Stack.Screen name="video/[muxAssetId]" />
+            <Stack.Screen
+              name="live/go-live"
+              options={{ presentation: "fullScreenModal" }}
+            />
+            <Stack.Screen name="live/watch/[muxLiveStreamId]" />
             <Stack.Screen name="sign-in" />
           </Stack>
 

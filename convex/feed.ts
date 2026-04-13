@@ -1,3 +1,4 @@
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 
@@ -44,6 +45,7 @@ type FeedVideoRow = {
   keyMomentsGeneratedAtMs: number | null;
   keyMomentsUnavailableReason: string | null;
   channelName: string;
+  channelAvatarUrl: string | null;
   createdAtMs: number;
 };
 
@@ -72,6 +74,51 @@ function asStringArray(value: unknown): string[] {
 
 function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function asPlaybackIds(value: unknown): PlaybackId[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item): item is PlaybackId => typeof item === "object" && item !== null,
+  );
+}
+
+async function resolveChannelInfo(ctx: any, metadataUserId: string | null) {
+  let channelName = "Robotube";
+  let channelAvatarUrl: string | null = null;
+
+  if (!metadataUserId) {
+    return { channelName, channelAvatarUrl };
+  }
+
+  try {
+    const uploader = await ctx.db.get(metadataUserId as Id<"users">);
+    const uploaderUsername = asString((uploader as any)?.username);
+    const uploaderName = asString((uploader as any)?.name);
+    const uploaderEmail = asString((uploader as any)?.email);
+    const uploaderImage = asString((uploader as any)?.image);
+    const uploaderAvatarStorageId = asString((uploader as any)?.avatarStorageId);
+
+    if (uploaderUsername) {
+      channelName = `@${uploaderUsername}`;
+    } else if (uploaderName) {
+      channelName = uploaderName;
+    } else if (uploaderEmail) {
+      channelName = uploaderEmail.split("@")[0] || channelName;
+    }
+
+    if (uploaderAvatarStorageId) {
+      channelAvatarUrl = await ctx.storage.getUrl(uploaderAvatarStorageId);
+    }
+
+    if (!channelAvatarUrl && uploaderImage) {
+      channelAvatarUrl = uploaderImage;
+    }
+  } catch {
+    // Keep default channel metadata fallback.
+  }
+
+  return { channelName, channelAvatarUrl };
 }
 
 function asChapterArray(value: unknown): Array<{ title: string; startTime: number }> {
@@ -157,56 +204,47 @@ function asKeyMomentArray(value: unknown): FeedVideoRow["keyMoments"] {
     .sort((a, b) => a.startMs - b.startMs);
 }
 
-async function buildFeedVideoRow(ctx: any, asset: CachedMuxAsset): Promise<FeedBuildResult> {
-  if (asset.deletedAtMs || asset.status !== "ready") {
+async function buildFeedVideoRowFromSource(
+  ctx: any,
+  source: {
+    muxAssetId: string;
+    playbackIds: unknown;
+    durationSeconds: number | null;
+    titleFallback?: string;
+    createdAtMs: number;
+    status: unknown;
+    deletedAtMs: unknown;
+    metadata: any;
+  },
+): Promise<FeedBuildResult> {
+  if (source.deletedAtMs || source.status !== "ready") {
     return { row: null, hiddenReason: "not_ready_or_deleted" };
   }
 
-  const playbackIds = (asset.playbackIds ?? []) as PlaybackId[];
+  const playbackIds = asPlaybackIds(source.playbackIds);
   const playback =
     playbackIds.find((id) => id.policy === "public") ?? playbackIds[0];
   if (!playback?.id) {
     return { row: null, hiddenReason: "no_public_playback" };
   }
 
-  const video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
-    muxAssetId: asset.muxAssetId as string,
-  });
-  const metadataValue = (video as any)?.metadata;
-  const metadata = Array.isArray(metadataValue)
-    ? metadataValue[0]
-    : metadataValue ?? null;
+  const metadata = source.metadata;
   const metadataUserId = asString(metadata?.userId);
-
-  let channelName = metadata?.custom?.channelName ?? "Robotube";
-  if (metadataUserId) {
-    try {
-      const uploader = await ctx.db.get(metadataUserId as Id<"users">);
-      const uploaderUsername = asString((uploader as any)?.username);
-      const uploaderName = asString((uploader as any)?.name);
-      const uploaderEmail = asString((uploader as any)?.email);
-
-      if (uploaderUsername) {
-        channelName = `@${uploaderUsername}`;
-      } else if (uploaderName) {
-        channelName = uploaderName;
-      } else if (uploaderEmail) {
-        channelName = uploaderEmail.split("@")[0] || channelName;
-      }
-    } catch {
-      // Keep metadata/custom fallback channel name.
-    }
-  }
+  const channelInfo = await resolveChannelInfo(ctx, metadataUserId);
+  const channelName = metadata?.custom?.channelName ?? channelInfo.channelName;
 
   return {
     hiddenReason: null,
     row: {
-      muxAssetId: asset.muxAssetId as string,
+      muxAssetId: source.muxAssetId,
       playbackId: playback.id,
       playbackUrl: `https://stream.mux.com/${playback.id}.m3u8`,
       thumbnailUrl: `https://image.mux.com/${playback.id}/thumbnail.jpg?width=1280`,
-      durationSeconds: asset.durationSeconds ?? null,
-      title: metadata?.title ?? `Video ${String(asset.muxAssetId).slice(0, 6)}`,
+      durationSeconds: source.durationSeconds,
+      title:
+        metadata?.title ??
+        source.titleFallback ??
+        `Video ${String(source.muxAssetId).slice(0, 6)}`,
       summary: asString(metadata?.description),
       tags: asStringArray(metadata?.tags),
       chapters: asChapterArray(metadata?.custom?.aiChapters),
@@ -214,9 +252,30 @@ async function buildFeedVideoRow(ctx: any, asset: CachedMuxAsset): Promise<FeedB
       keyMomentsGeneratedAtMs: asNumber(metadata?.custom?.aiKeyMomentsGeneratedAtMs),
       keyMomentsUnavailableReason: asString(metadata?.custom?.aiKeyMomentsUnavailableReason),
       channelName,
-      createdAtMs: asset.createdAtMs ?? Date.now(),
+      channelAvatarUrl: channelInfo.channelAvatarUrl,
+      createdAtMs: source.createdAtMs,
     },
   };
+}
+
+async function buildFeedVideoRow(ctx: any, asset: CachedMuxAsset): Promise<FeedBuildResult> {
+  const video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
+    muxAssetId: asset.muxAssetId as string,
+  });
+  const metadataValue = (video as any)?.metadata;
+  const metadata = Array.isArray(metadataValue)
+    ? metadataValue[0]
+    : metadataValue ?? null;
+
+  return await buildFeedVideoRowFromSource(ctx, {
+    muxAssetId: asset.muxAssetId as string,
+    playbackIds: asset.playbackIds,
+    durationSeconds: asset.durationSeconds ?? null,
+    createdAtMs: asset.createdAtMs ?? Date.now(),
+    status: asset.status,
+    deletedAtMs: asset.deletedAtMs,
+    metadata,
+  });
 }
 
 async function buildVisibleFeedRows(
@@ -243,6 +302,42 @@ export const listFeedVideos = query({
     );
 
     return await buildVisibleFeedRows(ctx, assets, requestedLimit);
+  },
+});
+
+export const listCurrentUserUploadedVideos = query({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return [];
+
+    const requestedLimit = Math.max(1, Math.floor(args.limit ?? 12));
+    const uploads = await ctx.runQuery(components.mux.videos.listVideosForUser, {
+      userId,
+      limit: requestedLimit * FEED_SCAN_MULTIPLIER,
+    });
+
+    const rows = await Promise.all(
+      (uploads as any[])
+        .filter((entry) => typeof entry?.asset?.muxAssetId === "string")
+        .map((entry) =>
+          buildFeedVideoRowFromSource(ctx, {
+            muxAssetId: entry.asset.muxAssetId,
+            playbackIds: entry.asset.playbackIds,
+            durationSeconds: asNumber(entry.asset.durationSeconds),
+            titleFallback: asString(entry.metadata?.title) ?? undefined,
+            createdAtMs: asNumber(entry.asset.createdAtMs) ?? Date.now(),
+            status: entry.asset.status,
+            deletedAtMs: entry.asset.deletedAtMs,
+            metadata: entry.metadata,
+          }),
+        ),
+    );
+
+    return rows
+      .flatMap((result) => (result.row ? [result.row] : []))
+      .sort((a, b) => b.createdAtMs - a.createdAtMs)
+      .slice(0, requestedLimit);
   },
 });
 

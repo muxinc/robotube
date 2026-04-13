@@ -382,6 +382,31 @@ export const ingestMuxWebhook = internalAction({
           }
         );
       }
+
+      // Sync status to our app's liveStreams table
+      if (
+        eventType === "video.live_stream.active" ||
+        eventType === "video.live_stream.idle" ||
+        eventType === "video.live_stream.disabled"
+      ) {
+        const statusMap: Record<string, "active" | "idle" | "disabled"> = {
+          "video.live_stream.active": "active",
+          "video.live_stream.idle": "idle",
+          "video.live_stream.disabled": "disabled",
+        };
+        const newStatus = statusMap[eventType];
+        if (newStatus) {
+          await ctx.runMutation(
+            (internal as any).liveStreamMutations.patchLiveStreamInternal,
+            {
+              muxLiveStreamId: objectId,
+              status: newStatus,
+              ...(newStatus === "idle" ? { endedAtMs: Date.now() } : {}),
+            },
+          );
+        }
+      }
+
       return { skipped: false };
     }
 

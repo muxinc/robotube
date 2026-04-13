@@ -7,6 +7,7 @@ export default defineSchema({
   users: defineTable({
     name: v.optional(v.string()),
     image: v.optional(v.string()),
+    avatarStorageId: v.optional(v.id("_storage")),
     email: v.optional(v.string()),
     emailVerificationTime: v.optional(v.number()),
     phone: v.optional(v.string()),
@@ -123,4 +124,24 @@ export default defineSchema({
     startedAtMs: v.number(),
     expiresAtMs: v.number(),
   }).index("by_asset", ["muxAssetId"]),
+  liveStreams: defineTable({
+    userId: v.id("users"),
+    title: v.string(),
+    muxLiveStreamId: v.string(),
+    livekitRoomName: v.string(),
+    broadcasterIdentity: v.string(),
+    livekitEgressId: v.optional(v.string()),
+    streamKey: v.string(),
+    playbackId: v.optional(v.string()),
+    status: v.union(
+      v.literal("idle"),
+      v.literal("active"),
+      v.literal("disabled"),
+    ),
+    createdAtMs: v.number(),
+    endedAtMs: v.optional(v.number()),
+  })
+    .index("by_mux_live_stream", ["muxLiveStreamId"])
+    .index("by_user", ["userId"])
+    .index("by_status", ["status", "createdAtMs"]),
 });
