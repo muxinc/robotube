@@ -20,13 +20,15 @@
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_NO_CAPABILITY_SYNC": "1"
+        "EXPO_NO_CAPABILITY_SYNC": "1",
+        "EXPO_PUBLIC_CONVEX_URL": "https://deafening-pigeon-620.convex.cloud"
       }
     }
   },
   "submit": {
     "production": {
       "ios": {
+        "appleId": "jalphonse@mux.com",
         "appleTeamId": "XX95P4Y787"
       }
     }

@@ -7,13 +7,14 @@ import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ConvexProvider } from "convex/react";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { Platform } from "react-native";
+import { Platform, StyleSheet, View } from "react-native";
 import "react-native-reanimated";
 
+import { ThemedText } from "@/components/themed-text";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { registerGlobals } from "@/lib/livekit";
 import { authTokenStorage } from "@/lib/auth-token-storage";
-import { convex } from "@/lib/convex";
+import { convex, convexConfigError } from "@/lib/convex";
 
 registerGlobals();
 
@@ -23,6 +24,21 @@ export const unstable_settings = {
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+
+  if (!convex) {
+    return (
+      <View style={styles.errorScreen}>
+        <ThemedText type="title" style={styles.errorTitle}>
+          App configuration error
+        </ThemedText>
+        <ThemedText style={styles.errorText}>{convexConfigError}</ThemedText>
+        <ThemedText style={styles.errorText}>
+          This build is missing its Convex client URL. Rebuild after setting
+          `EXPO_PUBLIC_CONVEX_URL` in EAS.
+        </ThemedText>
+      </View>
+    );
+  }
 
   return (
     <ConvexProvider client={convex}>
@@ -53,3 +69,18 @@ export default function RootLayout() {
     </ConvexProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  errorScreen: {
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    gap: 12,
+  },
+  errorTitle: {
+    textAlign: "center",
+  },
+  errorText: {
+    textAlign: "center",
+  },
+});
