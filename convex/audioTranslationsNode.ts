@@ -7,7 +7,7 @@ import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-trans
 import { components, internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
 
-const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v1";
+const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v0";
 const TRANSLATE_AUDIO_ASSET_WAIT_INTERVAL_MS = 15 * 1000;
 const TRANSLATE_AUDIO_FALLBACK_POLL_INTERVAL_MS = 2 * 60 * 1000;
 const TRANSLATE_AUDIO_MAX_ASSET_WAIT_ATTEMPTS = 40;

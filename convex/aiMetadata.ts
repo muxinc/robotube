@@ -10,7 +10,7 @@ const MAX_ATTEMPTS = 10;
 const AI_METADATA_READY_DELAY_MS = 5 * 1000;
 const AI_METADATA_SOURCE_CAPTIONS_RETRY_DELAY_MS = 30 * 1000;
 const AI_METADATA_FALLBACK_POLL_DELAY_MS = 2 * 60 * 1000;
-const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v1";
+const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v0";
 const SUMMARIZE_TONE = "neutral";
 const SUMMARIZE_TITLE_LENGTH = 80;
 const SUMMARIZE_DESCRIPTION_LENGTH = 320;
@@ -1066,8 +1066,7 @@ async function ensureAiMetadataForAssetImpl(
   const shouldScheduleAiMetadata =
     !muxRobotsPollingDisabled &&
     (missingSummary || missingChapters || missingKeyMoments) &&
-    !refreshedCustom.aiMetadataRetryScheduled &&
-    !refreshedCustom.aiMetadataRequestedAtMs;
+    !refreshedCustom.aiMetadataRetryScheduled;
 
   if (shouldScheduleCaptions || shouldScheduleAiMetadata) {
     await ctx.runMutation(

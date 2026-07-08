@@ -46,6 +46,24 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const strings = value.filter((item): item is string => typeof item === "string");
+  return strings.length > 0 ? strings : undefined;
+}
+
+function asVisibility(
+  value: unknown,
+): "private" | "unlisted" | "public" | undefined {
+  return value === "private" || value === "unlisted" || value === "public"
+    ? value
+    : undefined;
+}
+
 function normalizeLanguageCode(value: unknown) {
   if (typeof value !== "string") return "";
   const normalized = value.trim().toLowerCase().split("-")[0] ?? "";
@@ -194,6 +212,73 @@ function isNonRetryableCaptionsError(message: string) {
   );
 }
 
+function isActiveMuxRobotsJobStatus(value: unknown) {
+  return value === "pending" || value === "processing";
+}
+
+async function upsertCaptionMetadataFields(
+  ctx: any,
+  args: { muxAssetId: string; userId: string },
+  customFields: Record<string, unknown>,
+) {
+  const latestVideo = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
+    muxAssetId: args.muxAssetId,
+    userId: args.userId,
+  });
+  const latestMetadata = getMetadataRecord(latestVideo?.metadata);
+  const latestCustom = asCustomRecord(latestMetadata.custom);
+  const nextCustom = {
+    ...latestCustom,
+    ...customFields,
+  };
+
+  await ctx.runMutation(components.mux.videos.upsertVideoMetadata, {
+    muxAssetId: args.muxAssetId,
+    userId: args.userId,
+    title: asString(latestMetadata.title),
+    description: asString(latestMetadata.description),
+    tags: asStringArray(latestMetadata.tags),
+    visibility: asVisibility(latestMetadata.visibility),
+    custom: nextCustom,
+  });
+
+  return nextCustom;
+}
+
+async function maybeScheduleAiMetadataForReadyCaptions(
+  ctx: any,
+  args: { muxAssetId: string; userId: string },
+  custom: Record<string, unknown>,
+) {
+  const missingSummary =
+    asNumber(custom.aiGeneratedAtMs) === undefined &&
+    !isActiveMuxRobotsJobStatus(custom.aiSummaryJobStatus);
+  const missingChapters =
+    asNumber(custom.aiChaptersGeneratedAtMs) === undefined &&
+    !asString(custom.aiChaptersUnavailableReason) &&
+    !isActiveMuxRobotsJobStatus(custom.aiChaptersJobStatus);
+  const missingKeyMoments =
+    asNumber(custom.aiKeyMomentsGeneratedAtMs) === undefined &&
+    !asString(custom.aiKeyMomentsUnavailableReason) &&
+    !isActiveMuxRobotsJobStatus(custom.aiKeyMomentsJobStatus);
+
+  if (!missingSummary && !missingChapters && !missingKeyMoments) {
+    return false;
+  }
+
+  await ctx.scheduler.runAfter(
+    0,
+    (internal as any).aiMetadata.generateSummaryAndTagsForAssetInternal,
+    {
+      muxAssetId: args.muxAssetId,
+      userId: args.userId,
+      attempt: 0,
+    },
+  );
+
+  return true;
+}
+
 export const ensureGeneratedCaptionsTrackInternal = internalAction({
   args: {
     muxAssetId: v.string(),
@@ -212,16 +297,30 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
 
     const metadata = getMetadataRecord(video?.metadata);
     const custom = asCustomRecord(metadata.custom);
-    if (custom.aiCaptionsGeneratedAtMs || custom.aiCaptionsUnavailableReason) {
-      return { ok: true, skipped: true, reason: "already_handled" };
-    }
-
     if (asNumber(custom.moderationCheckedAtMs) === undefined) {
       return { ok: true, skipped: true, reason: "moderation_pending" };
     }
 
     if (custom.moderationPassed !== true) {
       return { ok: true, skipped: true, reason: "moderation_rejected" };
+    }
+
+    if (custom.aiCaptionsGeneratedAtMs && asString(custom.aiSourceLanguageCode)) {
+      const scheduledAiMetadata = await maybeScheduleAiMetadataForReadyCaptions(
+        ctx,
+        args,
+        custom,
+      );
+      return {
+        ok: true,
+        skipped: true,
+        reason: "already_handled",
+        scheduledAiMetadata,
+      };
+    }
+
+    if (asString(custom.aiCaptionsUnavailableReason)) {
+      return { ok: true, skipped: true, reason: "already_handled" };
     }
 
     try {
@@ -284,38 +383,33 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
           detectedLanguageCode,
         });
 
-        await ctx.runMutation(components.mux.videos.upsertVideoMetadata, {
-          muxAssetId: args.muxAssetId,
-          userId: args.userId,
-          custom: {
-            ...custom,
-            aiCaptionsGeneratedAtMs: Date.now(),
-            aiCaptionsTrackId: sourceCaptionsTrack.id,
-            aiSourceLanguageCode: detectedLanguageCode,
-            aiSourceLanguageLabel: getLanguageDisplayLabel(detectedLanguageCode),
-            aiCaptionsSource:
-              sourceCaptionsTrack.text_source === "generated_vod" ||
-              sourceCaptionsTrack.textSource === "generated_vod" ||
-              sourceCaptionsTrack.passthrough === GENERATED_CAPTIONS_PASSTHROUGH
-                ? "mux_generated"
-                : "existing",
-            aiCaptionsUnavailableReason: null,
-            aiCaptionsRetryScheduled: false,
-          },
+        const nextCustom = await upsertCaptionMetadataFields(ctx, args, {
+          aiCaptionsGeneratedAtMs: Date.now(),
+          aiCaptionsTrackId: sourceCaptionsTrack.id,
+          aiSourceLanguageCode: detectedLanguageCode,
+          aiSourceLanguageLabel: getLanguageDisplayLabel(detectedLanguageCode),
+          aiCaptionsSource:
+            sourceCaptionsTrack.text_source === "generated_vod" ||
+            sourceCaptionsTrack.textSource === "generated_vod" ||
+            sourceCaptionsTrack.passthrough === GENERATED_CAPTIONS_PASSTHROUGH
+              ? "mux_generated"
+              : "existing",
+          aiCaptionsUnavailableReason: null,
+          aiCaptionsRetryScheduled: false,
         });
-        return { ok: true, skipped: false, alreadyExisted: true };
+        const scheduledAiMetadata = await maybeScheduleAiMetadataForReadyCaptions(
+          ctx,
+          args,
+          nextCustom,
+        );
+        return { ok: true, skipped: false, alreadyExisted: true, scheduledAiMetadata };
       }
 
       const audioTrack = findPrimaryAudioTrack(asset);
       if (!audioTrack?.id) {
-        await ctx.runMutation(components.mux.videos.upsertVideoMetadata, {
-          muxAssetId: args.muxAssetId,
-          userId: args.userId,
-          custom: {
-            ...custom,
-            aiCaptionsUnavailableReason: "No audio track available for subtitle generation.",
-            aiCaptionsRetryScheduled: false,
-          },
+        await upsertCaptionMetadataFields(ctx, args, {
+          aiCaptionsUnavailableReason: "No audio track available for subtitle generation.",
+          aiCaptionsRetryScheduled: false,
         });
         return { ok: false, skipped: true, reason: "no_audio_track", retryScheduled: false };
       }
@@ -331,16 +425,11 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
       });
 
       const shouldRetry = nextAttempt < MAX_ATTEMPTS;
-      await ctx.runMutation(components.mux.videos.upsertVideoMetadata, {
-        muxAssetId: args.muxAssetId,
-        userId: args.userId,
-        custom: {
-          ...custom,
-          aiCaptionsRequestedAtMs: Date.now(),
-          aiCaptionsAttemptCount: nextAttempt,
-          aiCaptionsUnavailableReason: null,
-          aiCaptionsRetryScheduled: shouldRetry,
-        },
+      await upsertCaptionMetadataFields(ctx, args, {
+        aiCaptionsRequestedAtMs: Date.now(),
+        aiCaptionsAttemptCount: nextAttempt,
+        aiCaptionsUnavailableReason: null,
+        aiCaptionsRetryScheduled: shouldRetry,
       });
 
       if (shouldRetry) {
@@ -361,17 +450,12 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
       const retryable = !isNonRetryableCaptionsError(message);
       const shouldRetry = retryable && nextAttempt < MAX_ATTEMPTS;
 
-      await ctx.runMutation(components.mux.videos.upsertVideoMetadata, {
-        muxAssetId: args.muxAssetId,
-        userId: args.userId,
-        custom: {
-          ...custom,
-          aiCaptionsFailedAtMs: Date.now(),
-          aiCaptionsLastError: message,
-          aiCaptionsAttemptCount: nextAttempt,
-          aiCaptionsRetryScheduled: shouldRetry,
-          ...(retryable ? {} : { aiCaptionsUnavailableReason: message }),
-        },
+      await upsertCaptionMetadataFields(ctx, args, {
+        aiCaptionsFailedAtMs: Date.now(),
+        aiCaptionsLastError: message,
+        aiCaptionsAttemptCount: nextAttempt,
+        aiCaptionsRetryScheduled: shouldRetry,
+        ...(retryable ? {} : { aiCaptionsUnavailableReason: message }),
       });
 
       if (shouldRetry) {

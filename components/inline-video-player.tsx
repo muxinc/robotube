@@ -1,9 +1,17 @@
-import { useVideoPlayer, VideoView } from "expo-video";
-import { memo, useEffect, useRef } from "react";
+import {
+  MuxVideoView,
+  useMuxVideoPlayer,
+  type MuxVideoPlayer,
+} from "@mux/mux-react-native-player";
+import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { StyleSheet, View } from "react-native";
 
+import { runMuxPlayerCommand } from "@/lib/mux-player-command";
+
 type InlineVideoPlayerProps = {
-  playbackUrl: string;
+  playbackId: string;
+  muxAssetId?: string;
+  title?: string;
   isFocused: boolean;
   startAtSeconds?: number;
   onTimeUpdate?: (seconds: number) => void;
@@ -11,7 +19,9 @@ type InlineVideoPlayerProps = {
 };
 
 export const InlineVideoPlayer = memo(function InlineVideoPlayer({
-  playbackUrl,
+  playbackId,
+  muxAssetId,
+  title,
   isFocused,
   startAtSeconds,
   onTimeUpdate,
@@ -20,15 +30,30 @@ export const InlineVideoPlayer = memo(function InlineVideoPlayer({
   const hasAppliedStartAtRef = useRef(false);
   const focusedRef = useRef(isFocused);
 
-  const player = useVideoPlayer({ uri: playbackUrl, contentType: "hls" }, (player) => {
-    player.loop = true;
-    player.muted = muted;
-    player.playbackRate = 1;
-    player.timeUpdateEventInterval = 0.25;
-  });
+  const source = useMemo(
+    () => ({
+      playbackId,
+      assetId: muxAssetId,
+      metadata: {
+        playerName: "Robotube feed preview",
+        videoId: muxAssetId,
+        videoTitle: title,
+      },
+    }),
+    [muxAssetId, playbackId, title],
+  );
+  const setupPlayer = useCallback(
+    (player: MuxVideoPlayer) => {
+      runMuxPlayerCommand(player.setLoop(true));
+      runMuxPlayerCommand(player.setMuted(muted));
+      runMuxPlayerCommand(player.setPlaybackRate(1));
+    },
+    [muted],
+  );
+  const player = useMuxVideoPlayer(source, setupPlayer);
 
   useEffect(() => {
-    player.muted = muted;
+    runMuxPlayerCommand(player.setMuted(muted));
   }, [muted, player]);
 
   useEffect(() => {
@@ -36,50 +61,35 @@ export const InlineVideoPlayer = memo(function InlineVideoPlayer({
   }, [isFocused]);
 
   useEffect(() => {
-    if (startAtSeconds === undefined || hasAppliedStartAtRef.current) return;
-    player.currentTime = Math.max(0, startAtSeconds);
-    hasAppliedStartAtRef.current = true;
-  }, [player, startAtSeconds]);
-
-  useEffect(() => {
-    const subscription = player.addListener("timeUpdate", (event) => {
-      onTimeUpdate?.(event.currentTime);
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  }, [onTimeUpdate, player]);
-
-  useEffect(() => {
-    const subscription = player.addListener("statusChange", (event) => {
-      if (event.status === "readyToPlay" && focusedRef.current) {
-        player.play();
-      }
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  }, [player]);
-
-  useEffect(() => {
     if (isFocused) {
-      if (player.status === "readyToPlay") {
-        player.play();
-      }
+      runMuxPlayerCommand(player.play());
     } else {
-      player.pause();
+      runMuxPlayerCommand(player.pause());
     }
   }, [isFocused, player]);
 
   return (
     <View style={styles.container}>
-      <VideoView
+      <MuxVideoView
         player={player}
         style={styles.video}
         contentFit="cover"
-        nativeControls={false}
+        controls="none"
+        allowsFullscreen={false}
+        timeUpdateEventInterval={0.25}
+        onStatusChange={(event) => {
+          if (event.status === "ready" && focusedRef.current) {
+            runMuxPlayerCommand(player.play());
+          }
+        }}
+        onSourceLoad={() => {
+          if (startAtSeconds === undefined || hasAppliedStartAtRef.current) return;
+          runMuxPlayerCommand(player.seekTo(Math.max(0, startAtSeconds)));
+          hasAppliedStartAtRef.current = true;
+        }}
+        onTimeUpdate={(event) => {
+          onTimeUpdate?.(event.currentTime);
+        }}
       />
     </View>
   );

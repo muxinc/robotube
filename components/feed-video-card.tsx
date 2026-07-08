@@ -135,7 +135,9 @@ export function FeedVideoCard({
               style={[styles.previewLayer, !showPreview && styles.previewHidden]}
             >
               <InlineVideoPlayer
-                playbackUrl={item.playbackUrl}
+                playbackId={item.playbackId}
+                muxAssetId={item.muxAssetId}
+                title={item.title}
                 isFocused={isFocused}
                 startAtSeconds={previewPositionSeconds}
                 onTimeUpdate={setPreviewPositionSeconds}

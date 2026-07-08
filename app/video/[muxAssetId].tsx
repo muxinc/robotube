@@ -1,11 +1,25 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useUIMessages } from "@convex-dev/agent/react";
+import {
+  createMuxVideoPlayer,
+  MuxVideoView,
+  type MuxVideoChapter as MuxPlayerChapter,
+  type MuxVideoKeyMoment as MuxPlayerKeyMoment,
+  type MuxVideoPlayer,
+  type MuxVideoSummary as MuxPlayerSummary,
+} from "@mux/mux-react-native-player";
 import { useMutation, useQuery } from "convex/react";
 import { Image } from "expo-image";
 import { StatusBar } from "expo-status-bar";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { type SubtitleTrack, useVideoPlayer, VideoView } from "expo-video";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Alert,
   Animated,
@@ -34,101 +48,190 @@ import {
   formatPublished,
 } from "@/components/feed-video-card";
 import { api } from "@/convex/_generated/api";
-
-function getPreferredSubtitleTrack(tracks: SubtitleTrack[]) {
-  return tracks.find((track) => track.isDefault || track.autoSelect) ?? tracks[0] ?? null;
-}
+import { runMuxPlayerCommand } from "@/lib/mux-player-command";
 
 function FullVideoPlayer({
-  playbackUrl,
+  playbackId,
+  muxAssetId,
+  title,
+  summary,
+  tags,
+  chapters,
+  keyMoments,
   startAtSeconds,
   seekToSeconds,
   onSeekHandled,
   onTimeUpdate,
 }: {
-  playbackUrl: string;
+  playbackId: string;
+  muxAssetId: string;
+  title: string;
+  summary?: string | null;
+  tags?: string[];
+  chapters?: { title: string; startTime: number }[];
+  keyMoments?: FeedVideoKeyMoment[];
   startAtSeconds?: number;
   seekToSeconds?: number | null;
   onSeekHandled?: () => void;
   onTimeUpdate?: (seconds: number) => void;
 }) {
   const didSeekToStartRef = useRef(false);
+  const didSelectInitialCaptionTrackRef = useRef(false);
 
-  const player = useVideoPlayer(
-    { uri: playbackUrl, contentType: "hls" },
-    (videoPlayer) => {
-      videoPlayer.loop = false;
-      videoPlayer.play();
-    },
+  const source = useMemo(
+    () => ({
+      playbackId,
+      assetId: muxAssetId,
+      metadata: {
+        playerName: "Robotube video detail",
+        videoId: muxAssetId,
+        videoTitle: title,
+      },
+    }),
+    [muxAssetId, playbackId, title],
+  );
+  const sourceKey = useMemo(() => JSON.stringify(source), [source]);
+  const sourceKeyRef = useRef(sourceKey);
+  const [player] = useState<MuxVideoPlayer>(() => {
+    const videoPlayer = createMuxVideoPlayer(source);
+    runMuxPlayerCommand(videoPlayer.play());
+    return videoPlayer;
+  });
+  const [videoControlsEnabled, setVideoControlsEnabled] = useState(false);
+  const requestAutoplay = useCallback(() => {
+    runMuxPlayerCommand(player.play());
+  }, [player]);
+  const showVideoControls = useCallback(() => {
+    setVideoControlsEnabled(true);
+    requestAutoplay();
+  }, [requestAutoplay]);
+
+  const muxSummary = useMemo<MuxPlayerSummary | undefined>(
+    () =>
+      summary
+        ? {
+            title,
+            description: summary,
+            tags,
+          }
+        : undefined,
+    [summary, tags, title],
+  );
+  const muxChapters = useMemo<MuxPlayerChapter[]>(
+    () => chapters?.map((chapter) => ({ ...chapter })) ?? [],
+    [chapters],
+  );
+  const muxKeyMoments = useMemo<MuxPlayerKeyMoment[]>(
+    () =>
+      keyMoments?.map((moment, index) => ({
+        startTime: moment.startMs / 1000,
+        endTime: moment.endMs / 1000,
+        title: moment.title ?? `Key moment ${index + 1}`,
+        description: moment.audibleNarrative ?? moment.visualNarrative ?? undefined,
+        score: moment.overallScore ?? undefined,
+      })) ?? [],
+    [keyMoments],
   );
 
   useEffect(() => {
-    if (didSeekToStartRef.current) return;
-    if (startAtSeconds === undefined || Number.isNaN(startAtSeconds)) return;
-
-    player.currentTime = Math.max(0, startAtSeconds);
-    didSeekToStartRef.current = true;
-  }, [player, startAtSeconds]);
-
-  useEffect(() => {
-    if (seekToSeconds === undefined || seekToSeconds === null || Number.isNaN(seekToSeconds)) {
+    if (sourceKeyRef.current === sourceKey) {
       return;
     }
 
-    player.currentTime = Math.max(0, seekToSeconds);
-    onSeekHandled?.();
+    sourceKeyRef.current = sourceKey;
+    didSeekToStartRef.current = false;
+    didSelectInitialCaptionTrackRef.current = false;
+    setVideoControlsEnabled(false);
+    player.replace(source);
+    requestAutoplay();
+  }, [player, requestAutoplay, source, sourceKey]);
+
+  useEffect(
+    () => () => {
+      runMuxPlayerCommand(player.release());
+    },
+    [player],
+  );
+
+  const seekToStartPosition = useCallback(() => {
+    if (didSeekToStartRef.current) return;
+    if (startAtSeconds === undefined || Number.isNaN(startAtSeconds)) return;
+
+    didSeekToStartRef.current = true;
+    runMuxPlayerCommand(player.seekTo(Math.max(0, startAtSeconds)));
+  }, [player, startAtSeconds]);
+
+  const selectInitialCaptionTrack = useCallback(
+    (
+      captionTracks: { id: string }[] | undefined,
+      selectedCaptionTrackId?: string | null,
+    ) => {
+      if (
+        didSelectInitialCaptionTrackRef.current ||
+        selectedCaptionTrackId ||
+        !captionTracks?.length
+      ) {
+        return;
+      }
+
+      didSelectInitialCaptionTrackRef.current = true;
+      runMuxPlayerCommand(player.setCaptionTrack(captionTracks[0].id));
+    },
+    [player],
+  );
+
+  useEffect(() => {
+    if (
+      seekToSeconds === undefined ||
+      seekToSeconds === null ||
+      Number.isNaN(seekToSeconds)
+    ) {
+      return;
+    }
+
+    runMuxPlayerCommand(
+      player.seekTo(Math.max(0, seekToSeconds)).finally(() => {
+        onSeekHandled?.();
+      }),
+    );
   }, [onSeekHandled, player, seekToSeconds]);
 
-  useEffect(() => {
-    const subscription = player.addListener("timeUpdate", (event) => {
-      onTimeUpdate?.(event.currentTime);
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  }, [onTimeUpdate, player]);
-
-  useEffect(() => {
-    const ensureSubtitleTrack = (tracks: SubtitleTrack[]) => {
-      if (player.subtitleTrack || tracks.length === 0) {
-        return;
-      }
-
-      const nextTrack = getPreferredSubtitleTrack(tracks);
-      if (!nextTrack) {
-        return;
-      }
-
-      player.subtitleTrack = nextTrack;
-    };
-
-    ensureSubtitleTrack(player.availableSubtitleTracks);
-
-    const sourceLoadSubscription = player.addListener("sourceLoad", (event) => {
-      ensureSubtitleTrack(event.availableSubtitleTracks);
-    });
-    const availableSubtitleTracksSubscription = player.addListener(
-      "availableSubtitleTracksChange",
-      (event) => {
-        ensureSubtitleTrack(event.availableSubtitleTracks);
-      },
-    );
-
-    return () => {
-      sourceLoadSubscription.remove();
-      availableSubtitleTracksSubscription.remove();
-    };
-  }, [player]);
-
   return (
-    <VideoView
-      player={player}
-      nativeControls
-      contentFit="contain"
-      allowsVideoFrameAnalysis={false}
-      style={styles.video}
-    />
+    <View style={styles.video}>
+      <MuxVideoView
+        player={player}
+        controls={videoControlsEnabled ? "custom" : "none"}
+        controlsTheme={{ accentColor: "#FA50B5", progressTrackColor: "#FA50B5" }}
+        contentFit="contain"
+        style={StyleSheet.absoluteFill}
+        timeUpdateEventInterval={0.25}
+        robots={{
+          assetId: muxAssetId,
+          summary: muxSummary,
+          chapters: muxChapters,
+          keyMoments: muxKeyMoments,
+        }}
+        onSourceLoad={(event) => {
+          seekToStartPosition();
+          selectInitialCaptionTrack(event.captionTracks, event.selectedCaptionTrackId);
+          requestAutoplay();
+        }}
+        onStatusChange={(event) => {
+          selectInitialCaptionTrack(event.captionTracks, event.selectedCaptionTrackId);
+        }}
+        onTimeUpdate={(event) => {
+          onTimeUpdate?.(event.currentTime);
+        }}
+      />
+      {!videoControlsEnabled ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Show video controls"
+          onPress={showVideoControls}
+          style={styles.videoControlsActivator}
+        />
+      ) : null}
+    </View>
   );
 }
 
@@ -676,7 +779,13 @@ export default function VideoDetailPage() {
       <View style={styles.videoWrap}>
         <FullVideoPlayer
           key={selectedVideo.muxAssetId}
-          playbackUrl={selectedVideo.playbackUrl}
+          playbackId={selectedVideo.playbackId}
+          muxAssetId={selectedVideo.muxAssetId}
+          title={selectedVideo.title}
+          summary={selectedVideo.summary}
+          tags={selectedVideo.tags}
+          chapters={selectedVideo.chapters}
+          keyMoments={selectedVideo.keyMoments}
           startAtSeconds={startAtSeconds}
           seekToSeconds={seekToSeconds}
           onSeekHandled={() => setSeekToSeconds(null)}
@@ -1050,6 +1159,9 @@ const styles = StyleSheet.create({
   video: {
     width: "100%",
     height: "100%",
+  },
+  videoControlsActivator: {
+    ...StyleSheet.absoluteFillObject,
   },
   metaWrap: {
     paddingHorizontal: 14,

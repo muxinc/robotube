@@ -7,7 +7,7 @@ import { components, internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
 
 const MAX_ATTEMPTS = 8;
-const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v1";
+const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v0";
 const MODERATE_FALLBACK_POLL_INTERVAL_MS = 2 * 60 * 1000;
 const MODERATE_MAX_FALLBACK_POLLS = 10;
 const MODERATION_THRESHOLDS = {

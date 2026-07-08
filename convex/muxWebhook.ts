@@ -89,6 +89,11 @@ function parseRobotsPassthrough(passthrough: unknown): Record<string, unknown> {
   }
 }
 
+function getMetadataRecord(value: unknown): Record<string, unknown> {
+  if (Array.isArray(value)) return asRecord(value[0]) ?? {};
+  return asRecord(value) ?? {};
+}
+
 function getRobotsWorkflow(eventType: string, data: Record<string, unknown>) {
   const workflow = asString(data.workflow);
   if (workflow) {
@@ -293,7 +298,7 @@ export const ingestMuxWebhook = internalAction({
         const video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
           muxAssetId: assetId,
         });
-        const metadata = asRecord((video as any)?.metadata);
+        const metadata = getMetadataRecord((video as any)?.metadata);
         const custom = asRecord(metadata?.custom);
         const languageCodes = normalizeAudioTranslationLanguageCodes(
           asStringArray(custom?.audioTranslationLanguageCodes) ?? [],
@@ -322,6 +327,31 @@ export const ingestMuxWebhook = internalAction({
     }
 
     if (eventType.startsWith("video.asset.track.")) {
+      const assetId = asString(data.asset_id) ?? asString(data.assetId);
+      if (!assetId) {
+        return { skipped: true, reason: "missing_asset_id" };
+      }
+
+      if (eventType === "video.asset.track.ready") {
+        const video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
+          muxAssetId: assetId,
+        });
+        const metadata = getMetadataRecord((video as any)?.metadata);
+        const asset = asRecord((video as any)?.asset);
+        const parsedPassthrough = parseMetadataPassthrough(asset?.passthrough);
+        const userId = asString(metadata.userId) ?? parsedPassthrough.userId ?? "default";
+
+        await ctx.scheduler.runAfter(
+          0,
+          (internal as any).captions.ensureGeneratedCaptionsTrackInternal,
+          {
+            muxAssetId: assetId,
+            userId,
+            attempt: 0,
+          },
+        );
+      }
+
       return { skipped: false, reason: "asset_track_event" };
     }
 

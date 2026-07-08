@@ -58,6 +58,12 @@
           "microphonePermission": "Allow Robotube to use your microphone for uploads and live streaming."
         }
       ],
+      [
+        "@mux/mux-react-native-player/plugin",
+        {
+          "enablePictureInPicture": true
+        }
+      ],
       "@livekit/react-native-expo-plugin",
       "@config-plugins/react-native-webrtc",
       "expo-secure-store",

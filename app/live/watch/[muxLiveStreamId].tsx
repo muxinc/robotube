@@ -1,13 +1,18 @@
 import { Ionicons } from "@expo/vector-icons";
+import {
+  MuxVideoView,
+  useMuxVideoPlayer,
+  type MuxVideoPlayer,
+} from "@mux/mux-react-native-player";
 import { useQuery } from "convex/react";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useVideoPlayer, VideoView } from "expo-video";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
 import { api } from "@/convex/_generated/api";
+import { runMuxPlayerCommand } from "@/lib/mux-player-command";
 
 export default function WatchLiveStreamScreen() {
   const { muxLiveStreamId } = useLocalSearchParams<{
@@ -21,15 +26,26 @@ export default function WatchLiveStreamScreen() {
     muxLiveStreamId ? { muxLiveStreamId } : "skip",
   );
 
-  const playbackUrl = stream?.playbackUrl ?? null;
-
-  const player = useVideoPlayer(
-    playbackUrl ? { uri: playbackUrl, contentType: "hls" } : null,
-    (videoPlayer) => {
-      videoPlayer.loop = false;
-      videoPlayer.play();
-    },
+  const playbackId = stream?.playbackId ?? null;
+  const source = useMemo(
+    () =>
+      playbackId
+        ? {
+            playbackId,
+            metadata: {
+              playerName: "Robotube live stream",
+              videoId: stream?.muxLiveStreamId,
+              videoTitle: stream?.title,
+            },
+          }
+        : undefined,
+    [playbackId, stream?.muxLiveStreamId, stream?.title],
   );
+  const setupPlayer = useCallback((videoPlayer: MuxVideoPlayer) => {
+    runMuxPlayerCommand(videoPlayer.setLoop(false));
+    runMuxPlayerCommand(videoPlayer.play());
+  }, []);
+  const player = useMuxVideoPlayer(source, setupPlayer);
 
   const handleBack = useCallback(() => {
     router.back();
@@ -54,12 +70,13 @@ export default function WatchLiveStreamScreen() {
 
       {/* Video player */}
       <View style={styles.playerContainer}>
-        {playbackUrl && player ? (
-          <VideoView
+        {playbackId ? (
+          <MuxVideoView
             player={player}
             style={StyleSheet.absoluteFill}
             contentFit="contain"
-            nativeControls={false}
+            controls="none"
+            allowsFullscreen={false}
           />
         ) : (
           <View style={styles.playerPlaceholder}>

@@ -13,6 +13,7 @@ import type * as aiMetadataLocks from "../aiMetadataLocks.js";
 import type * as audioTranslations from "../audioTranslations.js";
 import type * as audioTranslationsNode from "../audioTranslationsNode.js";
 import type * as auth from "../auth.js";
+import type * as captionEditingNode from "../captionEditingNode.js";
 import type * as captionTranslations from "../captionTranslations.js";
 import type * as captionTranslationsNode from "../captionTranslationsNode.js";
 import type * as captions from "../captions.js";
@@ -49,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   audioTranslations: typeof audioTranslations;
   audioTranslationsNode: typeof audioTranslationsNode;
   auth: typeof auth;
+  captionEditingNode: typeof captionEditingNode;
   captionTranslations: typeof captionTranslations;
   captionTranslationsNode: typeof captionTranslationsNode;
   captions: typeof captions;
