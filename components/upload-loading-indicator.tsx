@@ -143,7 +143,7 @@ const styles = StyleSheet.create({
   fill: {
     height: "100%",
     borderRadius: 999,
-    backgroundColor: "#4AA8FF",
+    backgroundColor: "#FF8FD7",
   },
   percent: {
     fontSize: 12,

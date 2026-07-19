@@ -3,7 +3,7 @@
     "name": "robotube",
     "slug": "robotube",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/app-icon.png",
     "scheme": "robotube",
     "userInterfaceStyle": "automatic",
@@ -13,6 +13,11 @@
       "bundleIdentifier": "com.muxinc.robotube",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
+        "UISupportedInterfaceOrientations": [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationLandscapeLeft",
+          "UIInterfaceOrientationLandscapeRight"
+        ],
         "NSPhotoLibraryUsageDescription": "Allow Robotube to access your photos so you can upload videos.",
         "NSCameraUsageDescription": "Allow Robotube to use your camera for uploads and live streaming.",
         "NSMicrophoneUsageDescription": "Allow Robotube to use your microphone for uploads and live streaming."

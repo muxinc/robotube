@@ -196,6 +196,78 @@ export const updateTranslationStatusInternal = internalMutation({
   },
 });
 
+/**
+ * Idempotent create-or-update of an audio-translation row from a Laravel-owned
+ * translation job (Loop 11 translations). Matches by asset + language, creates
+ * if missing, and never regresses a terminal row (completed/errored/cancelled)
+ * back to a non-terminal status on a late or replayed sync.
+ */
+export const upsertLaravelTranslationInternal = internalMutation({
+  args: {
+    muxAssetId: v.string(),
+    userId: v.optional(v.string()),
+    languageCode: v.string(),
+    status: v.union(
+      v.literal("requested"),
+      v.literal("pending"),
+      v.literal("processing"),
+      v.literal("completed"),
+      v.literal("errored"),
+      v.literal("cancelled"),
+    ),
+    jobId: v.optional(v.string()),
+    errorMessage: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const terminal = new Set(["completed", "errored", "cancelled"]);
+
+    const row = await (ctx.db as any)
+      .query("audioTranslationJobs")
+      .withIndex("by_asset_language", (q: any) =>
+        q.eq("muxAssetId", args.muxAssetId).eq("languageCode", args.languageCode),
+      )
+      .unique();
+
+    if (!row) {
+      await (ctx.db as any).insert("audioTranslationJobs", {
+        muxAssetId: args.muxAssetId,
+        userId: args.userId ?? "default",
+        languageCode: args.languageCode,
+        languageLabel: getAudioTranslationLanguageLabel(args.languageCode),
+        status: args.status,
+        jobId: args.jobId,
+        errorMessage: args.errorMessage,
+        createdAtMs: now,
+        updatedAtMs: now,
+      });
+      return { ok: true, created: true };
+    }
+
+    // No-regress: keep a terminal row terminal.
+    if (terminal.has(row.status) && !terminal.has(args.status)) {
+      return { ok: true, skipped: true, reason: "terminal_no_regress" as const };
+    }
+
+    // Idempotent: identical status (+ jobId) delivery is a no-op.
+    if (
+      row.status === args.status &&
+      (args.jobId === undefined || row.jobId === args.jobId)
+    ) {
+      return { ok: true, skipped: true, reason: "duplicate" as const };
+    }
+
+    const patch: Record<string, unknown> = { status: args.status, updatedAtMs: now };
+    if (args.jobId !== undefined) patch.jobId = args.jobId;
+    if (args.errorMessage !== undefined) patch.errorMessage = args.errorMessage;
+    if (!row.languageLabel) {
+      patch.languageLabel = getAudioTranslationLanguageLabel(args.languageCode);
+    }
+    await (ctx.db as any).patch(row._id, patch);
+    return { ok: true, updated: true };
+  },
+});
+
 export const getTranslationJobInternal = internalQuery({
   args: {
     muxAssetId: v.string(),

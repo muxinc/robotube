@@ -6,6 +6,7 @@ import { api, components, internal } from "./_generated/api";
 import { v } from "convex/values";
 
 import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-translation-languages";
+import { isLaravelOrchestrationEnabled } from "./laravelFlag";
 
 function requiredEnv(name: string, value: string | undefined): string {
   if (!value) throw new Error(`Missing env var: ${name}`);
@@ -250,6 +251,19 @@ export const backfillAiMetadataForReadyAssets = action({
     onlyMissing: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
+    // Laravel owns Robots orchestration when the flag is on; this backfill
+    // kicks off the Convex-native AI-metadata Robots pipeline, so it must be a
+    // no-op to avoid creating duplicate Robots jobs.
+    if (isLaravelOrchestrationEnabled()) {
+      return {
+        scanned: 0,
+        queued: 0,
+        skippedNotReady: 0,
+        skippedAlreadyGenerated: 0,
+        skippedLaravelOrchestration: true,
+      };
+    }
+
     const mux = new Mux({
       tokenId: requiredEnv("MUX_TOKEN_ID", process.env.MUX_TOKEN_ID),
       tokenSecret: requiredEnv("MUX_TOKEN_SECRET", process.env.MUX_TOKEN_SECRET),
@@ -322,6 +336,19 @@ export const backfillModerationForReadyAssets = action({
     onlyMissing: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
+    // Laravel owns Robots orchestration when the flag is on; this backfill
+    // kicks off the Convex-native moderation Robots pipeline, so it must be a
+    // no-op to avoid creating duplicate Robots jobs.
+    if (isLaravelOrchestrationEnabled()) {
+      return {
+        scanned: 0,
+        queued: 0,
+        skippedNotReady: 0,
+        skippedAlreadyModerated: 0,
+        skippedLaravelOrchestration: true,
+      };
+    }
+
     const mux = new Mux({
       tokenId: requiredEnv("MUX_TOKEN_ID", process.env.MUX_TOKEN_ID),
       tokenSecret: requiredEnv("MUX_TOKEN_SECRET", process.env.MUX_TOKEN_SECRET),
@@ -538,6 +565,20 @@ export const backfillAudioTranslationsForReadyAssets = action({
     staggerMs: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    // Laravel owns caption/audio translation Robots jobs when the flag is on;
+    // this backfill kicks off the Convex-native audio-translation pipeline, so
+    // it must be a no-op to avoid creating duplicate Robots jobs.
+    if (isLaravelOrchestrationEnabled()) {
+      return {
+        scanned: 0,
+        queued: 0,
+        requestedTrackCount: 0,
+        skippedNotReady: 0,
+        skippedAlreadyRequested: 0,
+        skippedLaravelOrchestration: true,
+      };
+    }
+
     const mux = new Mux({
       tokenId: requiredEnv("MUX_TOKEN_ID", process.env.MUX_TOKEN_ID),
       tokenSecret: requiredEnv("MUX_TOKEN_SECRET", process.env.MUX_TOKEN_SECRET),
@@ -636,6 +677,21 @@ export const backfillRequestedTranslationTracksForReadyAssets = action({
     staggerMs: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    // Laravel owns caption/audio translation Robots jobs when the flag is on;
+    // this backfill re-requests native translation tracks, so it must be a
+    // no-op to avoid creating duplicate Robots jobs.
+    if (isLaravelOrchestrationEnabled()) {
+      return {
+        scanned: 0,
+        queuedAssets: 0,
+        queuedAudioRequests: 0,
+        queuedCaptionRequests: 0,
+        skippedNotReady: 0,
+        skippedNoRequestedLanguages: 0,
+        skippedLaravelOrchestration: true,
+      };
+    }
+
     const mux = new Mux({
       tokenId: requiredEnv("MUX_TOKEN_ID", process.env.MUX_TOKEN_ID),
       tokenSecret: requiredEnv("MUX_TOKEN_SECRET", process.env.MUX_TOKEN_SECRET),

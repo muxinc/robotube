@@ -15,7 +15,10 @@ import { TabPageScrollLayout } from "@/components/tab-page-scroll-layout";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { UploadLoadingIndicator } from "@/components/upload-loading-indicator";
-import { AUDIO_TRANSLATION_LANGUAGE_OPTIONS } from "@/constants/audio-translation-languages";
+import {
+  AUDIO_TRANSLATION_LANGUAGE_OPTIONS,
+  getAudioTranslationLanguageLabel,
+} from "@/constants/audio-translation-languages";
 import { api } from "@/convex/_generated/api";
 
 function SelectedVideoThumbnail({
@@ -64,6 +67,93 @@ function SelectedVideoThumbnail({
   );
 }
 
+function TranslationLanguagePills({
+  selectedCodes,
+  onToggle,
+  disabled,
+}: {
+  selectedCodes: string[];
+  onToggle: (code: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <View style={styles.translationOptions}>
+      {AUDIO_TRANSLATION_LANGUAGE_OPTIONS.map((language) => {
+        const isSelected = selectedCodes.includes(language.code);
+
+        return (
+          <Pressable
+            key={language.code}
+            disabled={disabled}
+            onPress={() => onToggle(language.code)}
+            style={({ pressed }) => [
+              styles.translationOption,
+              isSelected ? styles.translationOptionActive : undefined,
+              pressed && !disabled ? styles.buttonPressed : undefined,
+              disabled ? styles.buttonDisabled : undefined,
+            ]}
+          >
+            <Ionicons
+              name={isSelected ? "checkmark-circle" : "ellipse-outline"}
+              size={16}
+              color={isSelected ? "#FFFFFF" : "#CC4C99"}
+            />
+            <ThemedText
+              style={[
+                styles.translationOptionText,
+                isSelected ? styles.translationOptionTextActive : undefined,
+              ]}
+            >
+              {language.label}
+            </ThemedText>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+type PipelineJob = {
+  key: string;
+  label: string;
+  status: "waiting" | "processing" | "completed" | "errored" | "skipped";
+};
+
+const PIPELINE_JOB_STATUS_DISPLAY: Record<
+  PipelineJob["status"],
+  { icon: keyof typeof Ionicons.glyphMap; color: string; detail: string }
+> = {
+  waiting: { icon: "ellipse-outline", color: "#9AA4B2", detail: "Waiting" },
+  processing: { icon: "sync", color: "#CC4C99", detail: "Running" },
+  completed: { icon: "checkmark-circle", color: "#2E9E5B", detail: "Done" },
+  errored: { icon: "alert-circle", color: "#C23B4B", detail: "Failed" },
+  skipped: { icon: "remove-circle-outline", color: "#9AA4B2", detail: "Skipped" },
+};
+
+function RobotJobsChecklist({ jobs }: { jobs: PipelineJob[] }) {
+  if (jobs.length === 0) return null;
+
+  return (
+    <View style={styles.jobsChecklist}>
+      <ThemedText type="defaultSemiBold" style={styles.jobsChecklistTitle}>
+        Mux Robots jobs
+      </ThemedText>
+      {jobs.map((job) => {
+        const display = PIPELINE_JOB_STATUS_DISPLAY[job.status];
+        return (
+          <View key={job.key} style={styles.jobRow}>
+            <Ionicons name={display.icon} size={16} color={display.color} />
+            <ThemedText style={styles.jobRowLabel}>{job.label}</ThemedText>
+            <ThemedText style={[styles.jobRowDetail, { color: display.color }]}>
+              {display.detail}
+            </ThemedText>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 export default function HomeScreen() {
   const createMuxDirectUpload = useAction(
     (api as any).uploads.createMuxDirectUpload,
@@ -85,14 +175,26 @@ export default function HomeScreen() {
     setSelectedAudioTranslationLanguageCodes,
   ] = useState<string[]>([]);
   const [
+    selectedCaptionTranslationLanguageCodes,
+    setSelectedCaptionTranslationLanguageCodes,
+  ] = useState<string[]>([]);
+  const [
     lastRequestedAudioTranslationLanguageCodes,
     setLastRequestedAudioTranslationLanguageCodes,
   ] = useState<string[]>([]);
-  const moderationStatus = useQuery(
-    (api as any).uploadStatus.getUploadModerationStatus,
+  const [
+    lastRequestedCaptionTranslationLanguageCodes,
+    setLastRequestedCaptionTranslationLanguageCodes,
+  ] = useState<string[]>([]);
+  const pipelineStatus = useQuery(
+    (api as any).uploadStatus.getUploadPipelineStatus,
     lastUploadId
       ? {
           uploadId: lastUploadId,
+          audioTranslationLanguageCodes:
+            lastRequestedAudioTranslationLanguageCodes,
+          captionTranslationLanguageCodes:
+            lastRequestedCaptionTranslationLanguageCodes,
         }
       : "skip",
   ) as
@@ -102,26 +204,29 @@ export default function HomeScreen() {
         passed: boolean | null;
         progress: number;
         statusText: string;
+        jobs: PipelineJob[];
       }
     | undefined;
 
-  const moderationPending =
+  const pipelinePending =
     Boolean(lastUploadId) &&
-    (moderationStatus === undefined || moderationStatus.done === false);
+    (pipelineStatus === undefined || pipelineStatus.done === false);
   const uploadComplete = Boolean(lastUploadId) && !isUploading;
+  const pipelineJobs = pipelineStatus?.jobs ?? [];
+
+  const canUpload = Boolean(selectedVideo) && Boolean(title.trim());
 
   useEffect(() => {
     if (!lastUploadId || isUploading) return;
 
-    if (moderationStatus === undefined) {
-      setStatus("Checking moderation status...");
-      setUploadProgress((current) => Math.max(current, 96));
+    if (pipelineStatus === undefined) {
+      setStatus("Checking processing status...");
       return;
     }
 
-    setStatus(moderationStatus.statusText);
-    setUploadProgress(moderationStatus.progress);
-  }, [isUploading, lastUploadId, moderationStatus]);
+    setStatus(pipelineStatus.statusText);
+    setUploadProgress(pipelineStatus.progress);
+  }, [isUploading, lastUploadId, pipelineStatus]);
 
   const handleSelectedAsset = ({
     uri,
@@ -258,14 +363,23 @@ export default function HomeScreen() {
     }
 
     try {
-      const requestedLanguageCodes = [...selectedAudioTranslationLanguageCodes];
+      const requestedAudioLanguageCodes = [
+        ...selectedAudioTranslationLanguageCodes,
+      ];
+      const requestedCaptionLanguageCodes = [
+        ...selectedCaptionTranslationLanguageCodes,
+      ];
       setIsUploading(true);
-      setLastRequestedAudioTranslationLanguageCodes(requestedLanguageCodes);
+      setLastRequestedAudioTranslationLanguageCodes(requestedAudioLanguageCodes);
+      setLastRequestedCaptionTranslationLanguageCodes(
+        requestedCaptionLanguageCodes,
+      );
       setUploadProgress(12);
       setStatus("Creating Mux upload URL...");
       const { uploadId, uploadUrl } = await createMuxDirectUpload({
         title: title.trim() || undefined,
-        audioTranslationLanguageCodes: requestedLanguageCodes,
+        audioTranslationLanguageCodes: requestedAudioLanguageCodes,
+        captionTranslationLanguageCodes: requestedCaptionLanguageCodes,
       });
 
       setUploadProgress(32);
@@ -308,10 +422,16 @@ export default function HomeScreen() {
 
       setUploadProgress(100);
       setLastUploadId(uploadId);
+      const requestedAudio = requestedAudioLanguageCodes.length > 0;
+      const requestedCaptions = requestedCaptionLanguageCodes.length > 0;
       setStatus(
-        requestedLanguageCodes.length > 0
-          ? "Upload complete. Checking moderation and queueing translated audio and subtitle tracks..."
-          : "Upload complete. Checking moderation status...",
+        requestedAudio && requestedCaptions
+          ? "Upload complete. Checking moderation and queueing translated audio and caption tracks..."
+          : requestedAudio
+            ? "Upload complete. Checking moderation and queueing translated audio tracks..."
+            : requestedCaptions
+              ? "Upload complete. Checking moderation and queueing translated caption tracks..."
+              : "Upload complete. Checking moderation status...",
       );
       setSelectedVideo(null);
       setTitle("");
@@ -333,6 +453,14 @@ export default function HomeScreen() {
     );
   };
 
+  const toggleCaptionTranslationLanguage = (languageCode: string) => {
+    setSelectedCaptionTranslationLanguageCodes((current) =>
+      current.includes(languageCode)
+        ? current.filter((code) => code !== languageCode)
+        : [...current, languageCode],
+    );
+  };
+
   return (
     <ThemedView style={styles.screen}>
       <TabPageLogoHeader
@@ -348,12 +476,16 @@ export default function HomeScreen() {
         topPaddingOffset={18}
       >
 
-        {isUploading || moderationPending ? (
+        {isUploading || pipelinePending ? (
           <UploadLoadingIndicator
-            isActive={isUploading || moderationPending}
+            isActive={isUploading || pipelinePending}
             status={status}
             progress={uploadProgress}
           />
+        ) : null}
+
+        {!isUploading && lastUploadId ? (
+          <RobotJobsChecklist jobs={pipelineJobs} />
         ) : null}
 
         {uploadComplete ? (
@@ -366,23 +498,26 @@ export default function HomeScreen() {
               />
               <ThemedText style={styles.doneBadgeText}>
                 Upload complete
-                {moderationPending ? " - moderation in progress" : ""}
+                {pipelinePending ? " - Mux Robots jobs running" : ""}
               </ThemedText>
             </View>
             {lastRequestedAudioTranslationLanguageCodes.length > 0 ? (
               <ThemedText style={styles.supportingText}>
                 Requested translated audio:{" "}
                 {lastRequestedAudioTranslationLanguageCodes
-                  .map(
-                    (code) =>
-                      AUDIO_TRANSLATION_LANGUAGE_OPTIONS.find(
-                        (language) => language.code === code,
-                      )?.label ?? code,
-                  )
+                  .map(getAudioTranslationLanguageLabel)
                   .join(", ")}
               </ThemedText>
             ) : null}
-            {!moderationPending ? (
+            {lastRequestedCaptionTranslationLanguageCodes.length > 0 ? (
+              <ThemedText style={styles.supportingText}>
+                Requested translated captions:{" "}
+                {lastRequestedCaptionTranslationLanguageCodes
+                  .map(getAudioTranslationLanguageLabel)
+                  .join(", ")}
+              </ThemedText>
+            ) : null}
+            {!pipelinePending ? (
               <ThemedText style={styles.completionStatus}>{status}</ThemedText>
             ) : null}
           </View>
@@ -401,50 +536,27 @@ export default function HomeScreen() {
         </ThemedView>
 
         <ThemedView style={styles.inputWrap}>
-          <ThemedText type="defaultSemiBold">
-            Select translated audio tracks
+          <ThemedText type="defaultSemiBold">Translate audio</ThemedText>
+          <ThemedText style={styles.supportingText}>
+            Adds AI-dubbed audio tracks in the selected languages.
           </ThemedText>
-          {/* <ThemedText style={styles.supportingText}>
-            Select the languages Robotube should prepare after Mux finishes processing the upload.
-            Matching translated subtitle tracks will be added to the player too.
-          </ThemedText> */}
-          <View style={styles.translationOptions}>
-            {AUDIO_TRANSLATION_LANGUAGE_OPTIONS.map((language) => {
-              const isSelected = selectedAudioTranslationLanguageCodes.includes(
-                language.code,
-              );
+          <TranslationLanguagePills
+            selectedCodes={selectedAudioTranslationLanguageCodes}
+            onToggle={toggleAudioTranslationLanguage}
+            disabled={isUploading}
+          />
+        </ThemedView>
 
-              return (
-                <Pressable
-                  key={language.code}
-                  disabled={isUploading}
-                  onPress={() => toggleAudioTranslationLanguage(language.code)}
-                  style={({ pressed }) => [
-                    styles.translationOption,
-                    isSelected ? styles.translationOptionActive : undefined,
-                    pressed && !isUploading ? styles.buttonPressed : undefined,
-                    isUploading ? styles.buttonDisabled : undefined,
-                  ]}
-                >
-                  <Ionicons
-                    name={isSelected ? "checkmark-circle" : "ellipse-outline"}
-                    size={16}
-                    color={isSelected ? "#FFFFFF" : "#CC4C99"}
-                  />
-                  <ThemedText
-                    style={[
-                      styles.translationOptionText,
-                      isSelected
-                        ? styles.translationOptionTextActive
-                        : undefined,
-                    ]}
-                  >
-                    {language.label}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
+        <ThemedView style={styles.inputWrap}>
+          <ThemedText type="defaultSemiBold">Translate captions</ThemedText>
+          <ThemedText style={styles.supportingText}>
+            Adds translated subtitle tracks in the selected languages.
+          </ThemedText>
+          <TranslationLanguagePills
+            selectedCodes={selectedCaptionTranslationLanguageCodes}
+            onToggle={toggleCaptionTranslationLanguage}
+            disabled={isUploading}
+          />
         </ThemedView>
 
         <View style={styles.mediaActions}>
@@ -494,16 +606,12 @@ export default function HomeScreen() {
 
         {!isUploading ? (
           <Pressable
-            disabled={!selectedVideo || !title.trim()}
+            disabled={!canUpload}
             onPress={handleUpload}
             style={({ pressed }) => [
               styles.button,
-              pressed && selectedVideo && title.trim()
-                ? styles.buttonPressed
-                : undefined,
-              !selectedVideo || !title.trim()
-                ? styles.buttonDisabled
-                : undefined,
+              pressed && canUpload ? styles.buttonPressed : undefined,
+              !canUpload ? styles.buttonDisabled : undefined,
             ]}
           >
             <ThemedText type="defaultSemiBold">Upload video</ThemedText>
@@ -586,6 +694,36 @@ const styles = StyleSheet.create({
   },
   completionInfo: {
     gap: 8,
+  },
+  jobsChecklist: {
+    gap: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#FFC3E8",
+    backgroundColor: "#FFF7FC",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  jobsChecklistTitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#CC4C99",
+    marginBottom: 2,
+  },
+  jobRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  jobRowLabel: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  jobRowDetail: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "600",
   },
   completionStatus: {
     fontSize: 13,

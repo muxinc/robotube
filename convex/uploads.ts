@@ -1,5 +1,7 @@
 "use node";
 
+import { randomUUID } from "node:crypto";
+
 import Mux from "@mux/mux-node";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
@@ -7,6 +9,7 @@ import { v } from "convex/values";
 import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-translation-languages";
 import { components, internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
+import { isLaravelOrchestrationEnabled } from "./laravelFlag";
 
 function requiredEnv(name: string, value: string | undefined): string {
   if (!value) throw new Error(`Missing env var: ${name}`);
@@ -99,6 +102,7 @@ export const createMuxDirectUpload = action({
   args: {
     title: v.optional(v.string()),
     audioTranslationLanguageCodes: v.optional(v.array(v.string())),
+    captionTranslationLanguageCodes: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const authUserId = await getAuthUserId(ctx);
@@ -112,13 +116,27 @@ export const createMuxDirectUpload = action({
     const audioTranslationLanguageCodes = normalizeAudioTranslationLanguageCodes(
       args.audioTranslationLanguageCodes ?? [],
     );
+    const captionTranslationLanguageCodes = normalizeAudioTranslationLanguageCodes(
+      args.captionTranslationLanguageCodes ?? [],
+    );
+    // Mux caps passthrough at 255 characters, so the user's title never goes
+    // into it: each upload gets a short unique reference id that becomes the
+    // Mux-side meta.title/external_id (asset identity + dashboard search),
+    // while the full title only lives in Convex videoMetadata (carried via the
+    // syncUploadAssetAndMetadataInternal scheduler args below).
+    //
+    // Write both language keys whenever either job was requested: a
+    // present-but-empty captionTranslationLanguageCodes means "explicitly no
+    // captions", while a missing key means a legacy upload where the audio
+    // list covered both jobs.
+    const muxReferenceId = `rt-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
     const passthrough = JSON.stringify({
       userId,
-      title,
       visibility: "public",
       custom:
-        audioTranslationLanguageCodes.length > 0
-          ? { audioTranslationLanguageCodes }
+        audioTranslationLanguageCodes.length > 0 ||
+        captionTranslationLanguageCodes.length > 0
+          ? { audioTranslationLanguageCodes, captionTranslationLanguageCodes }
           : undefined,
     });
 
@@ -127,6 +145,10 @@ export const createMuxDirectUpload = action({
       new_asset_settings: {
         playback_policies: ["public"],
         passthrough,
+        meta: {
+          title: muxReferenceId,
+          external_id: muxReferenceId,
+        },
       },
     });
 
@@ -151,6 +173,7 @@ export const createMuxDirectUpload = action({
       uploadId: upload.id,
       uploadUrl: upload.url,
       status: upload.status,
+      muxReferenceId,
     };
   },
 });
@@ -228,7 +251,17 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
       if (metadata.visibility !== undefined) {
         metadataArgs.visibility = metadata.visibility;
       }
-      if (metadata.custom !== undefined) metadataArgs.custom = metadata.custom;
+      // The Mux-side asset title is a generated reference id (see
+      // createMuxDirectUpload); keep it on the Convex video so the two can be
+      // cross-referenced later.
+      const muxReferenceId = asString(asRecord((asset as any).meta)?.external_id);
+      const mergedCustom = {
+        ...(metadata.custom ?? {}),
+        ...(muxReferenceId ? { muxReferenceId } : {}),
+      };
+      if (Object.keys(mergedCustom).length > 0) {
+        metadataArgs.custom = mergedCustom;
+      }
 
       await ctx.runMutation(components.mux.videos.upsertVideoMetadata, metadataArgs);
 
@@ -258,7 +291,22 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
         };
       }
 
-      if (!isMuxRobotsPollingDisabled()) {
+      if (isLaravelOrchestrationEnabled()) {
+        // Laravel is the ONLY Robots runner. Hand off to the Laravel
+        // orchestration backend instead of kicking off the Convex-native
+        // moderation -> AI-metadata pipeline (which would create duplicate
+        // Robots jobs). Convex creates zero Robots jobs on this path.
+        await ctx.scheduler.runAfter(
+          0,
+          (internal as any).laravelOrchestration.startLaravelRobotRun,
+          {
+            muxAssetId,
+            userId: metadataArgs.userId,
+            title: resolvedTitle,
+            attempt: 0,
+          },
+        );
+      } else if (!isMuxRobotsPollingDisabled()) {
         await ctx.scheduler.runAfter(
           0,
           (internal as any).moderation.moderateAssetInternal,

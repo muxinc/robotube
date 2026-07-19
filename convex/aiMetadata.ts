@@ -5,6 +5,7 @@ import { v } from "convex/values";
 
 import { components, internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
+import { isLaravelOrchestrationEnabled } from "./laravelFlag";
 
 const MAX_ATTEMPTS = 10;
 const AI_METADATA_READY_DELAY_MS = 5 * 1000;
@@ -926,6 +927,7 @@ type EnsureAiMetadataResult =
   | { ok: false; skipped: false; error: string }
   | { ok: false; skipped: true; reason: "asset_not_found" }
   | { ok: false; skipped: true; reason: "asset_not_ready"; userId: string }
+  | { ok: true; skipped: true; reason: "laravel_orchestration" }
   | {
       ok: true;
       skipped: boolean;
@@ -945,6 +947,7 @@ type GenerateSummaryAndTagsResult =
   | { ok: true; skipped: true; reason: "already_generated" }
   | { ok: true; skipped: true; reason: "moderation_pending" | "moderation_rejected" }
   | { ok: true; skipped: true; reason: "polling_disabled" }
+  | { ok: true; skipped: true; reason: "laravel_orchestration" }
   | { ok: false; skipped: true; reason: "asset_not_found" }
   | { ok: boolean; skipped: false; retryScheduled: boolean; nextAttempt: number; errors: string[] };
 
@@ -952,6 +955,16 @@ async function ensureAiMetadataForAssetImpl(
   ctx: any,
   args: EnsureAiMetadataArgs,
 ): Promise<EnsureAiMetadataResult> {
+  // Laravel owns the summarize/chapters/key-moments Robots jobs when the flag
+  // is on. No-op so Convex never creates duplicate AI-metadata jobs (covers the
+  // internal + public ensure* entry points and any lazy "ensure on view" call).
+  if (isLaravelOrchestrationEnabled()) {
+    console.log(
+      `[aiMetadata] ensureAiMetadataForAssetImpl skipped for ${args.muxAssetId}: USE_LARAVEL_ORCHESTRATION on`,
+    );
+    return { ok: true, skipped: true, reason: "laravel_orchestration" };
+  }
+
   let video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
     muxAssetId: args.muxAssetId,
   });
@@ -1424,6 +1437,18 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
     attempt: v.optional(v.number()),
   },
   handler: async (ctx, args): Promise<GenerateSummaryAndTagsResult> => {
+    // Laravel owns the summarize/chapters/key-moments Robots jobs when the flag
+    // is on. This is the sink where all three /jobs/* POSTs originate, so the
+    // no-op here guarantees Convex creates zero AI-metadata Robots jobs
+    // regardless of caller (captions chain, ensure* impl, retries, job-update
+    // reschedules, migrations).
+    if (isLaravelOrchestrationEnabled()) {
+      console.log(
+        `[aiMetadata] generateSummaryAndTagsForAssetInternal skipped for ${args.muxAssetId}: USE_LARAVEL_ORCHESTRATION on`,
+      );
+      return { ok: true, skipped: true, reason: "laravel_orchestration" };
+    }
+
     const lock = (await ctx.runMutation((internal as any).aiMetadataLocks.claimAiMetadataLockInternal, {
       muxAssetId: args.muxAssetId,
       userId: args.userId,
