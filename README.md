@@ -130,6 +130,33 @@ npx convex run migrations:backfillEmbeddingsForReadyAssets '{"maxAssets":500,"de
 npx convex run migrations:backfillModerationForReadyAssets '{"maxAssets":500,"defaultUserId":"mobile-user","onlyMissing":true}'
 ```
 
+## News feed performance architecture
+
+The Home feed's playback path is being rebuilt around a recyclable list, one
+attached active player, bounded preloading, and a card-sized Convex response.
+
+- [News Feed Performance Architecture PRD](./docs/news-feed-performance-architecture-prd.md) — phases, exit gates, and success metrics
+- [Architecture and operations notes](./docs/news-feed-performance-operations.md) — event vocabulary, dev counters, rollout flags, preload kill switch, rollout runbook
+- [Phase 0 baseline](./docs/news-feed-performance-baseline.md) — measurement environment and what has and has not been measured
+
+Instrumentation and rollout controls live in:
+
+- `lib/feed-performance.ts` — single import surface for the modules below
+- `lib/feed-performance-events.ts` — event vocabulary and the privacy sanitizer that keeps tokens, playback URLs, captions, and transcripts out of telemetry
+- `lib/feed-performance-timeline.ts` — focus/playback timestamps and the p50/p75/p95 first-frame gates
+- `lib/feed-performance-counters.ts` — development-only counters and playback invariant checks (removed in Phase 6)
+- `lib/feed-feature-flags.ts` — default-off rollout flags with owners, removal dates, and deterministic cohort bucketing
+- `lib/feed-feature-kill-switch.ts` — immediate remote kill switch for predictive preloading
+
+Verification (no test runner is installed; these run on Node's built-in one):
+
+```bash
+node scripts/news-feed-tests.mjs        # pure unit tests, no device or network
+node scripts/news-feed-run-sheet.mjs    # probe local devices/tooling, print a blank measurement run sheet
+npm run lint
+npx tsc --noEmit
+```
+
 ## Get a fresh project
 
 When you're ready, run:
