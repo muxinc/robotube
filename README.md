@@ -136,6 +136,7 @@ The Home feed's playback path is being rebuilt around a recyclable list, one
 attached active player, bounded preloading, and a card-sized Convex response.
 
 - [News Feed Performance Architecture PRD](./docs/news-feed-performance-architecture-prd.md) — phases, exit gates, and success metrics
+- [9:16 Vertical Video Feed PRD](./docs/vertical-video-feed-prd.md) — phased plan for an exclusive TikTok-style Shorts tab
 - [Architecture and operations notes](./docs/news-feed-performance-operations.md) — event vocabulary, dev counters, rollout flags, preload kill switch, rollout runbook
 - [Phase 0 baseline](./docs/news-feed-performance-baseline.md) — measurement environment and what has and has not been measured
 

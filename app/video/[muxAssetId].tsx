@@ -627,7 +627,9 @@ export default function VideoDetailPage() {
   const chapters = useMemo(() => selectedVideo?.chapters ?? [], [selectedVideo?.chapters]);
   const keyMoments = useMemo(() => selectedVideo?.keyMoments ?? [], [selectedVideo?.keyMoments]);
   const [seekToSeconds, setSeekToSeconds] = useState<number | null>(null);
-  const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
+  const [activeChapterStartTime, setActiveChapterStartTime] = useState<
+    number | null
+  >(null);
   const [isDetailsSheetVisible, setIsDetailsSheetVisible] = useState(false);
   const [isKeyMomentsSheetVisible, setIsKeyMomentsSheetVisible] = useState(false);
   const [isChaptersSheetVisible, setIsChaptersSheetVisible] = useState(false);
@@ -656,21 +658,28 @@ export default function VideoDetailPage() {
     [assistantKeyboardHeight, insets.bottom, sheetHeight],
   );
 
-  const activeChapterStartTime = useMemo(() => {
-    if (chapters.length === 0) return null;
-    let active = chapters[0]?.startTime ?? 0;
-    for (const chapter of chapters) {
-      if (chapter.startTime <= currentTimeSeconds) {
-        active = chapter.startTime;
-      } else {
-        break;
+  // Time updates arrive 4×/sec; only commit state when the active chapter
+  // actually changes so playback doesn't re-render the whole screen.
+  const handlePlaybackTimeUpdate = useCallback(
+    (seconds: number) => {
+      if (chapters.length === 0) return;
+      let next = chapters[0]?.startTime ?? 0;
+      for (const chapter of chapters) {
+        if (chapter.startTime <= seconds) {
+          next = chapter.startTime;
+        } else {
+          break;
+        }
       }
-    }
-    return active;
-  }, [chapters, currentTimeSeconds]);
+      setActiveChapterStartTime((current) =>
+        current === next ? current : next,
+      );
+    },
+    [chapters],
+  );
 
   useEffect(() => {
-    setCurrentTimeSeconds(startAtSeconds ?? 0);
+    setActiveChapterStartTime(null);
     setSeekToSeconds(null);
   }, [selectedVideo?.muxAssetId, startAtSeconds]);
 
@@ -745,6 +754,14 @@ export default function VideoDetailPage() {
     setIsKeyMomentsSheetVisible(true);
   }, []);
 
+  const goBack = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/");
+    }
+  }, [router]);
+
   if (!muxAssetId) {
     return (
       <View style={styles.stateContainer}>
@@ -768,6 +785,17 @@ export default function VideoDetailPage() {
       <View style={styles.stateContainer}>
         <Stack.Screen options={{ headerShown: false }} />
         <Text style={styles.stateTitle}>Video not found</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          onPress={goBack}
+          style={({ pressed }) => [
+            styles.stateBackButton,
+            pressed && styles.backButtonPressed,
+          ]}
+        >
+          <Text style={styles.stateBackButtonText}>Go back</Text>
+        </Pressable>
       </View>
     );
   }
@@ -775,7 +803,11 @@ export default function VideoDetailPage() {
   return (
     <View style={styles.screen}>
       <StatusBar style="light" backgroundColor="#000000" translucent={false} />
-      <Stack.Screen options={{ headerShown: false }} />
+      {/* Swipe-back stays disabled here: the iOS interactive-pop gesture
+          claims horizontal drags that start near the left edge, which made
+          scrubbing the video timeline navigate back instead. The overlaid
+          back button below is the way out of this screen. */}
+      <Stack.Screen options={{ headerShown: false, gestureEnabled: false }} />
       <View style={{ height: insets.top, backgroundColor: "#000" }} />
       <View style={styles.videoWrap}>
         <FullVideoPlayer
@@ -790,9 +822,22 @@ export default function VideoDetailPage() {
           startAtSeconds={startAtSeconds}
           seekToSeconds={seekToSeconds}
           onSeekHandled={() => setSeekToSeconds(null)}
-          onTimeUpdate={setCurrentTimeSeconds}
+          onTimeUpdate={handlePlaybackTimeUpdate}
         />
       </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Go back"
+        onPress={goBack}
+        hitSlop={8}
+        style={({ pressed }) => [
+          styles.backButton,
+          { top: insets.top + 10 },
+          pressed && styles.backButtonPressed,
+        ]}
+      >
+        <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
+      </Pressable>
 
       <View
         style={[
@@ -1101,7 +1146,9 @@ export default function VideoDetailPage() {
                 contentContainerStyle={styles.chapterSheetScrollContent}
               >
                 {chapters.map((chapter) => {
-                  const isActive = activeChapterStartTime === chapter.startTime;
+                  const isActive =
+                    (activeChapterStartTime ?? chapters[0]?.startTime) ===
+                    chapter.startTime;
                   const timeLabel = formatDuration(chapter.startTime) ?? "0:00";
 
                   return (
@@ -1163,6 +1210,32 @@ const styles = StyleSheet.create({
   },
   videoControlsActivator: {
     ...StyleSheet.absoluteFillObject,
+  },
+  backButton: {
+    position: "absolute",
+    left: 12,
+    zIndex: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#00000080",
+  },
+  backButtonPressed: {
+    opacity: 0.75,
+  },
+  stateBackButton: {
+    marginTop: 16,
+    borderRadius: 999,
+    backgroundColor: "#FF8FD7",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  stateBackButtonText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#FFFFFF",
   },
   metaWrap: {
     paddingHorizontal: 14,

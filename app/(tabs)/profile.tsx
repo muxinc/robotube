@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useAuthActions } from "@convex-dev/auth/react";
+import { FlashList } from "@shopify/flash-list";
 import { useMutation, useQuery } from "convex/react";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
@@ -18,12 +19,12 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   FeedVideoCard,
   type FeedVideoItem,
 } from "@/components/feed-video-card";
-import { TabPageScrollLayout } from "@/components/tab-page-scroll-layout";
 import { api } from "@/convex/_generated/api";
 
 WebBrowser.maybeCompleteAuthSession();
@@ -33,12 +34,17 @@ function getAvatarFallbackLabel(user: {
   name?: string;
   email?: string;
 }) {
-  const source = user.name?.trim() || user.username?.trim() || user.email?.trim() || "Robotube";
+  const source =
+    user.name?.trim() ||
+    user.username?.trim() ||
+    user.email?.trim() ||
+    "Robotube";
   return source.charAt(0).toUpperCase() || "R";
 }
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { signIn, signOut } = useAuthActions();
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isSubmittingProvider, setIsSubmittingProvider] = useState<
@@ -64,9 +70,12 @@ export default function ProfileScreen() {
       }
     | null
     | undefined;
-  const uploadedVideos = useQuery((api as any).feed.listCurrentUserUploadedVideos, {
-    limit: 12,
-  }) as FeedVideoItem[] | undefined;
+  const uploadedVideos = useQuery(
+    (api as any).feed.listCurrentUserUploadedVideos,
+    {
+      limit: 12,
+    },
+  ) as FeedVideoItem[] | undefined;
 
   useEffect(() => {
     setErrorText(null);
@@ -188,7 +197,8 @@ export default function ProfileScreen() {
     if (!currentUser || isUploadingAvatar) return;
 
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
         setAvatarMessage("Photo library permission is required.");
         Alert.alert(
@@ -316,131 +326,145 @@ export default function ProfileScreen() {
     currentUser.email ||
     "Signed in user";
 
-  return (
-    <View style={styles.screen}>
-      <TabPageScrollLayout
-        includeTopInset
-        contentInsetAdjustmentBehavior="never"
-        topPaddingOffset={20}
-        contentContainerStyle={styles.scrollContent}
-        containerStyle={styles.contentContainer}
-      >
-        <View style={styles.topBar}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Open profile menu"
-            style={({ pressed }) => [
-              styles.menuButton,
-              pressed && styles.signOutPressed,
-              isSigningOut && styles.signOutDisabled,
-            ]}
-            onPress={handleOpenProfileMenu}
-            disabled={isSigningOut}
-          >
-            <Ionicons name="ellipsis-horizontal" size={22} color="#1B2434" />
-          </Pressable>
-        </View>
+  const profileHeader = (
+    <View style={styles.headerStack}>
+      <View style={styles.topBar}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Open profile menu"
+          style={({ pressed }) => [
+            styles.menuButton,
+            pressed && styles.signOutPressed,
+            isSigningOut && styles.signOutDisabled,
+          ]}
+          onPress={handleOpenProfileMenu}
+          disabled={isSigningOut}
+        >
+          <Ionicons name="ellipsis-horizontal" size={22} color="#1B2434" />
+        </Pressable>
+      </View>
 
-        <View style={styles.heroCard}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.avatarButton,
-              pressed && styles.signOutPressed,
-              isUploadingAvatar && styles.signOutDisabled,
-            ]}
-            onPress={() => {
-              void handleChangeAvatar();
-            }}
-            disabled={isUploadingAvatar}
-          >
-            {currentUser.avatarUrl ? (
-              <Image
-                source={{ uri: currentUser.avatarUrl }}
-                contentFit="cover"
-                style={styles.avatarImage}
-              />
-            ) : (
-              <View style={styles.avatarFallback}>
-                <Text style={styles.avatarFallbackText}>
-                  {getAvatarFallbackLabel(currentUser)}
-                </Text>
-              </View>
-            )}
-            <View style={styles.avatarBadge}>
-              <Ionicons name="camera" size={16} color="#FFFFFF" />
-            </View>
-          </Pressable>
-
-          <View style={styles.heroCopy}>
-            <Text style={styles.nameText}>{displayName}</Text>
-            <Text style={styles.metaText}>{currentUser.email ?? "No email available"}</Text>
-            {avatarMessage ? <Text style={styles.handleMessage}>{avatarMessage}</Text> : null}
-          </View>
-        </View>
-
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Public handle</Text>
-          <View style={styles.handleInputRow}>
-            <Text style={styles.handlePrefix}>@</Text>
-            <TextInput
-              value={handleInput}
-              onChangeText={setHandleInput}
-              autoCapitalize="none"
-              autoCorrect={false}
-              placeholder="your_handle"
-              placeholderTextColor="#8A94A8"
-              style={styles.handleInput}
+      <View style={styles.heroCard}>
+        <Pressable
+          style={({ pressed }) => [
+            styles.avatarButton,
+            pressed && styles.signOutPressed,
+            isUploadingAvatar && styles.signOutDisabled,
+          ]}
+          onPress={() => {
+            void handleChangeAvatar();
+          }}
+          disabled={isUploadingAvatar}
+        >
+          {currentUser.avatarUrl ? (
+            <Image
+              source={{ uri: currentUser.avatarUrl }}
+              contentFit="cover"
+              style={styles.avatarImage}
             />
+          ) : (
+            <View style={styles.avatarFallback}>
+              <Text style={styles.avatarFallbackText}>
+                {getAvatarFallbackLabel(currentUser)}
+              </Text>
+            </View>
+          )}
+          <View style={styles.avatarBadge}>
+            <Ionicons name="camera" size={16} color="#FFFFFF" />
           </View>
-          <Pressable
-            style={({ pressed }) => [
-              styles.secondaryButton,
-              pressed && styles.signOutPressed,
-              isSavingHandle && styles.signOutDisabled,
-            ]}
-            onPress={() => {
-              void handleSaveHandle();
-            }}
-            disabled={isSavingHandle}
-          >
-            <Text style={styles.secondaryButtonText}>
-              {isSavingHandle ? "Saving..." : "Save handle"}
-            </Text>
-          </Pressable>
-          {handleMessage ? <Text style={styles.handleMessage}>{handleMessage}</Text> : null}
-        </View>
+        </Pressable>
 
-        <View style={styles.uploadsHeader}>
-          <View>
-            <Text style={styles.sectionTitle}>Your uploads</Text>
-          </View>
-          <Text style={styles.uploadCountLabel}>
-            {uploadedVideos?.length ?? 0} {uploadedVideos?.length === 1 ? "video" : "videos"}
+        <View style={styles.heroCopy}>
+          <Text style={styles.nameText}>{displayName}</Text>
+          <Text style={styles.metaText}>
+            {currentUser.email ?? "No email available"}
+          </Text>
+          {avatarMessage ? (
+            <Text style={styles.handleMessage}>{avatarMessage}</Text>
+          ) : null}
+        </View>
+      </View>
+
+      <View style={styles.sectionCard}>
+        <Text style={styles.sectionTitle}>Public handle</Text>
+        <View style={styles.handleInputRow}>
+          <Text style={styles.handlePrefix}>@</Text>
+          <TextInput
+            value={handleInput}
+            onChangeText={setHandleInput}
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="your_handle"
+            placeholderTextColor="#8A94A8"
+            style={styles.handleInput}
+          />
+        </View>
+        <Pressable
+          style={({ pressed }) => [
+            styles.secondaryButton,
+            pressed && styles.signOutPressed,
+            isSavingHandle && styles.signOutDisabled,
+          ]}
+          onPress={() => {
+            void handleSaveHandle();
+          }}
+          disabled={isSavingHandle}
+        >
+          <Text style={styles.secondaryButtonText}>
+            {isSavingHandle ? "Saving..." : "Save handle"}
+          </Text>
+        </Pressable>
+        {handleMessage ? (
+          <Text style={styles.handleMessage}>{handleMessage}</Text>
+        ) : null}
+      </View>
+
+      <View style={styles.uploadsHeader}>
+        <View>
+          <Text style={styles.sectionTitle}>Your uploads</Text>
+        </View>
+        <Text style={styles.uploadCountLabel}>
+          {uploadedVideos?.length ?? 0}{" "}
+          {uploadedVideos?.length === 1 ? "video" : "videos"}
+        </Text>
+      </View>
+
+      {uploadedVideos === undefined ? (
+        <View style={styles.emptyCard}>
+          <ActivityIndicator size="small" color="#111111" />
+          <Text style={styles.emptyText}>Loading your uploads...</Text>
+        </View>
+      ) : uploadedVideos.length === 0 ? (
+        <View style={styles.emptyCard}>
+          <Text style={styles.emptyTitle}>No uploads yet</Text>
+          <Text style={styles.emptyText}>
+            Videos you upload from this account will show up here.
           </Text>
         </View>
+      ) : null}
+    </View>
+  );
 
-        {uploadedVideos === undefined ? (
-          <View style={styles.emptyCard}>
-            <ActivityIndicator size="small" color="#111111" />
-            <Text style={styles.emptyText}>Loading your uploads...</Text>
-          </View>
-        ) : uploadedVideos.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>No uploads yet</Text>
-            <Text style={styles.emptyText}>
-              Videos you upload from this account will show up here.
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.uploadsList}>
-            {uploadedVideos.map((item) => (
-              <FeedVideoCard key={item.muxAssetId} item={item} showPlayIcon={false} />
-            ))}
-          </View>
+  return (
+    <View style={styles.screen}>
+      <FlashList
+        data={uploadedVideos ?? []}
+        keyExtractor={(item) => item.muxAssetId}
+        renderItem={({ item }) => (
+          <FeedVideoCard item={item} showPlayIcon={false} />
         )}
-
-        {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
-      </TabPageScrollLayout>
+        showsVerticalScrollIndicator={false}
+        contentInsetAdjustmentBehavior="never"
+        contentContainerStyle={{
+          paddingTop: insets.top + 20,
+          paddingHorizontal: 20,
+          paddingBottom: 130,
+        }}
+        ListHeaderComponent={profileHeader}
+        ListFooterComponent={
+          errorText ? <Text style={styles.errorText}>{errorText}</Text> : null
+        }
+      />
     </View>
   );
 }
@@ -464,11 +488,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     backgroundColor: "#FFFFFF",
   },
-  scrollContent: {
-    paddingBottom: 130,
-  },
-  contentContainer: {
+  headerStack: {
     gap: 18,
+    marginBottom: 18,
   },
   topBar: {
     width: "100%",
@@ -645,9 +667,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     color: "#5A687F",
-  },
-  uploadsList: {
-    gap: 0,
   },
   emptyCard: {
     borderRadius: 18,
