@@ -166,20 +166,6 @@ function FeedVideoCardComponent({
       style={pressableStyle}
     >
       <View style={styles.videoContainer}>
-        {/*
-          Thumbnail-first: the poster is always mounted underneath the surface
-          and only hidden once the active player reports a real frame. The
-          recycling key guarantees a reused cell never paints the previous
-          card's image.
-        */}
-        <Image
-          source={{ uri: thumbnailUrl ?? item.thumbnailUrl }}
-          recyclingKey={muxAssetId}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          transition={0}
-          style={[styles.thumbnail, isActive && hasFirstFrame && styles.thumbnailHidden]}
-        />
         {isActive && playback ? (
           <View style={styles.previewLayer} pointerEvents="none">
             <MuxVideoView
@@ -209,6 +195,21 @@ function FeedVideoCardComponent({
             />
           </View>
         ) : null}
+        {/*
+          Keep the thumbnail mounted above the native surface while the source
+          loads. It becomes transparent only after the active player reports a
+          real frame, preventing the native view's black loading state from
+          showing through. The recycling key prevents reused cells from painting
+          the previous card's image.
+        */}
+        <Image
+          source={{ uri: thumbnailUrl ?? item.thumbnailUrl }}
+          recyclingKey={muxAssetId}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={0}
+          style={[styles.thumbnail, isActive && hasFirstFrame && styles.thumbnailHidden]}
+        />
         {showPlayIcon ? (
           <View style={styles.playOverlay} pointerEvents="none">
             <Ionicons name="play-circle" size={56} color="#FFFFFFE6" />
