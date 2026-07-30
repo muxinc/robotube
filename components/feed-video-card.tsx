@@ -1,10 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
+import { MuxVideoView, type MuxVideoPlayer } from "@mux/mux-react-native-player";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import { Activity, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { InlineVideoPlayer } from "@/components/inline-video-player";
+import type { FeedPlaybackSurfaceCallbacks } from "@/hooks/use-feed-playback-controller";
+import { bumpFeedCounter } from "@/lib/feed/feed-telemetry";
 
 export type FeedVideoItem = {
   muxAssetId: string;
@@ -69,84 +71,142 @@ export function formatPublished(createdAtMs: number) {
   return `${years}y ago`;
 }
 
+/**
+ * Everything the card needs to host the feed's single player surface. Passing
+ * `undefined` (the profile screen, related-video lists) keeps the card strictly
+ * thumbnail-only, which is the documented default.
+ */
+export type FeedVideoCardPlayback = {
+  player: MuxVideoPlayer;
+  /** True only for the committed card. At most one card may receive true. */
+  isActive: boolean;
+  /** Hides the thumbnail once the active source has produced a frame. */
+  hasFirstFrame: boolean;
+  surface: FeedPlaybackSurfaceCallbacks;
+  /** Preview position handed to the detail screen on navigation. */
+  getPreviewPositionSeconds: (muxAssetId: string) => number;
+};
+
 type FeedVideoCardProps = {
   item: FeedVideoItem;
+  /** Width-resolved thumbnail from the adaptive policy. Defaults to the item's. */
+  thumbnailUrl?: string;
   onPress?: (item: FeedVideoItem, startAtSeconds?: number) => void;
   showPlayIcon?: boolean;
-  isFocused?: boolean;
-  shouldPreload?: boolean;
+  playback?: FeedVideoCardPlayback;
   onMeasured?: (layout: { y: number; height: number }) => void;
 };
 
-export function FeedVideoCard({
+function FeedVideoCardComponent({
   item,
+  thumbnailUrl,
   onPress,
   showPlayIcon = true,
-  isFocused = false,
-  shouldPreload = false,
+  playback,
   onMeasured,
 }: FeedVideoCardProps) {
   const router = useRouter();
-  const [previewPositionSeconds, setPreviewPositionSeconds] = useState(0);
+  const { muxAssetId } = item;
+  const isActive = playback?.isActive ?? false;
+  const hasFirstFrame = playback?.hasFirstFrame ?? false;
 
   const durationLabel = useMemo(
     () => formatDuration(item.durationSeconds),
     [item.durationSeconds],
   );
 
-  const shouldRenderPlayer = shouldPreload || isFocused;
-  const showPreview = isFocused;
+  useEffect(() => {
+    bumpFeedCounter("mountedRows");
+    return () => bumpFeedCounter("mountedRows", -1);
+  }, []);
 
-  const handlePress = () => {
+  // Attach/detach reporting is scoped to this card's asset id, so a recycled row
+  // that rebinds to different content detaches before the new content binds.
+  const surface = playback?.surface;
+  useEffect(() => {
+    if (!isActive || !surface) return;
+    surface.onSurfaceAttached(muxAssetId);
+    return () => surface.onSurfaceDetached(muxAssetId);
+  }, [isActive, muxAssetId, surface]);
+
+  const handlePress = useCallback(() => {
+    const startAtSeconds = playback?.getPreviewPositionSeconds(muxAssetId) ?? 0;
     if (onPress) {
-      onPress(item, previewPositionSeconds);
+      onPress(item, startAtSeconds);
       return;
     }
 
     router.push({
       pathname: "/video/[muxAssetId]",
       params: {
-        muxAssetId: item.muxAssetId,
-        startAt: String(previewPositionSeconds),
+        muxAssetId,
+        startAt: String(startAtSeconds),
       },
     });
-  };
+  }, [item, muxAssetId, onPress, playback, router]);
+
+  const handleLayout = useCallback(
+    (event: { nativeEvent: { layout: { y: number; height: number } } }) => {
+      onMeasured?.({
+        y: event.nativeEvent.layout.y,
+        height: event.nativeEvent.layout.height,
+      });
+    },
+    [onMeasured],
+  );
 
   return (
     <Pressable
       onPress={handlePress}
-      onLayout={(event) => {
-        onMeasured?.({
-          y: event.nativeEvent.layout.y,
-          height: event.nativeEvent.layout.height,
-        });
-      }}
-      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+      onLayout={onMeasured ? handleLayout : undefined}
+      style={pressableStyle}
     >
       <View style={styles.videoContainer}>
+        {/*
+          Thumbnail-first: the poster is always mounted underneath the surface
+          and only hidden once the active player reports a real frame. The
+          recycling key guarantees a reused cell never paints the previous
+          card's image.
+        */}
         <Image
-          source={{ uri: item.thumbnailUrl }}
+          source={{ uri: thumbnailUrl ?? item.thumbnailUrl }}
+          recyclingKey={muxAssetId}
           contentFit="cover"
-          style={styles.thumbnail}
+          cachePolicy="memory-disk"
+          transition={0}
+          style={[styles.thumbnail, isActive && hasFirstFrame && styles.thumbnailHidden]}
         />
-        {shouldRenderPlayer ? (
-          <Activity mode="visible" name={`feed-preview-${item.muxAssetId}`}>
-            <View
-              style={[styles.previewLayer, !showPreview && styles.previewHidden]}
-            >
-              <InlineVideoPlayer
-                playbackId={item.playbackId}
-                muxAssetId={item.muxAssetId}
-                title={item.title}
-                isFocused={isFocused}
-                startAtSeconds={previewPositionSeconds}
-                onTimeUpdate={setPreviewPositionSeconds}
-              />
-            </View>
-          </Activity>
+        {isActive && playback ? (
+          <View style={styles.previewLayer} pointerEvents="none">
+            <MuxVideoView
+              player={playback.player}
+              style={styles.video}
+              contentFit="cover"
+              controls="none"
+              nativeControls={false}
+              allowsFullscreen={false}
+              /*
+                The Expo <Image> above already supplies the placeholder; a second
+                poster inside MuxVideoView would fetch and decode the same frame
+                a second time.
+              */
+              poster={false}
+              timeUpdateEventInterval={0.25}
+              onStatusChange={(event) =>
+                playback.surface.onStatusChange(muxAssetId, event.status)
+              }
+              onSourceLoad={() => playback.surface.onSourceLoad(muxAssetId)}
+              onTimeUpdate={(event) =>
+                playback.surface.onTimeUpdate(muxAssetId, event.currentTime)
+              }
+              onSourceError={(event) =>
+                playback.surface.onSourceError(muxAssetId, event.message)
+              }
+            />
+          </View>
         ) : null}
         {showPlayIcon ? (
-          <View style={styles.playOverlay}>
+          <View style={styles.playOverlay} pointerEvents="none">
             <Ionicons name="play-circle" size={56} color="#FFFFFFE6" />
           </View>
         ) : null}
@@ -162,7 +222,9 @@ export function FeedVideoCard({
           {item.channelAvatarUrl ? (
             <Image
               source={{ uri: item.channelAvatarUrl }}
+              recyclingKey={muxAssetId}
               contentFit="cover"
+              cachePolicy="memory-disk"
               style={styles.avatarImage}
             />
           ) : (
@@ -187,6 +249,38 @@ export function FeedVideoCard({
   );
 }
 
+const pressableStyle = ({ pressed }: { pressed: boolean }) => [
+  styles.card,
+  pressed && styles.cardPressed,
+];
+
+/**
+ * Recycled rows re-render constantly, so the comparison is limited to card data
+ * plus this card's own active/player state. `playback.player` and
+ * `playback.surface` are stable for the life of the screen; `isActive` and
+ * `hasFirstFrame` are the only playback fields that can change a card's output.
+ */
+export const FeedVideoCard = memo(
+  FeedVideoCardComponent,
+  (previous, next) =>
+    previous.item === next.item &&
+    previous.thumbnailUrl === next.thumbnailUrl &&
+    previous.showPlayIcon === next.showPlayIcon &&
+    previous.onPress === next.onPress &&
+    previous.onMeasured === next.onMeasured &&
+    previous.playback?.player === next.playback?.player &&
+    previous.playback?.surface === next.playback?.surface &&
+    previous.playback?.getPreviewPositionSeconds ===
+      next.playback?.getPreviewPositionSeconds &&
+    (previous.playback?.isActive ?? false) === (next.playback?.isActive ?? false) &&
+    // hasFirstFrame only affects a card that is currently active.
+    ((previous.playback?.isActive ?? false) === false ||
+      (previous.playback?.hasFirstFrame ?? false) ===
+        (next.playback?.hasFirstFrame ?? false)),
+);
+
+FeedVideoCard.displayName = "FeedVideoCard";
+
 const styles = StyleSheet.create({
   card: {
     marginBottom: 20,
@@ -203,6 +297,9 @@ const styles = StyleSheet.create({
   thumbnail: {
     ...StyleSheet.absoluteFillObject,
   },
+  thumbnailHidden: {
+    opacity: 0,
+  },
   playOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
@@ -211,8 +308,8 @@ const styles = StyleSheet.create({
   previewLayer: {
     ...StyleSheet.absoluteFillObject,
   },
-  previewHidden: {
-    opacity: 0,
+  video: {
+    flex: 1,
   },
   durationBadge: {
     position: "absolute",

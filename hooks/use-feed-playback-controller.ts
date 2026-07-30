@@ -1,0 +1,310 @@
+import {
+  createMuxVideoPlayer,
+  type MuxMaxResolution,
+  type MuxVideoPlayer,
+  type MuxVideoSourceObject,
+} from "@mux/mux-react-native-player";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import {
+  bumpFeedCounter,
+  hashPlaybackId,
+  trackFeedEvent,
+  type FeedTelemetryScreen,
+} from "@/lib/feed/feed-telemetry";
+import { runMuxPlayerCommand } from "@/lib/mux-player-command";
+
+/**
+ * Phase 2: one shared feed playback controller.
+ *
+ * The feed owns exactly one `MuxVideoPlayer` for its whole lifetime. Committing
+ * focus to a different card replaces the *source* on that player instead of
+ * creating a new one, so the number of live player objects never grows with the
+ * feed length.
+ *
+ * Why this shape, given @mux/mux-react-native-player@0.1.10:
+ *
+ *  - `MuxVideoPlayer` is a JS-side state holder. It queues commands until a
+ *    `MuxVideoView` calls `_attachNativeRef`, and the native `source` prop is
+ *    driven declaratively from the player snapshot. A player with no attached
+ *    view therefore performs no network or decoder work at all.
+ *  - `player.replace(source)` swaps the source in place and pushes it to the
+ *    already-attached native view. On iOS that re-points the `AVPlayer`; on
+ *    Android `MuxVideoView.setSource` rebuilds the `MuxPlayer` behind the same
+ *    `PlayerView`. Either way the React tree keeps one `MuxVideoView`, so there
+ *    is no RN view mount/unmount churn.
+ *  - `useMuxVideoFeed` is deliberately *not* used: it allocates one player per
+ *    window slot, and those extra players are inert unless each is attached to
+ *    its own visible `MuxVideoView`. That is the multi-surface architecture this
+ *    phase replaces.
+ *
+ * `components/inline-video-player.tsx` was deleted as part of this phase. It
+ * created one `MuxVideoPlayer` + one `MuxVideoView` per card, which is exactly
+ * the per-window ownership model the PRD removes, and it had no other consumer.
+ * The full-screen detail and live screens already use `MuxVideoView` directly.
+ */
+
+export type FeedPlaybackTarget = {
+  muxAssetId: string;
+  playbackId: string;
+  title: string;
+  /** Feed index, for telemetry only. */
+  index: number;
+};
+
+export type UseFeedPlaybackControllerOptions = {
+  /** The committed card, or null when nothing may play. */
+  target: FeedPlaybackTarget | null;
+  /** False pauses immediately while keeping the surface attached. */
+  isPlaybackAllowed: boolean;
+  /** Feed previews are always muted; exposed for future unmute affordances. */
+  muted?: boolean;
+  /** Rendition cap from the adaptive policy. */
+  maxResolution?: MuxMaxResolution;
+  screen?: FeedTelemetryScreen;
+};
+
+export type FeedPlaybackController = {
+  player: MuxVideoPlayer;
+  /** muxAssetId whose card should render the single surface, or null. */
+  activeMuxAssetId: string | null;
+  /** True once the active source has produced its first frame. */
+  hasFirstFrame: boolean;
+  /** Latest preview position, handed to the detail screen on navigation. */
+  getPreviewPositionSeconds: (muxAssetId: string) => number;
+  /** Card callbacks for the single `MuxVideoView`. */
+  surface: FeedPlaybackSurfaceCallbacks;
+};
+
+export type FeedPlaybackSurfaceCallbacks = {
+  onSurfaceAttached: (muxAssetId: string) => void;
+  onSurfaceDetached: (muxAssetId: string) => void;
+  onSourceLoad: (muxAssetId: string) => void;
+  onStatusChange: (muxAssetId: string, status: string) => void;
+  onTimeUpdate: (muxAssetId: string, currentTime: number) => void;
+  onSourceError: (muxAssetId: string, message: string) => void;
+};
+
+const FEED_PLAYER_NAME = "Robotube feed preview";
+
+export function useFeedPlaybackController({
+  target,
+  isPlaybackAllowed,
+  muted = true,
+  maxResolution,
+  screen = "home",
+}: UseFeedPlaybackControllerOptions): FeedPlaybackController {
+  const playerRef = useRef<MuxVideoPlayer | null>(null);
+  if (playerRef.current === null) {
+    playerRef.current = createMuxVideoPlayer();
+    bumpFeedCounter("livePlayers");
+    trackFeedEvent("feed_player_created", { screen });
+  }
+  const player = playerRef.current;
+
+  const activeMuxAssetId = target?.muxAssetId ?? null;
+  const [hasFirstFrame, setHasFirstFrame] = useState(false);
+  const attachedMuxAssetIdRef = useRef<string | null>(null);
+  // Updated during render so surface callbacks (which fire in child effects,
+  // before this hook's own effects) can see the *intended* target.
+  const targetMuxAssetIdRef = useRef<string | null>(activeMuxAssetId);
+  targetMuxAssetIdRef.current = activeMuxAssetId;
+  const loadedMuxAssetIdRef = useRef<string | null>(null);
+  const sourceRequestedAtMsRef = useRef<number | null>(null);
+  const isBufferingRef = useRef(false);
+  /** Preview position per asset, so returning to a card resumes where it was. */
+  const positionsRef = useRef(new Map<string, number>());
+
+  // Release the single player when the feed screen is destroyed.
+  useEffect(
+    () => () => {
+      runMuxPlayerCommand(player.release());
+      bumpFeedCounter("livePlayers", -1);
+      trackFeedEvent("feed_player_released", { screen });
+    },
+    [player, screen],
+  );
+
+  useEffect(() => {
+    runMuxPlayerCommand(player.setMuted(muted));
+    runMuxPlayerCommand(player.setLoop(true));
+    runMuxPlayerCommand(player.setPlaybackRate(1));
+  }, [muted, player]);
+
+  // Replace the active source only after focus is committed.
+  useEffect(() => {
+    if (target === null) {
+      setHasFirstFrame(false);
+      loadedMuxAssetIdRef.current = null;
+      runMuxPlayerCommand(player.pause());
+      return;
+    }
+    if (loadedMuxAssetIdRef.current === target.muxAssetId) return;
+
+    setHasFirstFrame(false);
+    loadedMuxAssetIdRef.current = target.muxAssetId;
+    sourceRequestedAtMsRef.current = Date.now();
+    isBufferingRef.current = false;
+
+    const source: MuxVideoSourceObject = {
+      playbackId: target.playbackId,
+      assetId: target.muxAssetId,
+      maxResolution,
+      metadata: {
+        playerName: FEED_PLAYER_NAME,
+        videoId: target.muxAssetId,
+        videoTitle: target.title,
+      },
+    };
+
+    bumpFeedCounter("sourceReplacements");
+    trackFeedEvent("feed_source_replace_started", {
+      screen,
+      muxAssetId: target.muxAssetId,
+      playbackIdHash: hashPlaybackId(target.playbackId),
+      feedIndex: target.index,
+    });
+    player.replace(source);
+    runMuxPlayerCommand(player.setMuted(muted));
+    runMuxPlayerCommand(player.setLoop(true));
+  }, [maxResolution, muted, player, screen, target]);
+
+  // Play/pause is driven purely by committed focus + lifecycle gating.
+  useEffect(() => {
+    if (target !== null && isPlaybackAllowed) {
+      trackFeedEvent("feed_playback_requested", {
+        screen,
+        muxAssetId: target.muxAssetId,
+        feedIndex: target.index,
+      });
+      runMuxPlayerCommand(player.play());
+      return;
+    }
+    trackFeedEvent("feed_playback_paused", {
+      screen,
+      muxAssetId: target?.muxAssetId,
+    });
+    runMuxPlayerCommand(player.pause());
+  }, [isPlaybackAllowed, player, screen, target]);
+
+  const onSurfaceAttached = useCallback(
+    (muxAssetId: string) => {
+      attachedMuxAssetIdRef.current = muxAssetId;
+      bumpFeedCounter("attachedSurfaces");
+      trackFeedEvent("feed_player_attached", { screen, muxAssetId });
+    },
+    [screen],
+  );
+
+  const onSurfaceDetached = useCallback(
+    (muxAssetId: string) => {
+      if (attachedMuxAssetIdRef.current === muxAssetId) {
+        attachedMuxAssetIdRef.current = null;
+      }
+      bumpFeedCounter("attachedSurfaces", -1);
+      trackFeedEvent("feed_player_detached", { screen, muxAssetId });
+
+      // A normal commit hand-off detaches the old card while the new target is
+      // already set, so this only fires when the committed row was recycled or
+      // unmounted out from under the player. Stop and fall back to thumbnails.
+      if (targetMuxAssetIdRef.current !== muxAssetId) return;
+      runMuxPlayerCommand(player.pause());
+      setHasFirstFrame(false);
+    },
+    [player, screen],
+  );
+
+  const onSourceLoad = useCallback(
+    (muxAssetId: string) => {
+      if (loadedMuxAssetIdRef.current !== muxAssetId) return;
+      trackFeedEvent("feed_source_ready", {
+        screen,
+        muxAssetId,
+        elapsedMs: elapsedSince(sourceRequestedAtMsRef.current),
+      });
+    },
+    [screen],
+  );
+
+  const onStatusChange = useCallback(
+    (muxAssetId: string, status: string) => {
+      if (loadedMuxAssetIdRef.current !== muxAssetId) return;
+      if (status === "buffering" && !isBufferingRef.current) {
+        isBufferingRef.current = true;
+        trackFeedEvent("feed_buffering_started", { screen, muxAssetId });
+        return;
+      }
+      if (status !== "buffering" && isBufferingRef.current) {
+        isBufferingRef.current = false;
+        trackFeedEvent("feed_buffering_ended", { screen, muxAssetId });
+      }
+    },
+    [screen],
+  );
+
+  const onTimeUpdate = useCallback(
+    (muxAssetId: string, currentTime: number) => {
+      if (!Number.isFinite(currentTime) || currentTime < 0) return;
+      positionsRef.current.set(muxAssetId, currentTime);
+      if (loadedMuxAssetIdRef.current !== muxAssetId) return;
+      if (currentTime > 0 && !hasFirstFrame) {
+        setHasFirstFrame(true);
+        trackFeedEvent("feed_first_frame", {
+          screen,
+          muxAssetId,
+          elapsedMs: elapsedSince(sourceRequestedAtMsRef.current),
+        });
+      }
+    },
+    [hasFirstFrame, screen],
+  );
+
+  const onSourceError = useCallback(
+    (muxAssetId: string, message: string) => {
+      trackFeedEvent("feed_playback_error", { screen, muxAssetId, errorCode: message });
+      // Fall back to the thumbnail rather than holding a black surface.
+      setHasFirstFrame(false);
+    },
+    [screen],
+  );
+
+  const getPreviewPositionSeconds = useCallback(
+    (muxAssetId: string) => positionsRef.current.get(muxAssetId) ?? 0,
+    [],
+  );
+
+  const surface = useMemo<FeedPlaybackSurfaceCallbacks>(
+    () => ({
+      onSurfaceAttached,
+      onSurfaceDetached,
+      onSourceLoad,
+      onStatusChange,
+      onTimeUpdate,
+      onSourceError,
+    }),
+    [
+      onSourceError,
+      onSourceLoad,
+      onStatusChange,
+      onSurfaceAttached,
+      onSurfaceDetached,
+      onTimeUpdate,
+    ],
+  );
+
+  return useMemo(
+    () => ({
+      player,
+      activeMuxAssetId,
+      hasFirstFrame,
+      getPreviewPositionSeconds,
+      surface,
+    }),
+    [activeMuxAssetId, getPreviewPositionSeconds, hasFirstFrame, player, surface],
+  );
+}
+
+function elapsedSince(startedAtMs: number | null): number | undefined {
+  if (startedAtMs === null) return undefined;
+  return Date.now() - startedAtMs;
+}

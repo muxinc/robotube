@@ -9,11 +9,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { FeedVideoCard, type FeedVideoItem } from "@/components/feed-video-card";
 import { api } from "@/convex/_generated/api";
-import { useFeedFocusController } from "@/hooks/use-feed-focus-controller";
+import { useFeedScreenPlayback } from "@/hooks/use-feed-screen-playback";
 import { useNativeSearch } from "@/hooks/use-native-search";
 
 const INITIAL_SEARCH_LIMIT = 16;
 const SEARCH_LOAD_MORE_COUNT = 12;
+
+const keyExtractor = (item: FeedVideoItem) => item.muxAssetId;
 
 function getSingleParam(value: string | string[] | undefined, fallback = "") {
   if (Array.isArray(value)) return value[0] ?? fallback;
@@ -47,16 +49,30 @@ export default function SearchResultsPage() {
   const isLoadingMore = isSearching && resultLimit > INITIAL_SEARCH_LIMIT;
   const canLoadMore = hasSearchQuery && !isSearching && items.length >= resultLimit;
 
-  const {
-    focusedIndex,
-    isScrollSettling,
-    onViewableItemsChanged,
-    viewabilityConfig,
-    onScrollBeginDrag,
-    onScrollEndDrag,
-    onMomentumScrollBegin,
-    onMomentumScrollEnd,
-  } = useFeedFocusController<FeedVideoItem>();
+  const { listProps, getCardPlayback, getThumbnailUrl, extraData } =
+    useFeedScreenPlayback({
+      items,
+      isScreenFocused: isTabFocused,
+      screen: "search",
+    });
+
+  const handleEndReached = useCallback(() => {
+    if (canLoadMore) {
+      setResultLimit((current) => current + SEARCH_LOAD_MORE_COUNT);
+    }
+  }, [canLoadMore]);
+
+  const renderItem = useCallback(
+    ({ item, target }: { item: FeedVideoItem; target: string }) => (
+      <FeedVideoCard
+        item={item}
+        thumbnailUrl={getThumbnailUrl(item)}
+        showPlayIcon={false}
+        playback={target === "Cell" ? getCardPlayback(item) : undefined}
+      />
+    ),
+    [getCardPlayback, getThumbnailUrl],
+  );
 
   useEffect(() => {
     setInputText(routeQuery);
@@ -118,18 +134,10 @@ export default function SearchResultsPage() {
 
       <FlashList
         data={items}
-        keyExtractor={(item) => item.muxAssetId}
-        onViewableItemsChanged={onViewableItemsChanged}
-        onScrollBeginDrag={onScrollBeginDrag}
-        onScrollEndDrag={onScrollEndDrag}
-        onMomentumScrollBegin={onMomentumScrollBegin}
-        onMomentumScrollEnd={onMomentumScrollEnd}
-        viewabilityConfig={viewabilityConfig}
-        onEndReached={() => {
-          if (canLoadMore) {
-            setResultLimit((current) => current + SEARCH_LOAD_MORE_COUNT);
-          }
-        }}
+        extraData={extraData}
+        keyExtractor={keyExtractor}
+        {...listProps}
+        onEndReached={handleEndReached}
         onEndReachedThreshold={0.6}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{
@@ -171,25 +179,7 @@ export default function SearchResultsPage() {
             </View>
           ) : null
         }
-        renderItem={({ item, index, target }) => {
-          const isCellTarget = target === "Cell";
-          const isFocused =
-            isCellTarget && isTabFocused && !isScrollSettling && index === focusedIndex;
-          const shouldPreload =
-            isCellTarget &&
-            isTabFocused &&
-            !isScrollSettling &&
-            Math.abs(index - focusedIndex) <= 1;
-
-          return (
-            <FeedVideoCard
-              item={item}
-              showPlayIcon={false}
-              isFocused={isFocused}
-              shouldPreload={shouldPreload}
-            />
-          );
-        }}
+        renderItem={renderItem}
       />
     </View>
   );

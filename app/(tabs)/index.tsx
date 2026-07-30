@@ -1,7 +1,7 @@
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useIsFocused, useScrollToTop } from "@react-navigation/native";
 import { usePaginatedQuery } from "convex/react";
-import { useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 
@@ -12,10 +12,12 @@ import {
 import { LiveNowSection } from "@/components/live-now-section";
 import { TabPageLogoHeader } from "@/components/tab-page-logo-header";
 import { api } from "@/convex/_generated/api";
-import { useFeedFocusController } from "@/hooks/use-feed-focus-controller";
+import { useFeedScreenPlayback } from "@/hooks/use-feed-screen-playback";
 
 const INITIAL_FEED_PAGE_SIZE = 16;
 const FEED_LOAD_MORE_COUNT = 12;
+
+const keyExtractor = (item: FeedVideoItem) => item.muxAssetId;
 
 export default function HomePage() {
   const router = useRouter();
@@ -34,21 +36,69 @@ export default function HomePage() {
     status: "LoadingFirstPage" | "CanLoadMore" | "LoadingMore" | "Exhausted";
     loadMore: (numItems: number) => void;
   };
-  const {
-    focusedIndex,
-    isScrollSettling,
-    onViewableItemsChanged,
-    viewabilityConfig,
-    onScrollBeginDrag,
-    onScrollEndDrag,
-    onMomentumScrollBegin,
-    onMomentumScrollEnd,
-    onScroll,
-  } = useFeedFocusController<FeedVideoItem>();
+  const { listProps, getCardPlayback, getThumbnailUrl, extraData } =
+    useFeedScreenPlayback({
+      items: feedVideos,
+      isScreenFocused: isTabFocused,
+      screen: "home",
+    });
   const isFeedLoading = feedStatus === "LoadingFirstPage";
   const isLoadingMore = feedStatus === "LoadingMore";
 
   useScrollToTop(feedListRef);
+
+  const handleEndReached = useCallback(() => {
+    if (feedStatus === "CanLoadMore") {
+      loadMore(FEED_LOAD_MORE_COUNT);
+    }
+  }, [feedStatus, loadMore]);
+
+  const renderItem = useCallback(
+    ({ item, target }: { item: FeedVideoItem; target: string }) => (
+      <FeedVideoCard
+        item={item}
+        thumbnailUrl={getThumbnailUrl(item)}
+        showPlayIcon={false}
+        // Recycled measurement passes must never own the player surface.
+        playback={target === "Cell" ? getCardPlayback(item) : undefined}
+      />
+    ),
+    [getCardPlayback, getThumbnailUrl],
+  );
+
+  const listHeader = useMemo(() => <LiveNowSection />, []);
+
+  const listEmpty = useMemo(
+    () => (
+      <View style={styles.emptyState}>
+        <Text style={styles.emptyTitle}>
+          {isFeedLoading ? "Loading feed..." : "No videos yet"}
+        </Text>
+        <Text style={styles.emptySubtitle}>
+          Upload a few videos from the Upload tab and they will show here.
+        </Text>
+      </View>
+    ),
+    [isFeedLoading],
+  );
+
+  const listFooter = useMemo(() => {
+    if (isLoadingMore) {
+      return (
+        <View style={styles.footerState}>
+          <Text style={styles.footerText}>Loading more videos...</Text>
+        </View>
+      );
+    }
+    if (feedVideos.length > 0 && feedStatus === "Exhausted") {
+      return (
+        <View style={styles.footerState}>
+          <Text style={styles.footerText}>You&apos;re all caught up.</Text>
+        </View>
+      );
+    }
+    return null;
+  }, [feedStatus, feedVideos.length, isLoadingMore]);
 
   return (
     <View style={styles.container}>
@@ -63,64 +113,17 @@ export default function HomePage() {
       <FlashList
         ref={feedListRef}
         data={feedVideos}
-        keyExtractor={(item) => item.muxAssetId}
-        onViewableItemsChanged={onViewableItemsChanged}
-        onScrollBeginDrag={onScrollBeginDrag}
-        onScrollEndDrag={onScrollEndDrag}
-        onMomentumScrollBegin={onMomentumScrollBegin}
-        onMomentumScrollEnd={onMomentumScrollEnd}
-        onScroll={onScroll}
-        scrollEventThrottle={16}
-        onEndReached={() => {
-          if (feedStatus === "CanLoadMore") {
-            loadMore(FEED_LOAD_MORE_COUNT);
-          }
-        }}
+        extraData={extraData}
+        keyExtractor={keyExtractor}
+        {...listProps}
+        onEndReached={handleEndReached}
         onEndReachedThreshold={0.6}
-        viewabilityConfig={viewabilityConfig}
-        renderItem={({ item, index, target }) => {
-          const isCellTarget = target === "Cell";
-          const isFocused =
-            isCellTarget && isTabFocused && !isScrollSettling && index === focusedIndex;
-          const shouldPreload =
-            isCellTarget &&
-            isTabFocused &&
-            !isScrollSettling &&
-            Math.abs(index - focusedIndex) <= 1;
-
-          return (
-            <FeedVideoCard
-              item={item}
-              showPlayIcon={false}
-              isFocused={isFocused}
-              shouldPreload={shouldPreload}
-            />
-          );
-        }}
+        renderItem={renderItem}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.feedContent}
-        ListHeaderComponent={<LiveNowSection />}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>
-              {isFeedLoading ? "Loading feed..." : "No videos yet"}
-            </Text>
-            <Text style={styles.emptySubtitle}>
-              Upload a few videos from the Upload tab and they will show here.
-            </Text>
-          </View>
-        }
-        ListFooterComponent={
-          isLoadingMore ? (
-            <View style={styles.footerState}>
-              <Text style={styles.footerText}>Loading more videos...</Text>
-            </View>
-          ) : feedVideos.length > 0 && feedStatus === "Exhausted" ? (
-            <View style={styles.footerState}>
-              <Text style={styles.footerText}>You&apos;re all caught up.</Text>
-            </View>
-          ) : null
-        }
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={listEmpty}
+        ListFooterComponent={listFooter}
       />
     </View>
   );
