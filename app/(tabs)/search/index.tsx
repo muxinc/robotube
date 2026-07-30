@@ -12,8 +12,8 @@ import {
   View,
 } from "react-native";
 
-import { TabPageLogoHeader } from "@/components/tab-page-logo-header";
 import {
+  TabPageLogoHeader,
   TAB_PAGE_LOGO_HEADER_BOTTOM_PADDING,
   TAB_PAGE_LOGO_HEADER_HEIGHT,
   TAB_PAGE_LOGO_HEADER_HORIZONTAL_PADDING,

@@ -11,15 +11,8 @@ import { bumpFeedCounter } from "@/lib/feed/feed-telemetry";
 export type FeedVideoItem = {
   muxAssetId: string;
   playbackId: string;
-  playbackUrl: string;
   thumbnailUrl: string;
   title: string;
-  summary: string | null;
-  tags: string[];
-  chapters: { title: string; startTime: number }[];
-  keyMoments: FeedVideoKeyMoment[];
-  keyMomentsGeneratedAtMs: number | null;
-  keyMomentsUnavailableReason: string | null;
   channelName: string;
   channelAvatarUrl: string | null;
   durationSeconds: number | null;
@@ -48,6 +41,17 @@ export type FeedVideoKeyMoment = {
   notableAudibleConcepts: string[];
   visualNarrative: string | null;
   notableVisualConcepts: FeedVideoKeyMomentVisualConcept[];
+};
+
+/** Rich video-detail data. This must never be returned by the card feed query. */
+export type FeedVideoDetailItem = FeedVideoItem & {
+  playbackUrl: string;
+  summary: string | null;
+  tags: string[];
+  chapters: { title: string; startTime: number }[];
+  keyMoments: FeedVideoKeyMoment[];
+  keyMomentsGeneratedAtMs: number | null;
+  keyMomentsUnavailableReason: string | null;
 };
 
 export function formatDuration(durationSeconds: number | null) {

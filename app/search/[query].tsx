@@ -10,7 +10,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FeedVideoCard, type FeedVideoItem } from "@/components/feed-video-card";
 import { api } from "@/convex/_generated/api";
 import { useFeedScreenPlayback } from "@/hooks/use-feed-screen-playback";
-import { useNativeSearch } from "@/hooks/use-native-search";
 
 const INITIAL_SEARCH_LIMIT = 16;
 const SEARCH_LOAD_MORE_COUNT = 12;

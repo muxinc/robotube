@@ -1,5 +1,5 @@
 import { Image } from "expo-image";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   createDisabledFeedPreloader,
@@ -14,6 +14,10 @@ import {
 import type { FeedScrollDirection } from "@/lib/feed/feed-focus-machine";
 import type { FeedMediaPolicy } from "@/lib/feed/feed-adaptive-policy";
 import type { FeedTelemetryScreen } from "@/lib/feed/feed-telemetry";
+import {
+  isPreloadKillSwitchEngaged,
+  subscribeToPreloadKillSwitch,
+} from "@/lib/feed-feature-kill-switch";
 
 export type FeedPreloadItem = {
   muxAssetId: string;
@@ -61,9 +65,22 @@ export function useFeedPreloader({
   const defaultPreloader = useMemo(() => createDisabledFeedPreloader(screen), [screen]);
   const activePreloader = preloader ?? defaultPreloader;
   const prefetchedThumbnailsRef = useRef(new Set<string>());
+  const [isKilled, setIsKilled] = useState(isPreloadKillSwitchEngaged);
+
+  useEffect(
+    () =>
+      subscribeToPreloadKillSwitch((state) => {
+        setIsKilled(state.engaged);
+        if (state.engaged) activePreloader.cancelAll();
+      }),
+    [activePreloader],
+  );
 
   const isMediaPreloadAllowed =
-    FEED_MEDIA_PRELOAD_ENABLED && policy.isMediaPreloadAllowed && isActive;
+    FEED_MEDIA_PRELOAD_ENABLED &&
+    !isKilled &&
+    policy.isMediaPreloadAllowed &&
+    isActive;
 
   const windowIndexes = useMemo(
     () =>

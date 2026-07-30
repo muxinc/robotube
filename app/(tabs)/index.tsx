@@ -1,7 +1,7 @@
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useIsFocused, useScrollToTop } from "@react-navigation/native";
 import { usePaginatedQuery } from "convex/react";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 
@@ -9,10 +9,12 @@ import {
   FeedVideoCard,
   type FeedVideoItem,
 } from "@/components/feed-video-card";
+import { FeedPerformanceDebugOverlay } from "@/components/feed-performance-debug-overlay";
 import { LiveNowSection } from "@/components/live-now-section";
 import { TabPageLogoHeader } from "@/components/tab-page-logo-header";
 import { api } from "@/convex/_generated/api";
 import { useFeedScreenPlayback } from "@/hooks/use-feed-screen-playback";
+import { trackFeedEvent } from "@/lib/feed/feed-telemetry";
 
 const INITIAL_FEED_PAGE_SIZE = 16;
 const FEED_LOAD_MORE_COUNT = 12;
@@ -23,6 +25,9 @@ export default function HomePage() {
   const router = useRouter();
   const isTabFocused = useIsFocused();
   const feedListRef = useRef<FlashListRef<FeedVideoItem> | null>(null);
+  const queryStartedAtRef = useRef(Date.now());
+  const didRecordQueryRef = useRef(false);
+  const didRecordFirstCardsRef = useRef(false);
   const {
     results: feedVideos,
     status: feedStatus,
@@ -46,6 +51,33 @@ export default function HomePage() {
   const isLoadingMore = feedStatus === "LoadingMore";
 
   useScrollToTop(feedListRef);
+
+  useEffect(() => {
+    trackFeedEvent("feed_query_started", { screen: "home" });
+  }, []);
+
+  useEffect(() => {
+    if (
+      didRecordQueryRef.current ||
+      feedStatus === "LoadingFirstPage"
+    ) {
+      return;
+    }
+    didRecordQueryRef.current = true;
+    trackFeedEvent("feed_query_received", {
+      screen: "home",
+      elapsedMs: Date.now() - queryStartedAtRef.current,
+    });
+  }, [feedStatus]);
+
+  useEffect(() => {
+    if (didRecordFirstCardsRef.current || feedVideos.length === 0) return;
+    didRecordFirstCardsRef.current = true;
+    trackFeedEvent("feed_first_cards_rendered", {
+      screen: "home",
+      elapsedMs: Date.now() - queryStartedAtRef.current,
+    });
+  }, [feedVideos.length]);
 
   const handleEndReached = useCallback(() => {
     if (feedStatus === "CanLoadMore") {
@@ -125,6 +157,7 @@ export default function HomePage() {
         ListEmptyComponent={listEmpty}
         ListFooterComponent={listFooter}
       />
+      <FeedPerformanceDebugOverlay />
     </View>
   );
 }
@@ -137,27 +170,6 @@ const styles = StyleSheet.create({
   feedContent: {
     paddingTop: 0,
     paddingBottom: 100,
-  },
-  debugCard: {
-    marginHorizontal: 12,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#E0E7F2",
-    backgroundColor: "#F7FAFF",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 4,
-  },
-  debugTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#294A73",
-  },
-  debugText: {
-    fontSize: 12,
-    color: "#3F566F",
-    lineHeight: 18,
   },
   emptyState: {
     paddingTop: 40,

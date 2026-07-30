@@ -5,10 +5,10 @@ in [`news-feed-performance-architecture-prd.md`](./news-feed-performance-archite
 Measurement results live in
 [`news-feed-performance-baseline.md`](./news-feed-performance-baseline.md).
 
-This document covers the parts that are implemented today: the observability
-vocabulary, the development counters, the rollout flags, and the preload kill
-switch. It does not describe the playback controller or the preloader, which
-are Phase 2 and Phase 3 work owned elsewhere.
+This document covers the implemented observability, shared-player runtime,
+bounded preload policy, lightweight feed query, rollout flags, and preload kill
+switch. Physical-device validation and production rollout remain separate
+gates.
 
 ---
 
@@ -24,6 +24,12 @@ are Phase 2 and Phase 3 work owned elsewhere.
 | `lib/feed-performance-scenarios.ts` | Device profiles, network states, scenario matrix | Documentation data |
 | `lib/feed-feature-flags.ts` | Rollout flags, cohort bucketing, resolution order | Removed with the flags |
 | `lib/feed-feature-kill-switch.ts` | Immediate preload kill switch, rollout guards | Kill switch is permanent |
+| `hooks/use-feed-focus-controller.ts` | Candidate/committed focus state and scroll-settle gating | Permanent |
+| `hooks/use-feed-playback-controller.ts` | One shared player, source replacement, lifecycle and position handoff | Permanent |
+| `hooks/use-feed-preloader.ts` | Bounded direction-aware policy, image prefetch, kill-switch cancellation | Permanent |
+| `lib/feed/feed-preloader.ts` | Platform-neutral preload interface and documented disabled implementation | Replace when reusable native preload exists |
+| `convex/feedContracts.ts` | Exact eight-field card projection and pagination helpers | Permanent |
+| `convex/muxAssetCache.ts` | Indexed feed read model used by the hot query | Permanent |
 
 Import from `@/lib/feed-performance` so the Phase 6 cleanup is a change in one
 file.
@@ -148,13 +154,31 @@ Totals: `playerCreations`, `playerReleases`, `surfaceAttachments`,
 | `at_most_one_live_player` | 1 | Yes — raise to 2 only with `feedStandbyPlayerFallback` |
 | `bounded_preload_window` | 2 | Yes |
 
-This is what satisfies the Phase 0 gate "current player and row counts are
-observable without reading logs manually". **It is not yet wired to a UI
-surface** — that belongs with the Phase 1/2 feed work.
+The Home feed renders `FeedPerformanceDebugOverlay` in development builds, so
+the current gauges, peaks, preload totals, and invariant violations are visible
+without reading logs.
 
 ---
 
-## 3. Feature flags
+## 3. Shared playback and preload posture
+
+`useFeedScreenPlayback` composes the focus state machine, one
+`MuxVideoPlayer`, adaptive policy, and preload policy for Home and search.
+Candidate changes during drag or momentum are cheap; source replacement occurs
+only after scroll settle and dwell commit. Profile cards do not receive
+playback props and remain thumbnail-only.
+
+The installed `@mux/mux-react-native-player@0.1.10` has no public data-only
+preload API. Its feed helper creates additional player objects but does not
+populate a reusable cache without attached native views. Therefore media
+preloading ships disabled. The policy and `FeedPreloader` interface are tested
+and ready for a future native/cache-backed implementation; thumbnail prefetch
+is active and bounded to the committed card plus one direction-aware neighbor.
+Engaging the preload kill switch synchronously cancels retained work.
+
+---
+
+## 4. Feature flags
 
 Four independent flags, all default-off.
 
@@ -168,7 +192,7 @@ Four independent flags, all default-off.
 `findExpiredFeedFeatureFlags(todayIso)` lists flags past their removal date, so
 the Phase 6 cleanup gate can be checked mechanically rather than remembered.
 
-### 3.1 Resolution order
+### 4.1 Resolution order
 
 Strongest last:
 
@@ -193,7 +217,7 @@ if (resolved.feedSharedPlayer.enabled) { /* ... */ }
 Each resolution carries a `source` and a human-readable `reason`, so a support
 question about why a user is on the old path is answerable without guessing.
 
-### 3.2 Cohort bucketing
+### 4.2 Cohort bucketing
 
 `rolloutBucket(flagKey, stableId)` returns a stable 0-99 bucket. The flag key is
 mixed into the hash, so a user in the first 10% for one flag is not
@@ -203,7 +227,7 @@ automatically in the first 10% for the others and the flags ramp independently.
 per-launch assignment would flip a user between architectures mid-session, so
 the safe read is off.
 
-### 3.3 The Android gate
+### 4.3 The Android gate
 
 PRD Phase 6: *"Keep Android rollout disabled if only emulator results are
 available; iOS rollout may proceed independently after its own gates pass."*
@@ -216,7 +240,7 @@ so **that value must stay false**.
 `feedLightweightQuery` is exempt: a Convex response-shape change does not depend
 on Android hardware validation.
 
-### 3.4 Illegal combinations
+### 4.4 Illegal combinations
 
 `findFlagCombinationViolations(resolved)` names combinations that must not ship:
 
@@ -229,9 +253,9 @@ on Android hardware validation.
 
 ---
 
-## 4. The preload kill switch
+## 5. The preload kill switch
 
-### 4.1 Operating it
+### 5.1 Operating it
 
 ```ts
 import {
@@ -258,7 +282,7 @@ Remote payload shape:
 { "preloadDisabled": true, "reason": "short operator note", "updatedAtMs": 1767225600000 }
 ```
 
-### 4.2 Guarantees
+### 5.2 Guarantees
 
 - **Immediate.** Subscribers are notified synchronously inside `engage()`, so
   in-flight preload work can be cancelled in the same tick — not on the next
@@ -276,7 +300,7 @@ Remote payload shape:
 - **Does not revert the rest.** Killing preload leaves `feedSharedPlayer` and
   `feedLightweightQuery` alone, matching PRD section 13.
 
-### 4.3 Rollback posture
+### 5.3 Rollback posture
 
 Per PRD section 13, a rollback must preserve feed readability: thumbnail cards
 and tap-to-open stay available even with autoplay disabled. Each flag's
@@ -284,7 +308,7 @@ and tap-to-open stay available even with autoplay disabled. Each flag's
 
 ---
 
-## 5. Rollout runbook
+## 6. Rollout runbook
 
 1. **Before any ramp** — Phase 0 baseline populated with real physical-iPhone
    numbers, and `DEFAULT_ROLLOUT_GUARD_THRESHOLDS` reviewed against them. Both
@@ -322,13 +346,15 @@ regression.
 
 ---
 
-## 6. Test tooling
+## 7. Test tooling
 
 ```bash
-node scripts/news-feed-tests.mjs        # 52 pure unit tests
-node scripts/news-feed-run-sheet.mjs    # tooling probe + blank run sheet
 npm run lint
 npx tsc --noEmit
+node scripts/run-tests.mjs
+node --experimental-strip-types --test tests/feed-contracts.test.ts
+node scripts/news-feed-tests.mjs
+node scripts/news-feed-run-sheet.mjs    # tooling probe + blank run sheet
 ```
 
 There is no test runner in `package.json` and this work did not add one.
@@ -337,7 +363,7 @@ directory using the existing TypeScript dev dependency and imports them, so the
 tests run on Node's built-in `node:test` with no new packages. A side benefit:
 every run also type-checks these modules in isolation from the app.
 
-### 6.1 Deterministic fixtures
+### 7.1 Deterministic fixtures
 
 `createDeterministicFeed({ count, seed, playbackIds })` produces a byte-stable
 feed. Same seed and count, same JSON — a scroll scenario run today and the same
@@ -349,19 +375,19 @@ playback IDs to make the fixture feed actually playable. The PRD's
 "deterministic test feed with at least 50 playable videos" is not satisfied by
 the generator alone.
 
-### 6.2 The card contract as an executable check
+### 7.2 The card contract as an executable check
 
 `findFeedCardContractViolations(page)` validates a feed response against PRD
 section 7.4 and reports every violation, classified as `missing_field`,
-`wrong_type`, `unexpected_field`, or `forbidden_field`. Phase 4 should call it
-from a Convex response-shape test so rich metadata cannot quietly return to the
-card query.
+`wrong_type`, `unexpected_field`, or `forbidden_field`. The Phase 4
+response-shape suite applies the same exact projection so rich metadata cannot
+quietly return to the card query.
 
 `projectFeedCard(row)` narrows an arbitrary row to the eight contract fields.
 
 ---
 
-## 7. Phase 6 cleanup checklist
+## 8. Phase 6 cleanup checklist
 
 - [ ] Remove `lib/feed-performance-counters.ts` and every call site.
 - [ ] Remove the four flags once each removal date passes; verify with

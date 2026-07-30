@@ -198,7 +198,7 @@ dependency in section 2.3.
 | iOS Simulator functional results exist and are labeled non-performance | Not met — see 4.4 |
 | Android emulator functional results exist, or the gap is recorded with an owner and target phase | **Met via the recorded gap** — see 2.3 |
 | Physical Android validation is scheduled as a rollout dependency and does not block Phase 0 | **Met** — see 2.3 |
-| Current player and row counts are observable without reading logs manually | **Met** — `lib/feed-performance-counters.ts` exposes gauges, peaks, totals, and invariant violations through `snapshot()` and `subscribe()`; not yet wired into a UI surface |
+| Current player and row counts are observable without reading logs manually | **Met** — `lib/feed-performance-counters.ts` exposes gauges, peaks, totals, and invariant violations, and the development-only Home overlay subscribes to them |
 
 ---
 

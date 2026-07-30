@@ -41,6 +41,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   FeedVideoCard,
+  type FeedVideoDetailItem,
   type FeedVideoKeyMoment,
   type FeedVideoKeyMomentCue,
   type FeedVideoItem,
@@ -608,7 +609,7 @@ export default function VideoDetailPage() {
   const selectedVideo = useQuery(
     (api as any).feed.getFeedVideoByMuxAssetId,
     muxAssetId ? { muxAssetId } : "skip",
-  ) as FeedVideoItem | null | undefined;
+  ) as FeedVideoDetailItem | null | undefined;
 
   const feedVideos = useQuery((api as any).feed.listFeedVideos, {
     limit: 20,

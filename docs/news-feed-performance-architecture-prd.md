@@ -2,8 +2,9 @@
 
 > **Implementation status.** A checked box means the item is fully satisfied by
 > artifacts on this branch. Items needing physical-device runs, a live Convex
-> deployment, instrumentation wired into `app/`, `components/`, or `hooks/`, or
-> a production rollout are left unchecked. See
+> deployment/backfill, or a production rollout are left unchecked. Runtime
+> instrumentation is wired into the feed and exposed through a development
+> overlay. See
 > [`news-feed-performance-baseline.md`](./news-feed-performance-baseline.md) for
 > what was and was not measured, and
 > [`news-feed-performance-operations.md`](./news-feed-performance-operations.md)
@@ -196,8 +197,8 @@ Goal: establish repeatable measurements before changing runtime behavior.
 - [ ] Create a deterministic test feed with at least 50 playable videos.
 - [x] Document the test scenarios: cold launch, warm launch, slow scroll, fast fling, reverse scroll, pagination, tab switch, background/foreground, and open-detail/back.
 - [x] Add development-only counters for mounted feed rows, attached player surfaces, live player instances, source replacements, preload starts, preload cancellations, and preload cache hits.
-- [ ] Record candidate-change and committed-focus timestamps.
-- [ ] Record playback-requested, source-ready, first-frame, buffering-start, buffering-end, and playback-error timestamps.
+- [x] Record candidate-change and committed-focus timestamps.
+- [x] Record playback-requested, source-ready, first-frame, buffering-start, buffering-end, and playback-error timestamps.
 - [ ] Capture JS/UI frame rate, dropped frames, memory, CPU, and network bytes during the standard 50-item scenario.
 - [ ] Measure the current feed query response size and execution time for 16 and 48 items.
 - [ ] Store baseline results in `docs/news-feed-performance-baseline.md`.
@@ -208,26 +209,26 @@ Phase 0 exit gate:
 - [ ] The same test scenario can be run twice with results that are comparable.
 - [ ] Physical-device baseline metrics exist for the available iPhone.
 - [ ] iOS Simulator functional results exist and are clearly labeled as non-performance results.
-- [x] Android emulator functional results exist, or the missing Android tooling is recorded with an owner and target phase.
+- [ ] Android emulator functional results exist, or the missing Android tooling is recorded with an owner and target phase.
 - [x] Physical Android validation is scheduled as a rollout dependency and does not block Phase 0.
-- [ ] Current player and row counts are observable without reading logs manually.
+- [x] Current player and row counts are observable without reading logs manually.
 
 ### Phase 1: Restore List Virtualization and Remove Scroll-Path Churn
 
 Goal: make scrolling cheap before changing the playback architecture.
 
-- [ ] Remove `maxItemsInRecyclePool={0}` from the Home feed.
-- [ ] Remove the explicit `removeClippedSubviews={false}` override and validate platform defaults.
-- [ ] Restore separate candidate and committed focus states.
-- [ ] Prevent committed-focus updates while dragging or momentum scrolling.
-- [ ] Commit focus only after scroll settle plus the agreed dwell threshold.
-- [ ] Stabilize `renderItem` with `useCallback`.
-- [ ] Stabilize `keyExtractor`, end-reached handlers, and list header/footer elements where measurements show rerenders.
-- [ ] Replace the per-render `extraData` object with a stable primitive or memoized structure.
-- [ ] Memoize `FeedVideoCard` with a comparison limited to card data and active/player state.
-- [ ] Add `recyclingKey={item.muxAssetId}` to recycled Expo images where required to prevent stale thumbnails.
-- [ ] Verify recycled rows never display the previous card's thumbnail, title, duration, or player surface.
-- [ ] Apply the same list rules to search results where the shared feed card autoplays.
+- [x] Remove `maxItemsInRecyclePool={0}` from the Home feed.
+- [x] Remove the explicit `removeClippedSubviews={false}` override and validate platform defaults.
+- [x] Restore separate candidate and committed focus states.
+- [x] Prevent committed-focus updates while dragging or momentum scrolling.
+- [x] Commit focus only after scroll settle plus the agreed dwell threshold.
+- [x] Stabilize `renderItem` with `useCallback`.
+- [x] Stabilize `keyExtractor`, end-reached handlers, and list header/footer elements where measurements show rerenders.
+- [x] Replace the per-render `extraData` object with a stable primitive or memoized structure.
+- [x] Memoize `FeedVideoCard` with a comparison limited to card data and active/player state.
+- [x] Add `recyclingKey={item.muxAssetId}` to recycled Expo images where required to prevent stale thumbnails.
+- [x] Verify recycled rows never display the previous card's thumbnail, title, duration, or player surface.
+- [x] Apply the same list rules to search results where the shared feed card autoplays.
 
 Phase 1 exit gate:
 
@@ -240,22 +241,22 @@ Phase 1 exit gate:
 
 Goal: replace per-window player ownership with one active feed player.
 
-- [ ] Create `hooks/use-feed-playback-controller.ts`.
-- [ ] Give the controller one active player and one committed `muxAssetId`.
-- [ ] Move mute, loop, play, pause, source replacement, and lifecycle commands into the controller.
-- [ ] Ensure only the committed active card receives the player/surface.
-- [ ] Detach the surface before a recycled card is rebound to different content.
-- [ ] Replace the active source only after focus is committed.
-- [ ] Keep the thumbnail visible until the active player emits its first frame.
-- [ ] Remove the duplicate `poster` from `MuxVideoView` when the underlying Expo thumbnail supplies the placeholder.
-- [ ] Remove `startupBufferDuration={2}` from feed previews and start from the package default.
+- [x] Create `hooks/use-feed-playback-controller.ts`.
+- [x] Give the controller one active player and one committed `muxAssetId`.
+- [x] Move mute, loop, play, pause, source replacement, and lifecycle commands into the controller.
+- [x] Ensure only the committed active card receives the player/surface.
+- [x] Detach the surface before a recycled card is rebound to different content.
+- [x] Replace the active source only after focus is committed.
+- [x] Keep the thumbnail visible until the active player emits its first frame.
+- [x] Remove the duplicate `poster` from `MuxVideoView` when the underlying Expo thumbnail supplies the placeholder.
+- [x] Remove `startupBufferDuration={2}` from feed previews and start from the package default.
 - [ ] Tune startup buffering only after cold and warm first-frame metrics are captured.
-- [ ] Pause playback immediately when the tab loses focus or the app backgrounds.
-- [ ] Release the active player when the feed screen is destroyed.
-- [ ] Preserve the current preview position when navigating to `/video/[muxAssetId]`.
-- [ ] Ensure returning from the detail screen restores a valid muted feed state without playing two videos.
-- [ ] Remove Home-feed usage of `useMuxVideoFeed`.
-- [ ] Decide whether `components/inline-video-player.tsx` is deleted, restored for another screen, or replaced by the shared controller; document the decision.
+- [x] Pause playback immediately when the tab loses focus or the app backgrounds.
+- [x] Release the active player when the feed screen is destroyed.
+- [x] Preserve the current preview position when navigating to `/video/[muxAssetId]`.
+- [x] Ensure returning from the detail screen restores a valid muted feed state without playing two videos.
+- [x] Remove Home-feed usage of `useMuxVideoFeed`.
+- [x] Decide whether `components/inline-video-player.tsx` is deleted, restored for another screen, or replaced by the shared controller; document the decision.
 
 Phase 2 exit gate:
 
@@ -269,27 +270,27 @@ Phase 2 exit gate:
 
 Goal: make the next likely video start quickly without sacrificing scrolling or memory.
 
-- [ ] Define a `FeedPreloader` interface independent of platform implementation.
-- [ ] Complete a technical spike for data-only Mux preloading on Android and iOS.
-- [ ] Document whether the installed package can be upgraded, extended, or needs a native adapter.
+- [x] Define a `FeedPreloader` interface independent of platform implementation.
+- [x] Complete a technical spike for data-only Mux preloading on Android and iOS.
+- [x] Document whether the installed package can be upgraded, extended, or needs a native adapter.
 - [ ] Prove that preloaded bytes/samples are consumed by the active player rather than downloaded twice.
-- [ ] Default the preload window to the committed current item plus one direction-aware next item.
-- [ ] Prioritize the active playback request over every preload request.
-- [ ] Cancel or reprioritize preload work when scroll direction changes.
-- [ ] Suspend preload work during a fast fling.
-- [ ] Suspend and release preload work when the app backgrounds or the feed loses focus.
-- [ ] Remove media from the preload window when it becomes distant.
-- [ ] Add a bounded cache key using playback ID, rendition constraints, and clipping parameters.
+- [x] Default the preload window to the committed current item plus one direction-aware next item.
+- [x] Prioritize the active playback request over every preload request.
+- [x] Cancel or reprioritize preload work when scroll direction changes.
+- [x] Suspend preload work during a fast fling.
+- [x] Suspend and release preload work when the app backgrounds or the feed loses focus.
+- [x] Remove media from the preload window when it becomes distant.
+- [x] Add a bounded cache key using playback ID, rendition constraints, and clipping parameters.
 - [ ] Verify reverse scrolling can reuse cached media without retaining an unbounded source list.
 - [ ] Add cache-hit, wasted-preload-byte, and preload-to-play conversion metrics.
 - [ ] Keep a feature-flagged maximum-one-standby-player fallback only if data-only preloading is unavailable.
-- [ ] Disable preloading rather than ship a fallback that regresses scrolling or memory.
+- [x] Disable preloading rather than ship a fallback that regresses scrolling or memory.
 
 Phase 3 exit gate:
 
 - [ ] Warm/preloaded p75 time to first frame meets the target or has an approved revised target.
-- [ ] Preloading does not create additional attached visible surfaces.
-- [ ] No more than the current and next eligible media items retain preload resources.
+- [x] Preloading does not create additional attached visible surfaces.
+- [x] No more than the current and next eligible media items retain preload resources.
 - [ ] The 50-item memory scenario remains bounded.
 - [ ] Wasted preload data is measured and within the agreed budget.
 
@@ -297,41 +298,41 @@ Phase 3 exit gate:
 
 Goal: reduce time before the list can render and before the first player can be prepared.
 
-- [ ] Add a dedicated `FeedVideoCardItem` type containing only the Section 7.4 fields.
-- [ ] Update `listFeedVideosPaginated` to return the lightweight card contract.
-- [ ] Stop serializing summaries, tags, chapters, key moments, transcript cues, and key-moment generation state in the feed response.
-- [ ] Keep rich metadata available through `getFeedVideoByMuxAssetId` or a dedicated detail query.
-- [ ] Eliminate per-card `components.mux.videos.getVideoByMuxAssetId` calls from the hot feed query.
-- [ ] Store or denormalize display-ready title and uploader data in an indexed feed-read model.
-- [ ] Resolve repeated channel/avatar data once per distinct uploader, not once per video.
-- [ ] Avoid regenerating identical Convex storage URLs for every card in the same page.
-- [ ] Preserve stable descending pagination and cursor behavior.
-- [ ] Add a response-shape test that fails if rich metadata is added back to the card query.
-- [ ] Add query tests for missing playback IDs, deleted assets, missing uploaders, and avatar fallbacks.
-- [ ] Update search and profile queries to use explicit card contracts appropriate to those screens.
+- [x] Add a dedicated `FeedVideoCardItem` type containing only the Section 7.4 fields.
+- [x] Update `listFeedVideosPaginated` to return the lightweight card contract.
+- [x] Stop serializing summaries, tags, chapters, key moments, transcript cues, and key-moment generation state in the feed response.
+- [x] Keep rich metadata available through `getFeedVideoByMuxAssetId` or a dedicated detail query.
+- [x] Eliminate per-card `components.mux.videos.getVideoByMuxAssetId` calls from the hot feed query.
+- [x] Store or denormalize display-ready title and uploader data in an indexed feed-read model.
+- [x] Resolve repeated channel/avatar data once per distinct uploader, not once per video.
+- [x] Avoid regenerating identical Convex storage URLs for every card in the same page.
+- [x] Preserve stable descending pagination and cursor behavior.
+- [x] Add a response-shape test that fails if rich metadata is added back to the card query.
+- [x] Add query tests for missing playback IDs, deleted assets, missing uploaders, and avatar fallbacks.
+- [x] Update search and profile queries to use explicit card contracts appropriate to those screens.
 
 Phase 4 exit gate:
 
 - [ ] A 16-card feed response is <= 15 KB serialized.
-- [ ] The feed query performs no per-video Mux component subquery.
-- [ ] Initial cards render before rich video metadata is requested.
-- [ ] Detail, search, and profile screens still receive every field they render.
-- [ ] Pagination has no duplicate, missing, or reordered entries.
+- [x] The feed query performs no per-video Mux component subquery.
+- [x] Initial cards render before rich video metadata is requested.
+- [x] Detail, search, and profile screens still receive every field they render.
+- [x] Pagination has no duplicate, missing, or reordered entries.
 
 ### Phase 5: Adaptive Media and Image Policy
 
 Goal: preserve performance across device classes and network conditions.
 
-- [ ] Define low-, standard-, and high-capability device policies.
-- [ ] Define Wi-Fi, cellular, constrained-network, and low-data preload policies.
-- [ ] Disable or reduce preloading when memory, CPU, thermal, or I/O pressure is high.
-- [ ] Keep feed previews muted and cap preview resolution at an appropriate mobile rendition.
+- [x] Define low-, standard-, and high-capability device policies.
+- [x] Define Wi-Fi, cellular, constrained-network, and low-data preload policies.
+- [ ] Disable or reduce preloading when memory, CPU, thermal, or I/O pressure is high. Memory warnings are wired; CPU, thermal, and I/O signal providers remain rollout work.
+- [x] Keep feed previews muted and cap preview resolution at an appropriate mobile rendition.
 - [ ] Validate whether `720p` remains the best maximum for the feed on representative screen densities.
-- [ ] Request thumbnail widths based on rendered size and device pixel ratio instead of always using 1280px.
-- [ ] Use one image cache path and one poster representation per card.
-- [ ] Prefetch only the active/next thumbnail and cancel stale image work.
+- [x] Request thumbnail widths based on rendered size and device pixel ratio instead of always using 1280px.
+- [x] Use one image cache path and one poster representation per card.
+- [x] Prefetch only the active/next thumbnail and cancel stale image work.
 - [ ] Verify active playback always wins bandwidth contention against thumbnails and media preload.
-- [ ] Add safe fallbacks for preload errors, cache corruption, offline state, and memory warnings.
+- [x] Add safe fallbacks for preload errors, cache corruption, offline state, and memory warnings.
 
 Phase 5 exit gate:
 
@@ -346,7 +347,8 @@ Goal: ship incrementally and remove the old architecture only after the new path
 
 - [x] Add feature flags for shared-player playback, predictive preloading, and the lightweight feed query.
 - [x] Support an immediate remote kill switch for preloading.
-- [ ] Run the automated test suite and the complete manual device matrix.
+- [x] Run the automated test suite.
+- [ ] Run the complete manual device matrix.
 - [ ] Validate Android behavior on at least one physical Android device before any external Android rollout.
 - [ ] Validate Android performance on a representative mid-tier physical or cloud-hosted Android device before rollout exceeds the internal cohort.
 - [ ] Keep Android rollout disabled if only emulator results are available; iOS rollout may proceed independently after its own gates pass.
@@ -392,13 +394,13 @@ Phase 6 exit gate:
 
 Unit tests:
 
-- [ ] Candidate-to-committed focus state transitions.
-- [ ] Scroll begin/end and momentum begin/end behavior.
-- [ ] Preload window selection and cancellation.
-- [ ] Player lifecycle on tab focus and app state changes.
-- [ ] Exactly-one-playing invariant.
+- [x] Candidate-to-committed focus state transitions.
+- [x] Scroll begin/end and momentum begin/end behavior.
+- [x] Preload window selection and cancellation.
+- [x] Player lifecycle on tab focus and app state changes.
+- [x] Exactly-one-playing invariant.
 - [x] Feed-card response projection.
-- [ ] Stable pagination and missing-data fallbacks.
+- [x] Stable pagination and missing-data fallbacks.
 
 Integration tests:
 
@@ -425,9 +427,13 @@ Required verification commands:
 ```bash
 npm run lint
 npx tsc --noEmit
+node scripts/run-tests.mjs
+node --experimental-strip-types --test tests/feed-contracts.test.ts
+node scripts/news-feed-tests.mjs
 ```
 
-Platform release builds and automated tests must be added to this section when their commands are established.
+Platform release-build commands must be added to this section when their
+device profiles and signing configuration are established.
 
 ## 11. Observability Events
 
@@ -503,9 +509,9 @@ This project is complete when:
 
 - [ ] Every phase exit gate is checked.
 - [ ] Final iOS and Android metrics are recorded against the Phase 0 baseline.
-- [ ] The Home feed uses recyclable cells and one attached active player surface.
+- [x] The Home feed uses recyclable cells and one attached active player surface.
 - [ ] Preloading is bounded, reusable by active playback, and safe to disable.
-- [ ] The feed query sends only card data.
+- [x] The feed query sends only card data.
 - [ ] All functional acceptance checks pass.
 - [ ] All automated checks and release-build performance scenarios pass.
 - [ ] Rollout reaches 100% without unresolved P0/P1 regressions.
