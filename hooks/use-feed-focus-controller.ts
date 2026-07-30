@@ -17,7 +17,15 @@ import {
   type FeedFocusTimings,
   type FeedScrollDirection,
 } from "@/lib/feed/feed-focus-machine";
-import { trackFeedEvent } from "@/lib/feed/feed-telemetry";
+import {
+  trackFeedEvent,
+  type FeedTelemetryScreen,
+} from "@/lib/feed/feed-telemetry";
+
+export type FeedViewabilityConfig = {
+  itemVisiblePercentThreshold: number;
+  minimumViewTime: number;
+};
 
 export type UseFeedFocusControllerOptions = {
   /** Number of rows currently in the list. Used to invalidate stale focus. */
@@ -27,7 +35,17 @@ export type UseFeedFocusControllerOptions = {
   /** Policy-level autoplay switch (reduced motion, low data, low-tier device). */
   isAutoplayAllowed?: boolean;
   timings?: FeedFocusTimings;
-  screen?: "home" | "search";
+  /**
+   * Viewability thresholds for this list's item geometry. Full-viewport pages
+   * need a higher visible percentage than Home's 16:9 cards, where several rows
+   * legitimately share the viewport.
+   *
+   * Captured once on mount: FlashList does not support changing
+   * `viewabilityConfig` on the fly, so a later value is ignored on purpose
+   * rather than silently producing a list that disagrees with its own config.
+   */
+  viewabilityConfig?: FeedViewabilityConfig;
+  screen?: FeedTelemetryScreen;
 };
 
 export type FeedFocusController<T> = {
@@ -41,7 +59,7 @@ export type FeedFocusController<T> = {
   isPlaybackAllowed: boolean;
   direction: FeedScrollDirection;
   onViewableItemsChanged: (info: { viewableItems: ViewToken<T>[] }) => void;
-  viewabilityConfig: { itemVisiblePercentThreshold: number; minimumViewTime: number };
+  viewabilityConfig: FeedViewabilityConfig;
   onScrollBeginDrag: () => void;
   onScrollEndDrag: () => void;
   onMomentumScrollBegin: () => void;
@@ -51,10 +69,11 @@ export type FeedFocusController<T> = {
   reportSurfaceLost: (index: number) => void;
 };
 
-const VIEWABILITY_CONFIG = {
+/** Home's card geometry: several 16:9 rows can share the viewport. */
+const VIEWABILITY_CONFIG: FeedViewabilityConfig = {
   itemVisiblePercentThreshold: 65,
   minimumViewTime: 100,
-} as const;
+};
 
 /**
  * Owns candidate focus and committed focus for a feed list.
@@ -69,8 +88,11 @@ export function useFeedFocusController<T>({
   isScreenFocused,
   isAutoplayAllowed = true,
   timings = DEFAULT_FEED_FOCUS_TIMINGS,
+  viewabilityConfig,
   screen = "home",
 }: UseFeedFocusControllerOptions): FeedFocusController<T> {
+  // Frozen for the life of the list, alongside `onViewableItemsChanged`.
+  const viewabilityConfigRef = useRef(viewabilityConfig ?? VIEWABILITY_CONFIG);
   const stateRef = useRef<FeedFocusState>(
     createFeedFocusState({
       itemCount,
@@ -223,7 +245,7 @@ export function useFeedFocusController<T>({
       isPlaybackAllowed: publishedState.isPlaybackAllowed,
       direction: stateRef.current.direction,
       onViewableItemsChanged,
-      viewabilityConfig: VIEWABILITY_CONFIG,
+      viewabilityConfig: viewabilityConfigRef.current,
       onScrollBeginDrag,
       onScrollEndDrag,
       onMomentumScrollBegin,

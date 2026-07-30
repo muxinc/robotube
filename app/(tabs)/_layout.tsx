@@ -39,6 +39,22 @@ export default function TabLayout() {
         <NativeTabs.Trigger.Label hidden>Home</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
+      {/*
+        Shorts sits immediately after Home. Remove this trigger to hide the tab;
+        the screen itself starts no query and no playback work until it mounts.
+      */}
+      <NativeTabs.Trigger name="shorts">
+        <NativeTabs.Trigger.Icon
+          src={
+            <NativeTabs.Trigger.VectorIcon
+              family={MaterialCommunityIcons}
+              name="play-box-outline"
+            />
+          }
+        />
+        <NativeTabs.Trigger.Label hidden>Shorts</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="upload">
         <NativeTabs.Trigger.Icon
           src={

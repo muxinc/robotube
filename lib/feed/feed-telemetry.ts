@@ -41,9 +41,24 @@ export type FeedTelemetryEventName =
   | "feed_preload_completed"
   | "feed_preload_cancelled"
   | "feed_preload_cache_hit"
-  | "feed_preload_promoted_to_active";
+  | "feed_preload_promoted_to_active"
+  // Shorts-specific vocabulary. These describe interactions the card feed has
+  // no equivalent for, so they are additive rather than reusing a feed_* name.
+  // They are not part of `FEED_PERFORMANCE_EVENTS`, so they reach telemetry
+  // listeners and the development overlay without widening the sanitized
+  // performance-event schema.
+  | "shorts_tab_opened"
+  | "shorts_page_impression"
+  | "shorts_manual_pause"
+  | "shorts_manual_resume"
+  | "shorts_muted"
+  | "shorts_unmuted"
+  | "shorts_open_detail"
+  | "shorts_retry_playback"
+  | "shorts_query_received"
+  | "shorts_empty_state_viewed";
 
-export type FeedTelemetryScreen = "home" | "search";
+export type FeedTelemetryScreen = "home" | "search" | "shorts";
 
 export type FeedTelemetryFields = {
   screen?: FeedTelemetryScreen;
@@ -138,9 +153,18 @@ export function trackFeedEvent(
     feedTimelineRecorder.mark(timelineKey(fields), mark);
   }
 
+  // Listeners receive the same normalized error code the sanitized performance
+  // sink gets. Call sites pass through raw player and query error text, which is
+  // exactly the free-form payload the privacy contract excludes, so normalizing
+  // here rather than at each call site means one path cannot be forgotten.
+  const listenerFields: FeedTelemetryFields =
+    fields.errorCode === undefined
+      ? fields
+      : { ...fields, errorCode: normalizeErrorCode(fields.errorCode) };
+
   for (const listener of listeners) {
     try {
-      listener(event, fields);
+      listener(event, listenerFields);
     } catch {
       // Observability must never interrupt playback.
     }
@@ -189,12 +213,7 @@ function toPerformanceFields(
   fields: FeedTelemetryFields,
 ): FeedPerformanceEventFields {
   return {
-    screen:
-      fields.screen === "search"
-        ? "search_results"
-        : fields.screen === "home"
-          ? "home_feed"
-          : undefined,
+    screen: toPerformanceScreen(fields.screen),
     mux_asset_id: fields.muxAssetId,
     playback_id_hash: fields.playbackIdHash,
     feed_index: fields.feedIndex,
@@ -218,6 +237,31 @@ function toPerformanceFields(
     elapsed_ms: fields.elapsedMs,
     error_code: normalizeErrorCode(fields.errorCode),
   };
+}
+
+/**
+ * Maps a runtime screen onto the sanitized performance-event vocabulary.
+ *
+ * `shorts` intentionally resolves to `undefined`: `FEED_SCREENS` in
+ * `lib/feed-performance-events.ts` owns that allowlist, and an unlisted value
+ * would be redacted by `sanitizeFeedEventFields` anyway. Dropping the dimension
+ * here keeps the event itself flowing with its asset, index, and timing fields
+ * instead of silently shipping a value that fails the allowlist. The Shorts
+ * screen dimension is still observable through `addFeedTelemetryListener`, which
+ * receives the unmapped `screen: "shorts"`. Add `"shorts_feed"` to `FEED_SCREENS`
+ * to carry it into the sanitized path as well.
+ */
+function toPerformanceScreen(
+  screen: FeedTelemetryScreen | undefined,
+): FeedPerformanceEventFields["screen"] {
+  switch (screen) {
+    case "home":
+      return "home_feed";
+    case "search":
+      return "search_results";
+    default:
+      return undefined;
+  }
 }
 
 function normalizeErrorCode(value: string | undefined): string | undefined {
