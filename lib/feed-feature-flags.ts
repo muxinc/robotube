@@ -1,12 +1,6 @@
 /**
- * News-feed rollout flags (PRD Phase 6).
- *
- * The PRD requires independent flags for shared-player playback, predictive
- * preloading, and the lightweight feed query, plus a feature-flagged
- * standby-player fallback that section 7.2 permits only as a temporary
- * measure. Every flag carries an owner and a removal date because Phase 6's
- * exit gate is "the feature flags have documented owners and removal dates",
- * and because section 12 names permanent duplicate code as a named risk.
+ * Independent rollout flags for shared playback, predictive preloading, the
+ * lightweight query, and the temporary standby-player fallback.
  *
  * Resolution order, strongest last:
  *
@@ -35,17 +29,14 @@ export type FeedFeatureFlagDefinition = {
   key: FeedFeatureFlagKey;
   description: string;
   defaultValue: boolean;
-  /** Who removes this flag. Phase 6 exit gate. */
+  /** Team responsible for removing this flag. */
   owner: string;
   /** ISO date. Past this date the flag is a cleanup task, not a control. */
   removalDate: string;
   phase: string;
   /** Whether the preload kill switch can force this flag off. */
   killSwitchControlled: boolean;
-  /**
-   * Android exposure requires physical-device validation first. PRD Phase 6:
-   * "Keep Android rollout disabled if only emulator results are available."
-   */
+  /** Android exposure requires physical-device validation first. */
   requiresAndroidPhysicalValidation: boolean;
   /** What reverting looks like if this flag is turned back off in production. */
   rollbackNote: string;
@@ -153,11 +144,7 @@ export type FeedFeatureFlagContext = {
   rollout?: FeedFlagRolloutConfig;
   /** Developer-menu overrides. Highest precedence below the kill switch. */
   overrides?: Partial<Record<FeedFeatureFlagKey, boolean>>;
-  /**
-   * Set true only after the PRD's physical-Android validation has actually
-   * happened. Defaults to false, which keeps Android exposure at zero for the
-   * flags that require it.
-   */
+  /** Set true only after physical Android validation has completed. */
   androidPhysicalValidationCompleted?: boolean;
   /** Defaults to the module-level preload kill switch. */
   preloadKillSwitchEngaged?: boolean;

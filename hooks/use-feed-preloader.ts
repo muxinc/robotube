@@ -40,8 +40,6 @@ export type UseFeedPreloaderOptions = {
 };
 
 /**
- * Phase 3 + the Phase 5 image half.
- *
  * Runs the bounded preload-window policy and drives two sinks:
  *
  *  - the media `FeedPreloader`, which ships disabled (see `feed-preloader.ts`

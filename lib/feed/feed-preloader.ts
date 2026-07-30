@@ -1,7 +1,5 @@
 /**
- * Phase 3: the `FeedPreloader` interface, and the default implementation.
- *
- * ## Spike result for @mux/mux-react-native-player@0.1.10
+ * `FeedPreloader` interface and the default implementation.
  *
  * Data-only media preloading is **not available** in the installed package, and
  * the shipped "feed" helper does not preload bytes either. Evidence:
@@ -18,23 +16,16 @@
  *     reaches native through that view's `source` prop. An unattached player
  *     therefore downloads zero bytes. `useMuxVideoFeed`'s `preloadAhead` /
  *     `preloadBehind` allocate extra `MuxVideoPlayer` objects that do nothing
- *     unless each one is attached to its own visible surface — which is the
- *     multi-surface architecture this PRD removes.
+ *     unless each one is attached to its own visible surface.
  *  3. Neither native view builds a shareable media cache the app can populate
  *     out of band. Android does construct its `MuxPlayer` with
  *     `enableSmartCache(true)`, so bytes fetched by one player *are* reusable by
  *     a later one; iOS uses a plain `AVPlayer` with only
  *     `preferredForwardBufferDuration` set and no cross-item cache.
  *
- * Per PRD section 7.3 ("A preload implementation that downloads data but cannot
- * be reused by the active player does not satisfy this PRD") and Phase 3
- * ("Disable preloading rather than ship a fallback that regresses scrolling or
- * memory"), the default preloader is a **no-op** that still records the policy
- * decisions and metrics. The one-standby-player fallback is deliberately NOT
- * enabled: it is only defensible on Android (smart cache) and is unverifiable on
- * iOS, and enabling it would re-introduce a second attached surface — which
- * Phase 3's own exit gate forbids ("Preloading does not create additional
- * attached visible surfaces").
+ * The default preloader is a no-op because downloaded media must be reusable by
+ * the active player. A standby-player fallback is not enabled: it is defensible
+ * only on Android and unverifiable on iOS, and would add another surface.
  *
  * To enable real preloading later, implement this interface against either an
  * upgraded Mux package that exposes a module-level preload API, or a small
@@ -142,8 +133,5 @@ export function createDisabledFeedPreloader(
   };
 }
 
-/**
- * Remote kill switch hook-up point (PRD section 13). Preloading ships off; a
- * Phase 6 flag provider can flip this once a real implementation exists.
- */
+/** Preloading stays off until a reusable implementation is available. */
 export const FEED_MEDIA_PRELOAD_ENABLED = false;

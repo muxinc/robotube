@@ -7,15 +7,14 @@
  *      run on Monday and the same run on Friday exercise identical data. The
  *      generator is pure: same seed and count always produce byte-identical
  *      JSON.
- *   2. Encode the PRD section 7.4 card contract as something executable, so
- *      Phase 4 can assert that rich metadata never reappears in the feed query
- *      response.
+ *   2. Encode the card contract as an executable check so rich metadata cannot
+ *      reappear in the feed response.
  *
  * The generator produces *fixtures*. Sizes computed from fixtures describe the
  * fixtures only; they are not measurements of the production Convex response.
  */
 
-/** PRD section 7.4. These eight fields are the entire feed-card contract. */
+/** These eight fields are the entire feed-card contract. */
 export const FEED_CARD_CONTRACT_FIELDS = [
   "muxAssetId",
   "playbackId",
@@ -98,12 +97,7 @@ function checkFieldType(field: FeedCardContractField, value: unknown): string | 
   }
 }
 
-/**
- * Validates a feed-card page against the section 7.4 contract.
- *
- * Returns every violation rather than the first one, so a failing Phase 4
- * response-shape test names all the fields that crept back in.
- */
+/** Validates a feed-card page and returns every contract violation. */
 export function findFeedCardContractViolations(
   page: readonly unknown[],
 ): FeedCardContractViolation[] {
@@ -181,7 +175,7 @@ export function serializedByteLength(value: unknown): number {
   return json.length;
 }
 
-/** PRD section 4: a 16-card feed response must serialize to at most 15 KB. */
+/** A 16-card feed response must serialize to at most 15 KB. */
 export const FEED_RESPONSE_SIZE_BUDGET_BYTES = 15 * 1024;
 export const FEED_RESPONSE_SIZE_BUDGET_CARD_COUNT = 16;
 
@@ -195,7 +189,7 @@ export type FeedResponseSizeReport = {
 
 /**
  * Scales the budget with the card count so a 48-item page is judged against
- * the same per-card allowance as the 16-item page the PRD states.
+ * the same per-card allowance as the 16-item page.
  */
 export function measureFeedResponseSize(
   page: readonly unknown[],
@@ -259,7 +253,7 @@ const FIXTURE_CHANNELS = [
 ] as const;
 
 export type DeterministicFeedOptions = {
-  /** Number of cards to generate. The PRD test feed needs at least 50. */
+  /** Number of cards to generate. */
   count: number;
   /** Any integer. The same seed always yields the same feed. */
   seed?: number;

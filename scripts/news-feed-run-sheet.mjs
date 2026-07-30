@@ -1,5 +1,5 @@
 /**
- * Generates a Phase 0 measurement run sheet for the news feed.
+ * Generates a measurement run sheet for the news feed.
  *
  *   node scripts/news-feed-run-sheet.mjs
  *   node scripts/news-feed-run-sheet.mjs --out docs/news-feed-run-sheet.md

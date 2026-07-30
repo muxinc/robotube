@@ -1,15 +1,14 @@
 /**
  * Entry point for the news-feed performance instrumentation.
  *
- * Import from `@/lib/feed-performance` rather than reaching into the
- * individual modules, so Phase 6's "remove temporary counters and retain
- * production-safe performance telemetry" is a change in one place.
+ * Import from `@/lib/feed-performance` rather than reaching into individual
+ * modules so temporary counters can be removed in one place.
  *
  * What is production-safe and what is temporary:
  *
  *   feed-performance-events     production-safe (sanitized, allowlisted)
- *   feed-performance-timeline   production-safe (derives the PRD's latency gates)
- *   feed-performance-counters   TEMPORARY, development-only; removed in Phase 6
+ *   feed-performance-timeline   production-safe latency summaries
+ *   feed-performance-counters   temporary, development-only
  *   feed-performance-test-feed  test/fixture tooling; never shipped in a UI path
  *   feed-performance-scenarios  documentation data for run sheets
  */

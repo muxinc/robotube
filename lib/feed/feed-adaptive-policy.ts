@@ -1,8 +1,6 @@
 /**
- * Phase 5: adaptive media and image policy.
- *
- * Pure resolution of a device/network/accessibility signal set into the levers
- * the feed actually has: autoplay, rendition cap, preload window size, and
+ * Pure resolution of device, network, accessibility, and pressure signals into
+ * the levers the feed actually has: autoplay, rendition cap, preload window size, and
  * thumbnail request width. No React and no react-native imports, so this is
  * directly unit testable.
  */

@@ -15,33 +15,8 @@ import {
 import { runMuxPlayerCommand } from "@/lib/mux-player-command";
 
 /**
- * Phase 2: one shared feed playback controller.
- *
- * The feed owns exactly one `MuxVideoPlayer` for its whole lifetime. Committing
- * focus to a different card replaces the *source* on that player instead of
- * creating a new one, so the number of live player objects never grows with the
- * feed length.
- *
- * Why this shape, given @mux/mux-react-native-player@0.1.10:
- *
- *  - `MuxVideoPlayer` is a JS-side state holder. It queues commands until a
- *    `MuxVideoView` calls `_attachNativeRef`, and the native `source` prop is
- *    driven declaratively from the player snapshot. A player with no attached
- *    view therefore performs no network or decoder work at all.
- *  - `player.replace(source)` swaps the source in place and pushes it to the
- *    already-attached native view. On iOS that re-points the `AVPlayer`; on
- *    Android `MuxVideoView.setSource` rebuilds the `MuxPlayer` behind the same
- *    `PlayerView`. Either way the React tree keeps one `MuxVideoView`, so there
- *    is no RN view mount/unmount churn.
- *  - `useMuxVideoFeed` is deliberately *not* used: it allocates one player per
- *    window slot, and those extra players are inert unless each is attached to
- *    its own visible `MuxVideoView`. That is the multi-surface architecture this
- *    phase replaces.
- *
- * `components/inline-video-player.tsx` was deleted as part of this phase. It
- * created one `MuxVideoPlayer` + one `MuxVideoView` per card, which is exactly
- * the per-window ownership model the PRD removes, and it had no other consumer.
- * The full-screen detail and live screens already use `MuxVideoView` directly.
+ * Owns one `MuxVideoPlayer` for the feed. Committing a different card replaces
+ * its source while preserving a single native surface and player instance.
  */
 
 export type FeedPlaybackTarget = {

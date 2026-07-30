@@ -1,7 +1,5 @@
 /**
- * Feed read model (PRD phase 4).
- *
- * The paginated feed query may not call `components.mux.videos.*` per card, so
+ * The paginated feed query does not call `components.mux.videos.*` per card, so
  * the display-ready title/uploader values live denormalized on `muxAssetCache`.
  * They are written from the same metadata mutation path every writer already
  * uses (`upsertVideoMetadataAndSyncFeedReadModel`), and `backfillFeedReadModel`
@@ -188,7 +186,7 @@ export const applyBackfillEntriesInternal = internalMutation({
 });
 
 /**
- * Repair/backfill tooling. Run after deploying phase 4:
+ * Repair/backfill tooling. Run after deploying the read model:
  *
  *   npx convex run feedReadModel:backfillFeedReadModel '{}'
  *

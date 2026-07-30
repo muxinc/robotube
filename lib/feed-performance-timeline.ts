@@ -1,11 +1,6 @@
 /**
- * Focus and playback timestamp recording for the news feed (PRD Phase 0).
- *
- * Phase 0 asks for candidate-change and committed-focus timestamps, and for
- * playback-requested, source-ready, first-frame, buffering-start/end, and
- * playback-error timestamps. This module records those marks per feed item and
- * derives the spans that the success metrics are stated in — notably warm and
- * cold time to first frame at p75.
+ * Records focus and playback marks per feed item and derives duration summaries
+ * such as warm and cold time to first frame.
  *
  * The clock is injected. Nothing here reads wall-clock time on its own, so
  * tests are deterministic and a scenario run can be replayed from a captured
@@ -34,8 +29,7 @@ export type FeedTimelineEntry = {
 };
 
 /**
- * Spans the PRD gates are expressed in. `warm_time_to_first_frame` and
- * `cold_time_to_first_frame` are the same span; which one a sample belongs to
+ * Warm and cold time to first frame use the same span; which one a sample belongs to
  * is decided by the recorded cache state, not by a different pair of marks.
  */
 export const FEED_TIMELINE_SPANS = {
@@ -247,7 +241,7 @@ export type FeedFirstFrameGateInput = {
   /** Samples in milliseconds, split by media cache state. */
   warmSamples: readonly number[];
   coldSamples: readonly number[];
-  /** PRD section 4 targets. */
+  /** First-frame latency targets. */
   warmP75TargetMs?: number;
   coldP75TargetMs?: number;
 };

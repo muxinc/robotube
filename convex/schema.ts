@@ -108,10 +108,9 @@ export default defineSchema({
         policy: v.optional(v.string()),
       }),
     ),
-    // Feed read model (PRD phase 4): display-ready values denormalized from the
-    // Mux component so the paginated feed query never runs a per-video
-    // subquery. Optional because rows written before this existed are only
-    // filled in by feedReadModel.backfillFeedReadModel.
+    // Display-ready values denormalized from the Mux component so the paginated
+    // feed query never runs a per-video subquery. Optional for older rows that
+    // have not been backfilled.
     feedTitle: v.optional(v.string()),
     feedChannelName: v.optional(v.string()),
     feedUploaderUserId: v.optional(v.string()),

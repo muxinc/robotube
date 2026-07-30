@@ -1,7 +1,7 @@
 /**
- * Explicit data contracts for the news feed (PRD section 7.4).
+ * Explicit data contracts for the news feed.
  *
- * This module is deliberately free of Convex imports so the projection,
+ * This module is free of Convex imports so the projection,
  * pagination, and fallback rules can be unit tested directly:
  *
  *   node --experimental-strip-types --test tests/feed-contracts.test.ts
@@ -11,10 +11,7 @@
  * video-detail contract.
  */
 
-/**
- * The exact field list from PRD section 7.4. The response-shape test fails if
- * this list drifts, which is what keeps rich metadata out of the card query.
- */
+/** The complete field list for a feed card. */
 export const FEED_VIDEO_CARD_FIELDS = [
   "muxAssetId",
   "playbackId",
@@ -49,7 +46,7 @@ export type FeedSearchIndexItem = FeedVideoCardItem & {
 
 export const DEFAULT_CHANNEL_NAME = "Robotube";
 
-/** Kept at the current feed width; Phase 5 owns adaptive thumbnail sizing. */
+/** Maximum server-generated thumbnail width; clients may request less. */
 export const FEED_THUMBNAIL_WIDTH = 1280;
 
 export type FeedChannelInfo = {
@@ -293,10 +290,7 @@ export function buildFeedVideoCardPageResult<
   };
 }
 
-/**
- * Hard projection onto the section 7.4 field list. Any extra key on the source
- * row is dropped rather than serialized to the feed.
- */
+/** Drops every source key that is not part of the feed-card contract. */
 export function projectToFeedVideoCardItem(
   row: FeedVideoCardItem & Record<string, unknown>,
 ): FeedVideoCardItem {

@@ -34,10 +34,7 @@ import {
 
 export type { FeedVideoCardItem, FeedSearchIndexItem } from "./feedContracts";
 
-/**
- * The video-detail contract. Rich AI metadata lives here and is never part of
- * the feed-card contract (PRD section 7.4).
- */
+/** Rich video-detail data that is never included in the card feed. */
 type FeedVideoDetailItem = {
   muxAssetId: string;
   playbackId: string;

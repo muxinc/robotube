@@ -1,6 +1,5 @@
 /**
- * Immediate remote kill switch for news-feed predictive preloading
- * (PRD Phase 6, "Support an immediate remote kill switch for preloading").
+ * Immediate remote kill switch for news-feed predictive preloading.
  *
  * Design constraints that shaped this module:
  *
@@ -220,10 +219,8 @@ export function subscribeToPreloadKillSwitch(
 }
 
 /**
- * Rollout guard thresholds from PRD section 13: crossing any of these pauses
- * rollout automatically. Thresholds are expressed as a ratio relative to the
- * Phase 0 baseline and are placeholders until baseline values exist — see
- * `docs/news-feed-performance-baseline.md`.
+ * Crossing any rollout guard pauses rollout automatically. Ratio thresholds
+ * remain placeholders until baseline values exist.
  */
 export type RolloutGuardMetrics = {
   crashRateRatioToBaseline?: number;

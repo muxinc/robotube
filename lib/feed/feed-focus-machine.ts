@@ -1,10 +1,8 @@
 /**
  * Pure candidate/committed focus state machine for the news feed.
  *
- * PRD section 7.1: viewability callbacks may update a cheap *candidate* value
- * while the user scrolls, but they must never create, release, attach, replace,
- * play, or pause a native player. Only a *committed* focus change is allowed to
- * touch playback, and a commit requires all of:
+ * Viewability callbacks may update a cheap candidate while the user scrolls,
+ * but only committed focus is allowed to change playback. A commit requires:
  *
  *   - the list is idle (not dragging, not in momentum, not settling);
  *   - the same candidate has met the dwell threshold;

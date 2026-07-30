@@ -1,9 +1,8 @@
 /**
- * Development-only news-feed counters (PRD Phase 0).
+ * Development-only news-feed counters.
  *
- * Phase 0 requires the current player and row counts to be observable without
- * reading logs manually, so this module keeps a small in-memory registry that a
- * debug overlay, a dev menu entry, or a test can read synchronously.
+ * This module keeps a small in-memory registry that a debug overlay, a dev menu
+ * entry, or a test can read synchronously.
  *
  * Two shapes are tracked:
  *
@@ -14,9 +13,8 @@
  *              cancellations, cache hits, player creations/releases).
  *
  * Everything is a no-op unless counters are enabled, which defaults to
- * development builds only. Phase 6 removes the temporary counters and keeps
- * only production-safe telemetry, so nothing here may be depended on by
- * production behavior.
+ * development builds only. Production behavior must not depend on these
+ * counters.
  */
 
 export const FEED_GAUGE_KEYS = [
@@ -68,9 +66,8 @@ export type FeedInvariantName =
   (typeof FEED_INVARIANTS)[keyof typeof FEED_INVARIANTS];
 
 /**
- * Section 7.2 allows a temporary two-slot active/standby pool behind a feature
- * flag, so the live-player limit is configurable. The attached-surface and
- * playing-video limits are not: those are hard PRD guarantees.
+ * A temporary two-slot active/standby pool can raise the live-player limit.
+ * Attached-surface and playing-video limits remain fixed.
  */
 export type FeedInvariantLimits = {
   maxLivePlayerInstances: number;
@@ -179,10 +176,7 @@ export class FeedPerformanceCounters {
     return this.counters[key];
   }
 
-  /**
-   * Returns every currently violated invariant. An empty array is the healthy
-   * state; the Phase 1/2/3 exit gates read this instead of eyeballing logs.
-   */
+  /** Returns every currently violated invariant. */
   getInvariantViolations(): FeedInvariantViolation[] {
     const violations: FeedInvariantViolation[] = [];
 

@@ -1,11 +1,9 @@
 /**
- * Phase 3: bounded predictive preload window selection.
- *
- * Pure policy — it decides *what may hold preload resources right now*, and the
+ * Pure policy that decides what may hold preload resources right now. The
  * caller diffs that against what is currently retained to derive start/cancel
  * work. No React, no react-native, no platform APIs.
  *
- * Rules encoded here (PRD section 8, Phase 3):
+ * Rules:
  *   - default window is the committed item plus one direction-aware next item;
  *   - preload work is suspended during a fast fling;
  *   - preload work is suspended when the app backgrounds or the feed loses focus;

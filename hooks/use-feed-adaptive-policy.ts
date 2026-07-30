@@ -29,9 +29,8 @@ export type UseFeedAdaptivePolicyOptions = {
 };
 
 /**
- * Phase 5: resolves device class, accessibility preferences and resource
- * pressure into the feed's media policy. Re-renders only when a resolved policy
- * value actually changes.
+ * Resolves device class, accessibility preferences, and resource pressure into
+ * the feed's media policy.
  */
 export function useFeedAdaptivePolicy({
   networkClass = "unknown",

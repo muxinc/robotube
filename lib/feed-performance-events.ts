@@ -1,5 +1,5 @@
 /**
- * News-feed performance event vocabulary (PRD section 11).
+ * News-feed performance event vocabulary.
  *
  * This module is intentionally dependency-free and side-effect-free apart from
  * the module-level sink, so it can be unit tested with plain Node:
@@ -63,7 +63,7 @@ export type FeedCacheState = (typeof FEED_CACHE_STATES)[number];
 export const FEED_SCREENS = ["home_feed", "search_results", "profile", "video_detail"] as const;
 export type FeedScreen = (typeof FEED_SCREENS)[number];
 
-/** Common fields from PRD section 11. Every key here is on the emit allowlist. */
+/** Common fields accepted by the emit allowlist. */
 export type FeedPerformanceEventFields = {
   session_id?: string;
   screen?: FeedScreen;

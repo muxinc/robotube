@@ -1,10 +1,6 @@
 /**
- * Adapter between the feed runtime and the repository-wide Phase 0
- * observability modules.
- *
- * Runtime callers use compact camelCase fields. This boundary converts them to
- * the PRD's allowlisted snake_case vocabulary, sanitizes every event, updates
- * the development counters, and records bounded in-memory timing tracks.
+ * Converts runtime telemetry into sanitized events, development counters, and
+ * bounded in-memory timing tracks.
  */
 
 import {

@@ -1,6 +1,5 @@
 /**
- * Feed data-contract tests (PRD phase 4 / section 10 "Feed-card response
- * projection" and "Stable pagination and missing-data fallbacks").
+ * Feed data-contract projection, pagination, and fallback tests.
  *
  * The repository has no test runner dependency, so these run on the Node
  * built-in runner with type stripping:
@@ -28,7 +27,7 @@ import {
   selectFeedPlaybackId,
 } from "../convex/feedContracts.ts";
 
-/** The literal field list from PRD section 7.4. */
+/** The complete feed-card field list. */
 const SECTION_7_4_FIELDS = [
   "muxAssetId",
   "playbackId",

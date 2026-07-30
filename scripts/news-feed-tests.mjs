@@ -26,8 +26,7 @@ const killSwitch = lib["feed-feature-kill-switch"];
 
 /* ------------------------------------------------------------------ events */
 
-// Copied verbatim from PRD section 11. If the PRD changes, this list changes
-// first and the implementation follows.
+// Canonical event and field contracts prevent analytics vocabulary drift.
 const PRD_EVENT_NAMES = [
   "feed_query_started",
   "feed_query_received",

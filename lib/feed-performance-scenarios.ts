@@ -1,5 +1,5 @@
 /**
- * Test matrix for the news-feed performance work (PRD Phase 0).
+ * Test matrix for the news-feed performance work.
  *
  * Device profiles, reference network states, and the standard scenario list
  * live here as data so the run-sheet generator, the docs, and any future
@@ -149,11 +149,11 @@ export type FeedScenario = {
   label: string;
   steps: readonly string[];
   captures: readonly FeedScenarioCapture[];
-  /** PRD gates this scenario feeds. */
+  /** Performance gates this scenario informs. */
   gates: readonly string[];
 };
 
-/** The nine scenarios named in Phase 0, in the order the run sheet lists them. */
+/** Scenarios in run-sheet order. */
 export const FEED_SCENARIOS: readonly FeedScenario[] = [
   {
     id: "cold-launch",
@@ -273,7 +273,7 @@ export function getScenario(id: string): FeedScenario | undefined {
   return FEED_SCENARIOS.find((scenario) => scenario.id === id);
 }
 
-/** The 50-item scroll target that Phase 0 and the memory gate are stated against. */
+/** The standard scroll and memory scenario size. */
 export const STANDARD_SCENARIO_ITEM_COUNT = 50;
 
 export type ScenarioRunCell = {
@@ -285,7 +285,7 @@ export type ScenarioRunCell = {
 
 /**
  * Expands profiles x scenarios x network states into the cells a run sheet
- * must cover. Offline recovery is only meaningful where the PRD asks for it,
+ * must cover. Offline recovery is only meaningful for scenarios that include it,
  * so it is limited to the scenarios that describe a network transition.
  */
 export function buildRunMatrix(
