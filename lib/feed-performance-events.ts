@@ -1,5 +1,6 @@
 /**
- * News-feed performance event vocabulary.
+ * Feed performance event vocabulary for the Home card feed and the Shorts
+ * vertical feed.
  *
  * This module is intentionally dependency-free and side-effect-free apart from
  * the module-level sink, so it can be unit tested with plain Node:
@@ -36,11 +37,76 @@ export const FEED_PERFORMANCE_EVENTS = {
   feedPreloadPromotedToActive: "feed_preload_promoted_to_active",
 } as const;
 
-export type FeedPerformanceEventName =
+export type NewsFeedPerformanceEventName =
   (typeof FEED_PERFORMANCE_EVENTS)[keyof typeof FEED_PERFORMANCE_EVENTS];
 
-export const FEED_PERFORMANCE_EVENT_NAMES: readonly FeedPerformanceEventName[] =
+export const FEED_PERFORMANCE_EVENT_NAMES: readonly NewsFeedPerformanceEventName[] =
   Object.values(FEED_PERFORMANCE_EVENTS);
+
+/**
+ * Shorts-only additions from the 9:16 vertical-feed PRD section 13.
+ *
+ * These are an *extension*, not a replacement. Everything the Home feed already
+ * emits — query start, focus candidate/commit, source replacement, source
+ * ready, first frame, buffering, errors, surface attach/detach, preload
+ * start/cancel/hit, lifecycle pause — is reused verbatim with `screen:
+ * "shorts"`. Only the interactions that have no Home equivalent get a new name.
+ *
+ * Keeping the two sets separate means the Home vocabulary contract stays
+ * exactly what it was, while a single sanitizer, a single sink, and a single
+ * privacy allowlist still cover both feeds.
+ */
+export const SHORTS_PERFORMANCE_EVENTS = {
+  shortsTabOpened: "shorts_tab_opened",
+  shortsPageImpression: "shorts_page_impression",
+  shortsManualPause: "shorts_manual_pause",
+  shortsManualResume: "shorts_manual_resume",
+  shortsMuted: "shorts_muted",
+  shortsUnmuted: "shorts_unmuted",
+  shortsOpenDetail: "shorts_open_detail",
+  shortsRetryPlayback: "shorts_retry_playback",
+  shortsQueryReceived: "shorts_query_received",
+  shortsEmptyStateViewed: "shorts_empty_state_viewed",
+} as const;
+
+export type ShortsPerformanceEventName =
+  (typeof SHORTS_PERFORMANCE_EVENTS)[keyof typeof SHORTS_PERFORMANCE_EVENTS];
+
+export const SHORTS_PERFORMANCE_EVENT_NAMES: readonly ShortsPerformanceEventName[] =
+  Object.values(SHORTS_PERFORMANCE_EVENTS);
+
+/**
+ * Runtime lifecycle events that `lib/feed/feed-telemetry.ts` already emits by
+ * name but that the documented vocabulary never listed.
+ *
+ * Because `trackFeedEvent` forwards an event only when
+ * `isFeedPerformanceEventName` recognizes it, these two were being **silently
+ * dropped** before reaching the sink — the lifecycle-pause and player-release
+ * signals that both feed PRDs say to reuse were never actually arriving.
+ * Recognizing them here fixes that without changing the two frozen contract
+ * lists above.
+ */
+export const FEED_RUNTIME_EVENTS = {
+  feedPlaybackPaused: "feed_playback_paused",
+  feedPlayerReleased: "feed_player_released",
+} as const;
+
+export type FeedRuntimeEventName =
+  (typeof FEED_RUNTIME_EVENTS)[keyof typeof FEED_RUNTIME_EVENTS];
+
+export const FEED_RUNTIME_EVENT_NAMES: readonly FeedRuntimeEventName[] =
+  Object.values(FEED_RUNTIME_EVENTS);
+
+export type FeedPerformanceEventName =
+  | NewsFeedPerformanceEventName
+  | ShortsPerformanceEventName
+  | FeedRuntimeEventName;
+
+export const ALL_FEED_PERFORMANCE_EVENT_NAMES: readonly FeedPerformanceEventName[] = [
+  ...FEED_PERFORMANCE_EVENT_NAMES,
+  ...SHORTS_PERFORMANCE_EVENT_NAMES,
+  ...FEED_RUNTIME_EVENT_NAMES,
+];
 
 export const FEED_DEVICE_CLASSES = ["low", "standard", "high", "unknown"] as const;
 export type FeedDeviceClass = (typeof FEED_DEVICE_CLASSES)[number];
@@ -60,8 +126,43 @@ export type FeedNetworkClass = (typeof FEED_NETWORK_CLASSES)[number];
 export const FEED_CACHE_STATES = ["cold", "warm", "unknown"] as const;
 export type FeedCacheState = (typeof FEED_CACHE_STATES)[number];
 
-export const FEED_SCREENS = ["home_feed", "search_results", "profile", "video_detail"] as const;
+export const FEED_SCREENS = [
+  "home_feed",
+  "shorts",
+  "search_results",
+  "profile",
+  "video_detail",
+] as const;
 export type FeedScreen = (typeof FEED_SCREENS)[number];
+
+/**
+ * Server-side aspect classification, mirrored into telemetry so the
+ * classification diagnostics in vertical-feed PRD section 13 can be answered
+ * without joining against the database.
+ */
+export const FEED_PLACEMENTS = ["standard", "vertical", "unknown"] as const;
+export type FeedPlacement = (typeof FEED_PLACEMENTS)[number];
+
+/** Why a Shorts page rendered its empty state. Enumerated, never free text. */
+export const SHORTS_EMPTY_REASONS = [
+  "no_vertical_assets",
+  "query_error",
+  "offline",
+  "flag_disabled",
+] as const;
+export type ShortsEmptyReason = (typeof SHORTS_EMPTY_REASONS)[number];
+
+/**
+ * How a `shorts_query_received` attempt ended.
+ *
+ * A query failure is reported on the query event itself, carrying an
+ * `error_code`. It is deliberately *not* folded into `feed_playback_error`: a
+ * page that failed to load and a video that failed to decode are different
+ * incidents with different owners, and counting one as the other makes both
+ * rates meaningless.
+ */
+export const SHORTS_QUERY_OUTCOMES = ["success", "error"] as const;
+export type ShortsQueryOutcome = (typeof SHORTS_QUERY_OUTCOMES)[number];
 
 /** Common fields accepted by the emit allowlist. */
 export type FeedPerformanceEventFields = {
@@ -77,6 +178,14 @@ export type FeedPerformanceEventFields = {
   is_preloaded?: boolean;
   elapsed_ms?: number;
   error_code?: string;
+  /* Shorts extension fields. */
+  feed_placement?: FeedPlacement;
+  item_count?: number;
+  is_muted?: boolean;
+  retry_attempt?: number;
+  empty_reason?: ShortsEmptyReason;
+  page_height_dp?: number;
+  query_outcome?: ShortsQueryOutcome;
 };
 
 export type FeedPerformanceEvent = {
@@ -107,7 +216,33 @@ export const FEED_EVENT_ALLOWED_FIELDS = [
   "error_code",
 ] as const;
 
-const ALLOWED_FIELD_SET = new Set<string>(FEED_EVENT_ALLOWED_FIELDS);
+/**
+ * Fields only the Shorts feed needs. All six are bounded enums, booleans, or
+ * small non-negative integers: none of them can carry a URL, a token, a title,
+ * or anything a user typed, so the Shorts surface adds no new privacy surface
+ * beyond what the Home vocabulary already allows.
+ */
+export const SHORTS_EVENT_ALLOWED_FIELDS = [
+  "feed_placement",
+  "item_count",
+  "is_muted",
+  "retry_attempt",
+  "empty_reason",
+  "page_height_dp",
+  "query_outcome",
+] as const;
+
+export const ALL_FEED_EVENT_ALLOWED_FIELDS = [
+  ...FEED_EVENT_ALLOWED_FIELDS,
+  ...SHORTS_EVENT_ALLOWED_FIELDS,
+] as const;
+
+const ALLOWED_FIELD_SET = new Set<string>(ALL_FEED_EVENT_ALLOWED_FIELDS);
+
+/** Guards `page_height_dp` and `item_count` against absurd values. */
+const MAX_ITEM_COUNT = 10_000;
+const MAX_PAGE_HEIGHT_DP = 10_000;
+const MAX_RETRY_ATTEMPT = 1_000;
 
 /**
  * Values that must never reach a telemetry sink even when they arrive under an
@@ -207,10 +342,36 @@ export function sanitizeFeedEventFields(
       case "cache_state":
         accepted = isMemberOf(FEED_CACHE_STATES, value) ? value : undefined;
         break;
+      case "feed_placement":
+        accepted = isMemberOf(FEED_PLACEMENTS, value) ? value : undefined;
+        break;
+      case "empty_reason":
+        accepted = isMemberOf(SHORTS_EMPTY_REASONS, value) ? value : undefined;
+        break;
+      case "query_outcome":
+        accepted = isMemberOf(SHORTS_QUERY_OUTCOMES, value) ? value : undefined;
+        break;
       case "feed_index":
         accepted = isNonNegativeInteger(value) ? value : undefined;
         break;
+      case "item_count":
+        accepted =
+          isNonNegativeInteger(value) && value <= MAX_ITEM_COUNT ? value : undefined;
+        break;
+      case "retry_attempt":
+        accepted =
+          isNonNegativeInteger(value) && value <= MAX_RETRY_ATTEMPT ? value : undefined;
+        break;
+      case "page_height_dp":
+        // Rounded to a whole dp: the exact sub-pixel viewport height is a
+        // needlessly precise device signature and nothing downstream needs it.
+        accepted =
+          isNonNegativeFinite(value) && value <= MAX_PAGE_HEIGHT_DP
+            ? Math.round(value)
+            : undefined;
+        break;
       case "is_preloaded":
+      case "is_muted":
         accepted = typeof value === "boolean" ? value : undefined;
         break;
       case "elapsed_ms":
@@ -265,7 +426,16 @@ export function isFeedPerformanceEventName(
 ): value is FeedPerformanceEventName {
   return (
     typeof value === "string" &&
-    (FEED_PERFORMANCE_EVENT_NAMES as readonly string[]).includes(value)
+    (ALL_FEED_PERFORMANCE_EVENT_NAMES as readonly string[]).includes(value)
+  );
+}
+
+export function isShortsPerformanceEventName(
+  value: unknown,
+): value is ShortsPerformanceEventName {
+  return (
+    typeof value === "string" &&
+    (SHORTS_PERFORMANCE_EVENT_NAMES as readonly string[]).includes(value)
   );
 }
 

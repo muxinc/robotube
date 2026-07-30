@@ -143,7 +143,7 @@ attached active player, bounded preloading, and a card-sized Convex response.
 Instrumentation and rollout controls live in:
 
 - `lib/feed-performance.ts` — single import surface for the modules below
-- `lib/feed-performance-events.ts` — event vocabulary and the privacy sanitizer that keeps tokens, playback URLs, captions, and transcripts out of telemetry
+- `lib/feed-performance-events.ts` — event vocabulary and the privacy sanitizer that keeps tokens, playback URLs, captions, and transcripts out of telemetry; covers both the Home feed and Shorts
 - `lib/feed-performance-timeline.ts` — focus/playback timestamps and the p50/p75/p95 first-frame gates
 - `lib/feed-performance-counters.ts` — development-only counters and playback invariant checks (removed in Phase 6)
 - `lib/feed-feature-flags.ts` — default-off rollout flags with owners, removal dates, and deterministic cohort bucketing
@@ -156,6 +156,44 @@ node scripts/news-feed-tests.mjs        # pure unit tests, no device or network
 node scripts/news-feed-run-sheet.mjs    # probe local devices/tooling, print a blank measurement run sheet
 npm run lint
 npx tsc --noEmit
+```
+
+## Shorts: the 9:16 vertical feed
+
+A planned fifth native tab presenting a full-viewport, vertically paged feed
+containing only ready videos whose normalized display aspect ratio is exactly
+`9:16`. Home keeps the YouTube-style card feed for every other known ratio.
+
+**Not shipped.** There is no `app/(tabs)/shorts.tsx`, no vertical Convex query,
+and no `feedPlacement` column yet. What exists today is the verification,
+observability, and rollout scaffolding those phases plug into, plus the gates
+they have to pass.
+
+- [9:16 Vertical Video Feed PRD](./docs/vertical-video-feed-prd.md) — phases, exit gates, and the eligibility contract
+- [Observability, flags, and operations](./docs/vertical-video-feed-operations.md) — Shorts event vocabulary, rollout flags, cohort ladder, rollback plan, dashboard specifications, runbook
+- [Fixtures and verification record](./docs/vertical-video-feed-verification.md) — the fixture set and an explicit list of what has and has not been verified
+
+Tooling:
+
+- `lib/vertical-video-feed.ts` — single import surface for the modules below
+- `lib/vertical-video-feed-fixtures.ts` — 42 deterministic classification and visibility fixtures, plus the PRD section 7.2/7.3 eligibility oracle the production classifier must agree with
+- `lib/vertical-video-feed-audit.ts` — placement distribution, coverage gate, Home/Shorts exclusivity audit, backfill counter checks
+- `lib/vertical-video-feed-scenarios.ts` — the 13 Phase 6 scenarios and the acceptance, Home-regression, and accessibility checklists
+- `lib/vertical-video-feed-rollout.ts` — cohort ladder, ordered rollback plan, Shorts rollout guards
+- `lib/vertical-video-feed-dashboards.ts` — saved-query and alert specifications, validated against the live event vocabulary
+
+Two default-off flags in the shared registry gate the rollout: `shortsTabEnabled`
+(hides the tab and its query/playback work) and `exclusiveFeedPlacementEnabled`
+(moves Home to `feedPlacement == "standard"`). The second **resolves false
+whenever the first is off**, enforced in `resolveFeedFeatureFlags` rather than
+merely reported, because otherwise exact 9:16 assets would appear in neither
+feed. A remote `false` also outranks any percentage rollout still configured, so
+an emergency off switch cannot be undone by a stale ramp value.
+
+```bash
+node scripts/vertical-video-feed-tests.mjs                    # 93 pure unit tests
+node scripts/vertical-video-feed-fixtures.mjs                 # fixture summary; --format markdown|json, --feed N
+node scripts/vertical-video-feed-run-sheet.mjs                # probe tooling, print a blank Shorts run sheet
 ```
 
 ## Get a fresh project

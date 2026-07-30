@@ -470,16 +470,40 @@ Goal: lock scope and identify reusable foundations before runtime changes.
 - [x] Record persistent engagement features as out of scope.
 - [ ] Capture the current number of ready Mux assets and their aspect-ratio
   distribution.
-- [ ] Build a deterministic fixture set containing at least 10 exact 9:16 assets
+- [x] Build a deterministic fixture set containing at least 10 exact 9:16 assets
   and at least 10 non-qualifying assets.
 - [ ] Record baseline Home playback and memory metrics before shared hooks are
   changed.
 
 Phase 0 exit gate:
 
-- [ ] Fixture assets and physical reference devices are documented.
+- [x] Fixture assets and physical reference devices are documented.
 - [ ] Product, placement, and audio decisions are accepted by the project owner.
 - [ ] Home baseline metrics are recorded for regression comparison.
+
+**Phase 0 evidence.**
+
+- Fixture set — `lib/vertical-video-feed-fixtures.ts`: 42 hand-authored,
+  order-stable cases with no wall-clock or random input. 12 exact/reducible 9:16
+  and eligible; 8 valid non-9:16 ratios (including the `4:5`, `2:3`, and `10:16`
+  near-portrait traps); 16 missing/malformed/zero/negative/non-integer/oversized;
+  6 exactly 9:16 but excluded by a section 7.3 visibility rule. Every expectation
+  is derived from an executable oracle of sections 7.2 and 7.3, not hand-typed;
+  `findFixtureOracleDisagreements` lets the Phase 1 classifier be asserted
+  against the same set. Also `createDeterministicVerticalFeed` for a byte-stable
+  50-item card page. Tests: `scripts/vertical-video-feed-tests.mjs`. Table:
+  `node scripts/vertical-video-feed-fixtures.mjs --format markdown`. Documented
+  in `docs/vertical-video-feed-verification.md` section 2.
+- Reference devices — `docs/vertical-video-feed-verification.md` section 3,
+  reusing the profiles recorded in `lib/feed-performance-scenarios.ts` and
+  `docs/news-feed-performance-baseline.md`. One observed physical iOS reference;
+  **no physical Android device is attached**, which is recorded as a rollout
+  dependency and enforced by `requiresAndroidPhysicalValidation` on
+  `shortsTabEnabled`.
+- Still open — the asset-inventory capture needs a Convex deployment and the
+  Home baseline needs a physical-device run. Neither has been done, and the
+  original Home baseline in `docs/news-feed-performance-baseline.md` section 4.3
+  is itself still `NOT MEASURED`.
 
 ### Phase 1: Aspect Classification and Cache Migration
 
@@ -642,7 +666,7 @@ Goal: prove the new feed is correct and does not regress Home.
 - [ ] Verify player/surface/source counters remain within invariants.
 - [ ] Verify Mux Data metadata identifies the Shorts player and video correctly.
 - [ ] Re-run the Home baseline and investigate material regressions.
-- [ ] Run lint, TypeScript, feed tests, and Convex contract tests.
+- [x] Run lint, TypeScript, feed tests, and Convex contract tests.
 - [ ] Complete physical iOS and Android test matrices.
 
 Phase 6 exit gate:
@@ -653,25 +677,67 @@ Phase 6 exit gate:
 - [ ] Home behavior and performance do not materially regress.
 - [ ] No P0/P1 accessibility, lifecycle, pagination, or playback defects remain.
 
+**Phase 6 evidence.**
+
+- Verification battery, run 2026-07-30 on `39b2290` plus this branch —
+  `npx tsc --noEmit` clean; `npm run lint` clean;
+  `node scripts/vertical-video-feed-tests.mjs` 93/93;
+  `node scripts/news-feed-tests.mjs` 52/52 (unchanged);
+  `node scripts/run-tests.mjs` 56/56 across 15 suites;
+  `tests/feed-contracts.test.ts` 22/22. Recorded in
+  `docs/vertical-video-feed-verification.md` section 4. No Shorts-specific Convex
+  contract test exists yet because `listVerticalFeedVideosPaginated` does not;
+  those arrive with Phase 2.
+- Scenario and checklist tooling, not results —
+  `lib/vertical-video-feed-scenarios.ts` defines all 13 Phase 6 scenarios (cold
+  launch, warm launch, slow swipe, fast fling, reverse fling, pagination, tab
+  switch, lifecycle, rotation, detail handoff, offline, recovery, and the 50-item
+  memory run) with steps, observations, captures, and the gates each informs,
+  plus acceptance, Home-regression, and accessibility checklists.
+  `node scripts/vertical-video-feed-run-sheet.mjs` probes the machine for real
+  devices and emits a run sheet whose every result cell and checkbox is empty.
+  Simulator and emulator cells are stamped `functional-only` so their numbers
+  cannot be filed as physical-device results.
+- Audit arithmetic, not audit results — `lib/vertical-video-feed-audit.ts`
+  implements the placement distribution, the zero-unknown coverage gate, the
+  Home/Shorts exclusivity audit, and the backfill counter balance check. It has
+  no runtime imports, so it is callable from a Convex query, and it takes an
+  injected classifier rather than defining a second implementation of section
+  7.2. It re-derives every stored placement instead of trusting the column,
+  rejects a non-null unparseable `aspectRatio` as a section 7.1 contract
+  violation, matches coverage exceptions by asset id rather than counting them,
+  and fails both gates on duplicate ids. Every gate can return `unmeasured`, and
+  an unmeasured gate never reports as a pass.
+- Telemetry gap closed — `feed_playback_paused` and `feed_player_released` were
+  already emitted by `lib/feed/feed-telemetry.ts` but were not in the recognized
+  vocabulary, so `trackFeedEvent` discarded them before the sink. Both are now
+  recognized, with a regression test that parses the runtime layer's own event
+  union so the gap cannot reopen.
+- **Deliberately unchecked.** Every remaining Phase 6 box and all five exit gates
+  need a running Shorts screen, a classified Convex deployment, or a physical
+  device. None exists on this branch. `docs/vertical-video-feed-verification.md`
+  section 5 lists each one individually as `NOT RUN`, `NOT MEASURED`,
+  `NOT IMPLEMENTED`, or `NOT POSSIBLE`, with the reason.
+
 ### Phase 7: Feature Flags, Rollout, and Operations
 
 Goal: release incrementally with a fast, safe rollback.
 
 - [ ] Add a remote `shortsTabEnabled` flag that hides the tab and prevents its
   query/playback work when disabled.
-- [ ] Add a separate `exclusiveFeedPlacementEnabled` flag for the Home cutover.
-- [ ] Keep both flags default-off until migration and QA gates pass.
-- [ ] Define cohort order: team → internal beta → small production cohort →
+- [x] Add a separate `exclusiveFeedPlacementEnabled` flag for the Home cutover.
+- [x] Keep both flags default-off until migration and QA gates pass.
+- [x] Define cohort order: team → internal beta → small production cohort →
   staged increase → 100%.
 - [ ] Add dashboards or saved queries for tab opens, query errors, empty rate,
   first frame, buffering, playback errors, classification unknowns, and
   player-invariant violations.
-- [ ] Document the kill-switch owner and rollback steps.
-- [ ] Roll back by disabling the Shorts tab first; disable exclusive placement if
+- [x] Document the kill-switch owner and rollback steps.
+- [x] Roll back by disabling the Shorts tab first; disable exclusive placement if
   Home must temporarily show all assets again.
 - [ ] Monitor each cohort for at least one agreed observation window.
 - [ ] Remove migration-only legacy Home behavior after stable 100% rollout.
-- [ ] Update README architecture notes and mark completed PRD boxes with evidence.
+- [x] Update README architecture notes and mark completed PRD boxes with evidence.
 
 Phase 7 exit gate:
 
@@ -680,6 +746,67 @@ Phase 7 exit gate:
 - [ ] Unknown placement remains at zero or alerts are actionable.
 - [ ] Rollback has been rehearsed without data loss.
 - [ ] Temporary flags and migration code have owners and removal dates.
+
+**Phase 7 evidence.**
+
+- Both flags — `lib/feed-feature-flags.ts` registers `shortsTabEnabled`
+  (owner `vertical-feed`, removal 2026-12-31, requires physical Android
+  validation) and `exclusiveFeedPlacementEnabled` (owner `vertical-feed-data`,
+  removal 2026-12-31), both `defaultValue: false`, both with rollback notes, both
+  resolving through the existing precedence order. Neither is
+  `killSwitchControlled`: relieving preload pressure is not a reason to remove a
+  tab. Tests: `scripts/vertical-video-feed-tests.mjs`.
+- Two resolver safety rules, both enforced rather than reported —
+  `FEED_FLAG_DEPENDENCIES` makes `exclusiveFeedPlacementEnabled` resolve `false`
+  whenever `shortsTabEnabled` is off, through every route to "tab off" including
+  the Android validation gate, so a consumer that simply reads the flag can never
+  hide exact 9:16 assets from both feeds — the one thing section 15 forbids. And
+  a remote `false` now outranks a percentage rollout that is still configured, so
+  an operator's emergency off switch cannot be undone by a stale ramp value.
+  `findFlagCombinationViolations` still names the illegal combination as defense
+  in depth for hand-built resolutions.
+- **`shortsTabEnabled` stays unchecked on purpose.** The flag exists, resolves,
+  and is tested, but its box describes hiding a tab and preventing query and
+  playback work, and there is no tab, query, or player to gate yet. The registry
+  half is done; the consumption half lands with Phase 3.
+- Cohort order — `SHORTS_COHORT_STAGES` in `lib/vertical-video-feed-rollout.ts`:
+  team (local override, 24 h) → internal beta (remote targeting, 72 h) → 5% →
+  25% → 100% (168 h), each with a mechanism, a minimum observation window, and
+  identified exit criteria covering first frame, buffering, playback errors,
+  Home regression, the exclusivity audit, and the migration-removal owner.
+  `evaluateCohortReadiness` reports `ready` only when the window is served,
+  every guard metric is usable and within threshold, **and** every exit criterion
+  carries an attestation with an evidence note; anything less is `blocked` or
+  `unmeasured`. Metric *and threshold* values are validated, because `x > NaN` is
+  false and a NaN threshold would otherwise make its metric unbreachable.
+  Documented in `docs/vertical-video-feed-operations.md` section 4.
+- Rollback — `buildShortsRollbackPlan` produces the ordered plan: disable the tab
+  first, then clear the exclusive-placement value as cleanup. The dependency gate
+  means step 1 alone already reverts Home, so there is no window in which exact
+  9:16 assets are in neither feed; the plan reports
+  `leavesVerticalAssetsUnreachable: false` and a test asserts it. Owner, per-flag
+  cost, and schema-retention posture are in
+  `docs/vertical-video-feed-operations.md` section 5.
+- Dashboards — `lib/vertical-video-feed-dashboards.ts` specifies all eight named
+  subjects plus exclusivity and engagement depth, and
+  `findDashboardSpecViolations` proves every panel's events and group-by fields
+  survive the privacy sanitizer. **The box stays unchecked**: these are
+  specifications, no analytics backend is wired into `setFeedPerformanceSink`,
+  and no panel exists in any tool. Four alert thresholds are marked
+  `provisional` because they are ratios against a baseline that does not exist.
+- Telemetry — `lib/feed-performance-events.ts` adds the ten section 13 Shorts
+  events, `screen: "shorts"`, and seven bounded extension fields
+  (`feed_placement`, `item_count`, `is_muted`, `retry_attempt`, `empty_reason`,
+  `page_height_dp`, `query_outcome`). The Home vocabulary is untouched at 20
+  events and 12 common fields, and the new fields add no privacy surface: all
+  seven are enums, booleans, or small integers. A query failure is reported on
+  `shorts_query_received` with `query_outcome: "error"` rather than as a
+  `feed_playback_error`, so a page that failed to load and a video that failed to
+  decode stay separate incidents with separate rates and owners.
+- **Deliberately unchecked.** Cohort monitoring, migration-code removal, and all
+  five exit gates require a live rollout. Rollback is implemented and unit-tested
+  but has never been rehearsed against a deployment. The final exit gate also
+  covers migration code that does not exist yet.
 
 ### Phase 8: Optional Post-v1 Engagement
 

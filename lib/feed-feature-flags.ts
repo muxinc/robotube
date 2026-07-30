@@ -1,6 +1,7 @@
 /**
  * Independent rollout flags for shared playback, predictive preloading, the
- * lightweight query, and the temporary standby-player fallback.
+ * lightweight query, the temporary standby-player fallback, the Shorts tab, and
+ * exclusive Home/Shorts feed placement.
  *
  * Resolution order, strongest last:
  *
@@ -10,8 +11,21 @@
  *   4. Android physical-validation gate
  *   5. local override (developer menu)
  *   6. preload kill switch
+ *   7. cross-flag dependency gate
  *
- * The kill switch is last on purpose: nothing can out-vote it.
+ * Two rules bend that ladder, both in the disabling direction:
+ *
+ *   - **A remote `false` is authoritative over a percentage rollout.** Step 3
+ *     normally overwrites step 2, but a remote `false` is an operator switching
+ *     something off, and a stale or forgotten rollout percentage must not
+ *     quietly switch it back on. Only a local developer override — which exists
+ *     for debugging and never ships enabled — can still turn it on after that.
+ *   - **The dependency gate runs last and only ever disables.** A flag whose
+ *     prerequisite resolved off cannot be left on by any earlier step,
+ *     including an override.
+ *
+ * The kill switch and the dependency gate are last on purpose: nothing can
+ * out-vote them upward.
  */
 
 import { isPreloadKillSwitchEngaged } from "./feed-feature-kill-switch";
@@ -21,6 +35,8 @@ export const FEED_FEATURE_FLAG_KEYS = [
   "feedPredictivePreload",
   "feedLightweightQuery",
   "feedStandbyPlayerFallback",
+  "shortsTabEnabled",
+  "exclusiveFeedPlacementEnabled",
 ] as const;
 
 export type FeedFeatureFlagKey = (typeof FEED_FEATURE_FLAG_KEYS)[number];
@@ -98,6 +114,35 @@ export const FEED_FEATURE_FLAGS: Record<
     rollbackNote:
       "Not a target state. If it regresses scroll or memory, disable preloading entirely rather than shipping it.",
   },
+  shortsTabEnabled: {
+    key: "shortsTabEnabled",
+    description:
+      "Register the Shorts native tab and allow its vertical query, playback, and preload work. Off means the tab is absent and no Shorts query runs.",
+    defaultValue: false,
+    owner: "vertical-feed",
+    removalDate: "2026-12-31",
+    phase: "Vertical feed Phase 7",
+    // The preload kill switch relieves preload pressure; it is not a reason to
+    // take away a whole tab. Shorts has its own first-lever rollback below.
+    killSwitchControlled: false,
+    requiresAndroidPhysicalValidation: true,
+    rollbackNote:
+      "Disabling hides the tab and stops every Shorts query, player, and preload. Home is untouched and keeps serving exactly what it served before. This is the first rollback lever.",
+  },
+  exclusiveFeedPlacementEnabled: {
+    key: "exclusiveFeedPlacementEnabled",
+    description:
+      'Serve Home from the placement index with feedPlacement == "standard", making Home and Shorts mutually exclusive. Off means Home keeps the migration query and may also show exact 9:16 assets.',
+    defaultValue: false,
+    owner: "vertical-feed-data",
+    removalDate: "2026-12-31",
+    phase: "Vertical feed Phase 7",
+    killSwitchControlled: false,
+    // A Convex placement filter does not depend on Android hardware behavior.
+    requiresAndroidPhysicalValidation: false,
+    rollbackNote:
+      "Disabling returns Home to the migration query that shows standard and unknown placements alongside 9:16. The worst case is a temporary duplicate between Home and Shorts, never a video missing from both.",
+  },
 };
 
 export const FEED_FEATURE_FLAG_DEFINITIONS: readonly FeedFeatureFlagDefinition[] =
@@ -160,8 +205,27 @@ export type FeedFeatureFlagResolution = {
     | "rollout"
     | "android_validation_gate"
     | "override"
-    | "kill_switch";
+    | "kill_switch"
+    | "dependency_gate";
   reason: string;
+};
+
+/**
+ * Flags that cannot be on unless their prerequisite is also on.
+ *
+ * This is enforced during resolution, not merely reported afterwards. A
+ * consumer that reads `isFeedFeatureEnabled("exclusiveFeedPlacementEnabled")`
+ * gets `false` the moment the Shorts tab is off, so there is no window in which
+ * Home has dropped exact 9:16 assets and no Shorts tab exists to show them.
+ */
+export const FEED_FLAG_DEPENDENCIES: Partial<
+  Record<FeedFeatureFlagKey, { requires: FeedFeatureFlagKey; because: string }>
+> = {
+  exclusiveFeedPlacementEnabled: {
+    requires: "shortsTabEnabled",
+    because:
+      "exclusive placement removes exact 9:16 assets from Home; without the Shorts tab they would appear in neither feed",
+  },
 };
 
 export type FeedFeatureFlagResolutions = Record<
@@ -207,15 +271,26 @@ function resolveOne(
   let reason = "registry default";
 
   const remoteValue = context.remote?.[key];
+  const remoteDisabled = remoteValue === false;
   if (typeof remoteValue === "boolean") {
     enabled = remoteValue;
     source = "remote";
-    reason = "remote config value";
+    reason = remoteDisabled
+      ? "remote config disabled the flag"
+      : "remote config value";
   }
 
   const stage = context.rollout?.[key]?.[context.platform];
   if (stage && typeof stage.percent === "number") {
-    if (context.stableId) {
+    if (remoteDisabled) {
+      // A remote `false` is an operator turning something off. A rollout
+      // percentage that is still sitting in config — usually because nobody
+      // remembered to zero it — must not quietly turn it back on. Staying off
+      // here is what makes remote config usable as an emergency lever.
+      enabled = false;
+      source = "remote";
+      reason = `remote config disabled the flag; ${stage.percent}% ${context.platform} rollout ignored`;
+    } else if (context.stableId) {
       enabled = isInRolloutCohort(key, context.stableId, stage.percent);
       source = "rollout";
       reason = `${stage.percent}% ${context.platform} cohort`;
@@ -256,6 +331,41 @@ function resolveOne(
   return { key, enabled, source, reason };
 }
 
+/**
+ * Forces a dependent flag off when its prerequisite resolved off.
+ *
+ * Runs after every per-flag step, including the Android validation gate, the
+ * developer override, and the kill switch, because any of those can turn a
+ * prerequisite off after the dependent flag has already been decided.
+ *
+ * Applied repeatedly until stable so a chain of dependencies resolves in one
+ * call; the flag count bounds the loop.
+ */
+function applyDependencyGates(resolutions: FeedFeatureFlagResolutions): void {
+  for (let pass = 0; pass < FEED_FEATURE_FLAG_KEYS.length; pass += 1) {
+    let changed = false;
+
+    for (const key of FEED_FEATURE_FLAG_KEYS) {
+      const dependency = FEED_FLAG_DEPENDENCIES[key];
+      if (!dependency) continue;
+
+      const resolution = resolutions[key];
+      if (!resolution.enabled) continue;
+      if (resolutions[dependency.requires].enabled) continue;
+
+      resolutions[key] = {
+        key,
+        enabled: false,
+        source: "dependency_gate",
+        reason: `${dependency.requires} is off: ${dependency.because}`,
+      };
+      changed = true;
+    }
+
+    if (!changed) return;
+  }
+}
+
 export function resolveFeedFeatureFlags(
   context: FeedFeatureFlagContext,
 ): FeedFeatureFlagResolutions {
@@ -266,6 +376,8 @@ export function resolveFeedFeatureFlags(
   for (const key of FEED_FEATURE_FLAG_KEYS) {
     result[key] = resolveOne(FEED_FEATURE_FLAGS[key], context, killSwitchEngaged);
   }
+
+  applyDependencyGates(result);
   return result;
 }
 
@@ -310,6 +422,24 @@ export function findFlagCombinationViolations(
   ) {
     violations.push(
       "feedStandbyPlayerFallback requires feedSharedPlayer: the standby slot is defined relative to the shared active player",
+    );
+  }
+
+  // Vertical-feed PRD section 15: the rollout may temporarily duplicate a video
+  // between Home and Shorts, but it must never let a classified video fall out
+  // of both.
+  //
+  // `applyDependencyGates` already makes this state unreachable through
+  // `resolveFeedFeatureFlags`. This check stays as defense in depth for
+  // resolutions assembled by hand — a test fixture, a config preview screen, a
+  // future caller that builds the record itself — so the invariant is still
+  // named rather than silently assumed.
+  if (
+    resolutions.exclusiveFeedPlacementEnabled.enabled &&
+    !resolutions.shortsTabEnabled.enabled
+  ) {
+    violations.push(
+      "exclusiveFeedPlacementEnabled requires shortsTabEnabled: exclusive placement removes exact 9:16 assets from Home, and with no Shorts tab they appear in neither feed",
     );
   }
 
