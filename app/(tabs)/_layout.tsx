@@ -4,8 +4,10 @@ import { Platform } from "react-native";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useFeedFeatureFlags } from "@/hooks/use-feed-feature-flags";
 
 export default function TabLayout() {
+  const { shortsTabEnabled } = useFeedFeatureFlags();
   const colorScheme = useColorScheme() === "dark" ? "dark" : "light";
   const isDark = colorScheme === "dark";
   const isIOS = Platform.OS === "ios";
@@ -39,11 +41,7 @@ export default function TabLayout() {
         <NativeTabs.Trigger.Label hidden>Home</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
-      {/*
-        Shorts sits immediately after Home. Remove this trigger to hide the tab;
-        the screen itself starts no query and no playback work until it mounts.
-      */}
-      <NativeTabs.Trigger name="shorts">
+      <NativeTabs.Trigger name="shorts" hidden={!shortsTabEnabled}>
         <NativeTabs.Trigger.Icon
           src={
             <NativeTabs.Trigger.VectorIcon

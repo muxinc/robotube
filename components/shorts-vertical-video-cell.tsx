@@ -119,7 +119,7 @@ function ShortsVerticalVideoCellComponent({
         accessibilityState={{ selected: isActive, busy: isActive && !hasFirstFrame }}
         style={styles.mediaLayer}
       >
-        {isActive && playback ? (
+        {isActive && playback?.player ? (
           <View style={styles.previewLayer} pointerEvents="none">
             <MuxVideoView
               player={playback.player}

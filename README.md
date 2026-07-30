@@ -160,14 +160,18 @@ npx tsc --noEmit
 
 ## Shorts: the 9:16 vertical feed
 
-A planned fifth native tab presenting a full-viewport, vertically paged feed
-containing only ready videos whose normalized display aspect ratio is exactly
-`9:16`. Home keeps the YouTube-style card feed for every other known ratio.
+A default-off fifth native tab presenting a full-viewport, vertically paged feed
+containing only ready, visible videos whose normalized display aspect ratio is
+exactly `9:16`. Classification, indexed queries, the Shorts UI/playback layer,
+telemetry, and remote rollout controls are implemented. Home keeps its legacy
+query until `exclusiveFeedPlacementEnabled` is turned on, after which it uses
+the indexed `standard` placement.
 
-**Not shipped.** There is no `app/(tabs)/shorts.tsx`, no vertical Convex query,
-and no `feedPlacement` column yet. What exists today is the verification,
-observability, and rollout scaffolding those phases plug into, plus the gates
-they have to pass.
+The configured development deployment was backfilled and audited on 2026-07-30:
+72 playable assets classified as 68 standard and 4 vertical, with zero playable
+unknowns, overlaps, omissions, inconsistent classifications, or duplicate IDs.
+Runtime flags remain fail-closed; physical-device performance and Android
+validation are still rollout gates.
 
 - [9:16 Vertical Video Feed PRD](./docs/vertical-video-feed-prd.md) — phases, exit gates, and the eligibility contract
 - [Observability, flags, and operations](./docs/vertical-video-feed-operations.md) — Shorts event vocabulary, rollout flags, cohort ladder, rollback plan, dashboard specifications, runbook
@@ -175,6 +179,12 @@ they have to pass.
 
 Tooling:
 
+- `convex/aspectClassification.ts` and `convex/feedPlacement.ts` — canonical
+  classification, resumable audit, and exclusivity/coverage gate
+- `convex/feed.ts` — indexed standard and vertical paginated card queries
+- `convex/feedRuntimeConfig.ts` — atomic, reactive remote flag state
+- `app/(tabs)/shorts.tsx` — paged Shorts route, states, playback, and telemetry
+- `hooks/use-feed-feature-flags.tsx` — one app-wide resolved rollout snapshot
 - `lib/vertical-video-feed.ts` — single import surface for the modules below
 - `lib/vertical-video-feed-fixtures.ts` — 42 deterministic classification and visibility fixtures, plus the PRD section 7.2/7.3 eligibility oracle the production classifier must agree with
 - `lib/vertical-video-feed-audit.ts` — placement distribution, coverage gate, Home/Shorts exclusivity audit, backfill counter checks
@@ -194,6 +204,7 @@ an emergency off switch cannot be undone by a stale ramp value.
 node scripts/vertical-video-feed-tests.mjs                    # 93 pure unit tests
 node scripts/vertical-video-feed-fixtures.mjs                 # fixture summary; --format markdown|json, --feed N
 node scripts/vertical-video-feed-run-sheet.mjs                # probe tooling, print a blank Shorts run sheet
+node --experimental-strip-types --test tests/aspect-classification.test.ts tests/vertical-feed-data.test.ts tests/vertical-feed-data-backfill.test.ts tests/vertical-feed-runtime-wiring.test.ts
 ```
 
 ## Get a fresh project

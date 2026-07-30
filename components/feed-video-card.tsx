@@ -81,7 +81,7 @@ export function formatPublished(createdAtMs: number) {
  * thumbnail-only, which is the documented default.
  */
 export type FeedVideoCardPlayback = {
-  player: MuxVideoPlayer;
+  player: MuxVideoPlayer | null;
   /** True only for the committed card. At most one card may receive true. */
   isActive: boolean;
   /** Hides the thumbnail once the active source has produced a frame. */
@@ -166,7 +166,7 @@ function FeedVideoCardComponent({
       style={pressableStyle}
     >
       <View style={styles.videoContainer}>
-        {isActive && playback ? (
+        {isActive && playback?.player ? (
           <View style={styles.previewLayer} pointerEvents="none">
             <MuxVideoView
               player={playback.player}

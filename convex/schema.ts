@@ -143,6 +143,13 @@ export default defineSchema({
       "isDeleted",
       "createdAtMs",
     ]),
+  feedRuntimeConfig: defineTable({
+    key: v.literal("vertical-feed"),
+    shortsTabEnabled: v.boolean(),
+    exclusiveFeedPlacementEnabled: v.boolean(),
+    androidPhysicalValidationCompleted: v.boolean(),
+    updatedAtMs: v.number(),
+  }).index("by_key", ["key"]),
   aiMetadataLocks: defineTable({
     muxAssetId: v.string(),
     userId: v.string(),

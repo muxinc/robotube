@@ -37,7 +37,7 @@ export type UseShortsScreenPlaybackOptions = {
 
 /** Everything one Shorts cell needs from the shared controllers. */
 export type ShortsCellPlayback = {
-  player: MuxVideoPlayer;
+  player: MuxVideoPlayer | null;
   /** True for the committed cell only. At most one cell may receive true. */
   isActive: boolean;
   /** True once the committed source produced a frame; hides the poster. */
@@ -101,8 +101,8 @@ export type ShortsScreenPlayback = {
  *    lifecycle gate; and
  *  - the player reports a Shorts-specific name to Mux Data.
  *
- * One controller per screen is what keeps the one-playing-video invariant true:
- * Home and Shorts each own exactly one, and each pauses on tab blur.
+ * Only the focused feed owns a player. Native tabs retain inactive routes, so
+ * allocation as well as playback is gated by tab focus.
  */
 export function useShortsScreenPlayback({
   items,
@@ -174,6 +174,7 @@ export function useShortsScreenPlayback({
   }, [reportSurfaceLost]);
 
   const controller = useFeedPlaybackController({
+    isPlayerEnabled: isScreenFocused,
     target,
     isPlaybackAllowed: shouldPlay,
     muted: intent.isMuted,
@@ -259,6 +260,7 @@ export function useShortsScreenPlayback({
     trackFeedEvent(intent.isMuted ? "shorts_unmuted" : "shorts_muted", {
       screen: "shorts",
       muxAssetId: committedMuxAssetId ?? undefined,
+      isMuted: !intent.isMuted,
     });
   }, [committedMuxAssetId, intent.isMuted]);
 
@@ -283,8 +285,9 @@ export function useShortsScreenPlayback({
       screen: "shorts",
       muxAssetId: committedMuxAssetId,
       feedIndex: focus.committedIndex ?? undefined,
+      retryAttempt: intent.retryNonce + 1,
     });
-  }, [committedMuxAssetId, focus.committedIndex]);
+  }, [committedMuxAssetId, focus.committedIndex, intent.retryNonce]);
 
   const getCellPlayback = useCallback(
     (item: FeedVideoItem): ShortsCellPlayback => {

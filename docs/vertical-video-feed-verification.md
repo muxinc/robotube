@@ -5,40 +5,33 @@ Phase 0 fixture record and Phase 6 verification status for
 rollback, and dashboards live in
 [`vertical-video-feed-operations.md`](./vertical-video-feed-operations.md).
 
-**Status: fixtures and rule-level verification complete; no runtime verification
-performed.** Nothing in this document is estimated, extrapolated, or copied from
-another project. Every device-measured cell is explicitly `NOT MEASURED`.
+**Status: implementation, static verification, development backfill, live data
+audits, and an iOS simulator smoke test complete; physical-device performance
+verification remains open.**
+Nothing in this document is estimated or extrapolated. Every device-measured
+cell that has not been captured is explicitly `NOT MEASURED`.
 
 - Recorded on: 2026-07-30
-- Branch: `herdr/vertical-quality`
+- Branch: `ja/laracon`
 - Base commit: `39b2290`
 - Node v22.17.1, TypeScript 5.9.3
 
 ---
 
-## 1. What exists, and what does not
+## 1. Implementation status
 
-The vertical feed is a nine-phase project. This branch owns the verification,
-observability, fixture, flag, rollout, and documentation slice. It is important
-to be blunt about what that means for a verification record:
+The parallel data, UI, and quality lanes are integrated on this branch:
 
 | PRD phase | State on this branch |
 | --- | --- |
-| Phase 0 — baseline | Fixtures **done**. Asset-inventory capture and Home baseline **not done** (need production data and a device run). |
-| Phase 1 — classification and cache migration | **Not present.** No `aspectRatio` or `feedPlacement` column, no backfill, no audit query. |
-| Phase 2 — indexed queries | **Not present.** No `listVerticalFeedVideosPaginated`. |
-| Phase 3 — tab and paged screen | **Not present.** No `app/(tabs)/shorts.tsx`. |
-| Phase 4 — playback, focus, preload | **Not present**, except the telemetry vocabulary Shorts will emit. |
-| Phase 5 — overlay and accessibility | **Not present.** |
-| Phase 6 — verification | Rule-level tests, scenarios, and checklists **done**. Every runtime, device, and performance item **not done**. |
-| Phase 7 — flags and operations | Flag registry, cohorts, rollback plan, dashboard specs, runbook **done**. Consumption, real dashboards, and rehearsal **not done**. |
-
-Verified at `39b2290` by grepping the whole repository: `feedPlacement`,
-`aspect_ratio`, and `shorts` appear in no `.ts`, `.tsx`, or `.mjs` file outside
-the modules this branch added.
-
-So: this document can honestly say the *rules* are right. It cannot say anything
-about a running app, because there is no Shorts screen to run.
+| Phase 0 — baseline | Fixtures and live asset inventory **done**. Home physical baseline remains open. |
+| Phase 1 — classification and cache migration | **Implemented and run** on the configured development deployment. |
+| Phase 2 — indexed queries | **Implemented and contract-tested**; live vertical and standard queries return classified cards. |
+| Phase 3 — tab and paged screen | **Implemented** behind the default-off Shorts flag. |
+| Phase 4 — playback, focus, preload | **Implemented and unit-tested**; real media warm-preload is unavailable in the installed Mux SDK, so poster warming is the bounded fallback. |
+| Phase 5 — overlay and accessibility | **Implemented**; physical VoiceOver/TalkBack acceptance remains open. |
+| Phase 6 — verification | Static, unit, integration, live-data, and iOS simulator smoke checks **done**. Full device scenarios and performance measurements remain open. |
+| Phase 7 — flags and operations | Reactive remote config and runtime consumption **done**. Analytics dashboards, targeted cohorts, and production rehearsal remain external. |
 
 ---
 
@@ -154,8 +147,8 @@ sections 2.1 to 2.3 for the full record.
 | Profile | Kind | Validity | Availability |
 | --- | --- | --- | --- |
 | iPhone 14 Pro (`iPhone15,2`), iOS 26.5.2 | physical | performance | **observed** — the Shorts performance reference |
-| iOS Simulator (iPhone 17 Pro / iPhone 16e) | simulator | functional-only | observed |
-| Android emulator (`Medium_Phone_API_36.1`) | emulator | functional-only | observed |
+| iOS Simulator (iPhone 16e, iOS 26.0.1) | simulator | functional-only | **booted** (`06E3A27A-1988-43ED-8831-ECC402744C84`) |
+| Android emulator (`Medium_Phone_API_36.1`) | emulator | functional-only | configured, not attached during this run |
 | Constrained Android emulator | emulator | functional-only | **not configured** |
 | Physical Android | physical | performance | **unavailable** |
 
@@ -171,7 +164,7 @@ resolver, not by a promise. This is a rollout dependency, not a Phase 0 blocker.
 
 ## 4. What was verified
 
-Run on 2026-07-30 against `39b2290` plus this branch's changes.
+Run on 2026-07-30 on `ja/laracon`.
 
 | Command | Result |
 | --- | --- |
@@ -179,10 +172,14 @@ Run on 2026-07-30 against `39b2290` plus this branch's changes.
 | `npm run lint` (`expo lint`) | **Pass**, no findings |
 | `node scripts/vertical-video-feed-tests.mjs` | **Pass** — 93/93 |
 | `node scripts/news-feed-tests.mjs` | **Pass** — 52/52, unchanged from before this branch |
-| `node scripts/run-tests.mjs` | **Pass** — 56/56 across 15 suites |
-| `node --experimental-strip-types --test tests/feed-contracts.test.ts` | **Pass** — 22/22 |
+| `node scripts/run-tests.mjs` | **Pass** — 185/185 |
+| Backend/runtime Node test battery | **Pass** — 121/121 |
 | `node scripts/vertical-video-feed-fixtures.mjs` | **Pass** — 42 fixtures, zero oracle disagreements |
 | `node scripts/vertical-video-feed-run-sheet.mjs` | **Pass** — probes tooling, emits a blank run sheet |
+| `migrations:backfillMuxAssetCache` | **Pass** — 72 scanned/classified; 68 standard, 4 vertical, 0 failed/unknown |
+| `feedPlacement:auditFeedPlacementCoverage` | **Pass** — 72 playable; 0 playable unknown, duplicate, inconsistent, overlap, or omitted |
+| Live development queries | **Pass** — vertical 4/4 and standard first page 16 cards |
+| iPhone 16e simulator smoke | **Functional smoke** — Home and Shorts loaded real media; Shorts returned 4 items; settled counters after repeated switches read 1 player / 1 surface / 1 playing video |
 
 ### 4.1 What the 93 new tests actually cover
 
@@ -265,51 +262,38 @@ None of them is evidence about a running app.
 | `feed_playback_paused` and `feed_player_released` are recognized | Both were emitted by the runtime and silently dropped before the sink. |
 | Query failures are reported on `shorts_query_received`, not `feed_playback_error` | Counting decode failures as query failures inflates one rate, hides the other, and pages the wrong owner. |
 
-### 4.3 Fixture-derived response sizes
+### 4.3 Contract response sizes
 
-**Measurements of a generated fixture, not of a production Convex response.**
-They validate the tooling and show the contract's headroom. They satisfy no PRD
-gate.
-
-Produced from `createDeterministicVerticalFeed({ count })` at the default seed,
-serialized with `JSON.stringify`, counted as UTF-8 bytes:
+The data contract suite serializes representative `FeedVideoCardItem` pages
+with `JSON.stringify` and counts UTF-8 bytes:
 
 | Page | Bytes | Bytes per card | Scaled budget | Within budget |
 | ---: | ---: | ---: | ---: | :---: |
-| 16 cards | 5,868 | 367 | 15,360 | yes |
-| 48 cards | 17,487 | 364 | 46,080 | yes |
-| 50 cards | 18,203 | 364 | 48,000 | yes |
+| 16 cards | 5,937 | 371 | 15,360 | yes |
+| 48 cards | 17,809 | 371 | 46,080 | yes |
 
 Slightly larger per card than the Home fixtures (337 B) because the 9:16
 thumbnail URL carries `height` and `fit_mode` parameters.
 
 ---
 
-## 5. What was NOT verified
+## 5. What remains unverified
 
-Everything below requires a running Shorts screen, a Convex deployment with
-classified content, or a physical device. None of it has been done, and none of
-it should be read as done.
-
-### 5.1 Needs the data lane (Phases 1–2)
+### 5.1 Data and query measurements
 
 | Item | Status |
 | --- | --- |
-| Ready-asset count and aspect-ratio distribution in any deployment | **NOT CAPTURED** |
-| Classification of real Mux payloads through `normalizeMuxAssetPayload` | **NOT IMPLEMENTED** |
-| Backfill execution and its scanned/classified/unknown/unchanged/failed counts | **NOT RUN** |
-| Zero-unknown coverage gate against real data | **NOT MEASURED** |
-| `listVerticalFeedVideosPaginated` correctness, cursors, and multi-page behavior | **NOT IMPLEMENTED** |
-| Query response size and execution time for 16 and 48 Shorts cards | **NOT MEASURED** |
-| Home/Shorts exclusivity audit against real rows | **NOT RUN** |
-| Convex contract tests for the vertical query | **DO NOT EXIST** |
+| Query execution time for 16 and 48 Shorts cards | **NOT MEASURED** |
+| Response size from the live Convex transport rather than representative card serialization | **NOT MEASURED** |
+| Production-deployment backfill and audit | **NOT RUN** — development deployment only |
 
-### 5.2 Needs the UI lane (Phases 3–5)
+### 5.2 Runtime scenarios
 
 | Item | Status |
 | --- | --- |
 | Cold launch, warm launch, slow swipe, fast fling, reverse fling | **NOT RUN** |
-| Pagination during playback, tab switch, background/foreground | **NOT RUN** |
+| Pagination during playback, background/foreground | **NOT RUN** |
+| Repeated Home/Shorts tab switching | **SMOKE ONLY, NOT A GATE** — settled gauges were in range, but retained transition peaks were not captured |
 | Rotation and safe-area change, detail handoff and return | **NOT RUN** |
 | Offline and recovery | **NOT RUN** |
 | 50-item down/up memory run | **NOT RUN** |
@@ -336,7 +320,7 @@ it should be read as done.
 | Mux Data metadata identifying the Shorts player and video | **NOT VERIFIED** |
 | Dashboard panels created in an analytics tool | **NOT CREATED** — specifications only |
 | Cohort observation windows | **NOT OBSERVED** |
-| Rollback rehearsal against a real deployment | **NOT REHEARSED** |
+| Production rollback rehearsal | **NOT REHEARSED** — development flag off/on only |
 | Product, placement, and audio decisions accepted by the project owner | **NOT RECORDED** |
 | Removal of migration-only legacy Home behavior | **NOT APPLICABLE YET** — nothing to remove |
 
@@ -401,10 +385,16 @@ npm run lint
 node scripts/vertical-video-feed-tests.mjs
 node scripts/news-feed-tests.mjs
 node scripts/run-tests.mjs
-node --experimental-strip-types --no-warnings=ExperimentalWarning \
-  --import ./scripts/register-test-resolver.mjs --test tests/feed-contracts.test.ts
+node --experimental-strip-types --test \
+  tests/feed-contracts.test.ts \
+  tests/aspect-classification.test.ts \
+  tests/vertical-feed-data.test.ts \
+  tests/vertical-feed-data-backfill.test.ts \
+  tests/vertical-feed-runtime-wiring.test.ts
 node scripts/vertical-video-feed-fixtures.mjs
 node scripts/vertical-video-feed-run-sheet.mjs --out /tmp/shorts-run-sheet.md
+npx convex run feedPlacement:auditFeedPlacementCoverage \
+  '{"pageSize":200,"maxRows":1000}'
 ```
 
 ## 8. Revision policy

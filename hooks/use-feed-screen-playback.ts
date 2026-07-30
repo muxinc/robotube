@@ -52,9 +52,9 @@ export type FeedScreenPlayback = {
  * bounded preload policy and the adaptive media policy into one wiring that the
  * Home feed and the search results screen share verbatim.
  *
- * Sharing this hook is what keeps the one-active-player guarantee true across
- * screens: each screen owns exactly one controller, and a card can only be
- * active when its `muxAssetId` matches that controller's committed asset.
+ * Sharing this hook keeps the one-active-player guarantee true across screens:
+ * only the focused screen allocates a player, and a card can only be active
+ * when its `muxAssetId` matches that controller's committed asset.
  */
 export function useFeedScreenPlayback({
   items,
@@ -86,6 +86,7 @@ export function useFeedScreenPlayback({
   }, [committedItem, focus.committedIndex]);
 
   const controller = useFeedPlaybackController({
+    isPlayerEnabled: isScreenFocused,
     target,
     isPlaybackAllowed: focus.isPlaybackAllowed,
     maxResolution: policy.maxResolution,

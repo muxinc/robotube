@@ -5,15 +5,11 @@ Engineering and operational notes for the vertical-feed work described in
 status and the fixture set live in
 [`vertical-video-feed-verification.md`](./vertical-video-feed-verification.md).
 
-This document covers what is **implemented in this repository today**: the
-Shorts telemetry vocabulary, the placement audit helpers, the two rollout flags,
-the cohort ladder, the rollback plan, and the dashboard specifications.
-
-It does **not** describe a running Shorts tab. At the time of writing there is
-no `app/(tabs)/shorts.tsx`, no `listVerticalFeedVideosPaginated`, and no
-`feedPlacement` column — those are Phases 1 through 5 and belong to the data and
-UI lanes. Everything here is the scaffolding those phases plug into, plus the
-gates they have to pass.
+This document covers what is **implemented in this repository today**:
+classification and indexed placement queries, the Shorts runtime, telemetry,
+the two remote rollout flags, the cohort ladder, rollback plan, and dashboard
+specifications. The configured development deployment has been backfilled and
+audited; physical-device performance and production rollout remain gated.
 
 ---
 
@@ -29,6 +25,8 @@ gates they have to pass.
 | `lib/vertical-video-feed-dashboards.ts` | Saved-query and alert specifications | Until real dashboards exist |
 | `lib/feed-performance-events.ts` | **Shared.** Event vocabulary and privacy sanitizer, now covering Shorts | Production-safe |
 | `lib/feed-feature-flags.ts` | **Shared.** Flag registry, now including the two vertical flags | Removed with the flags |
+| `convex/feedRuntimeConfig.ts` | Reactive singleton flag state and atomic operator mutation | Removed with the flags |
+| `hooks/use-feed-feature-flags.tsx` | One resolved app-wide flag snapshot for tab, route, and Home | Removed with the flags |
 
 Telemetry and flags are deliberately **not** re-exported from
 `lib/vertical-video-feed.ts`. Shorts emits through the same
@@ -105,7 +103,7 @@ emitFeedPerformanceEvent(SHORTS_PERFORMANCE_EVENTS.shortsPageImpression, {
 | `shorts_unmuted` | The user unmutes via the sound control. |
 | `shorts_open_detail` | The user opens `/video/[muxAssetId]` from Shorts. |
 | `shorts_retry_playback` | The user taps retry after a recoverable error. |
-| `shorts_query_received` | A `listVerticalFeedVideosPaginated` page **resolves or fails**, carrying `query_outcome`. |
+| `shorts_query_received` | The initial `listVerticalFeedVideosPaginated` attempt **resolves or fails**, carrying `query_outcome`. |
 | `shorts_empty_state_viewed` | The empty state renders. |
 
 A query failure is reported on `shorts_query_received` with
@@ -114,6 +112,11 @@ into `feed_playback_error`: a page that failed to load and a video that failed
 to decode are different incidents with different owners, and counting one as the
 other makes both rates meaningless.
 
+The success event is emitted once per mounted query attempt at the first
+terminal paginated-query state. `item_count` is the cumulative number of cards
+available then; it is not a per-page network-response counter. Retrying the
+query remounts the attempt and emits a new result.
+
 ### 2.3 Fields
 
 The 12 common fields are unchanged. Shorts adds seven, all bounded:
@@ -121,9 +124,9 @@ The 12 common fields are unchanged. Shorts adds seven, all bounded:
 | Field | Type | Notes |
 | --- | --- | --- |
 | `feed_placement` | enum | `standard` \| `vertical` \| `unknown` |
-| `item_count` | integer 0–10000 | Page size on `shorts_query_received` |
+| `item_count` | integer 0–10000 | Cumulative cards at the initial query result |
 | `is_muted` | boolean | Session mute state |
-| `retry_attempt` | integer 0–1000 | Which retry this is |
+| `retry_attempt` | integer 0–1000 | One-based retry ordinal for this screen session |
 | `empty_reason` | enum | `no_vertical_assets` \| `query_error` \| `offline` \| `flag_disabled` |
 | `page_height_dp` | integer 0–10000 | Measured content viewport, rounded to whole dp |
 | `query_outcome` | enum | `success` \| `error`, on `shorts_query_received` |
@@ -151,8 +154,8 @@ stripped of its screen tag.
 ### 2.5 Classification diagnostics
 
 PRD section 13 also asks for aggregate diagnostics that are not per-event.
-Those come from `lib/vertical-video-feed-audit.ts`, fed by a Convex read-only
-audit query (Phase 1, not yet written):
+Those come from `lib/vertical-video-feed-audit.ts` and the Convex read-only
+`feedPlacement:auditFeedPlacementCoverage` query:
 
 ```ts
 import { buildPlacementDiagnostics, formatPlacementDiagnostics } from "@/lib/vertical-video-feed";
@@ -234,9 +237,27 @@ runs. Home is untouched either way.
 also show exact 9:16 assets, which is the intended state for most of the
 rollout.
 
-> **Status.** Both flags exist, resolve, and are tested. Neither is *consumed* by
-> a runtime path yet, because the tab and the placement query do not exist. The
-> registry half is done; the wiring lands with Phases 3 and 2 respectively.
+> **Status.** Both flags are consumed from one reactive Convex singleton through
+> `FeedFeatureFlagsProvider`. The same resolved snapshot hides the native tab,
+> redirects direct Shorts routes before query/player work mounts, and selects
+> Home's legacy or standard-placement query. Missing or loading config is
+> all-off.
+
+Operators update the complete state atomically. These commands target the
+configured development deployment unless `--prod` or an explicit deployment is
+supplied:
+
+```bash
+npx convex run feedRuntimeConfig:setVerticalFeedFlags \
+  '{"shortsTabEnabled":true,"exclusiveFeedPlacementEnabled":false,"androidPhysicalValidationCompleted":false}'
+npx convex run feedRuntimeConfig:getVerticalFeedFlags '{}'
+```
+
+The mutation rejects `exclusiveFeedPlacementEnabled: true` while Shorts is
+false. Production remains default-off. Percentage and targeted cohorts are
+modeled and tested by the resolver, but this singleton stores global booleans;
+an analytics/targeting service and persistent install identifier must be wired
+before the 5% ladder can operate automatically.
 
 ### 3.2 Resolution order
 
@@ -474,10 +495,10 @@ would make re-enabling the feature a migration instead of a flag flip.
 
 ### 5.3 Rehearsal
 
-**Not rehearsed.** PRD Phase 7's exit gate "Rollback has been rehearsed without
-data loss" requires a deployment with the feature enabled, which does not exist.
-The plan above is implemented and unit-tested; it has never been executed
-against a real deployment.
+The atomic off/on sequence has been exercised only against the development
+deployment. That proves the reactive kill-switch path can be changed without a
+schema rollback; it is not a production rehearsal and does not satisfy the
+physical QA, observation-window, or data-loss exit gates.
 
 ---
 
@@ -599,6 +620,8 @@ node scripts/news-feed-tests.mjs                               # Home suite, mus
 node scripts/run-tests.mjs
 npm run lint
 npx tsc --noEmit
+npx convex run feedPlacement:auditFeedPlacementCoverage '{"pageSize":200,"maxRows":1000}'
+npx convex run feedRuntimeConfig:getVerticalFeedFlags '{}'
 ```
 
 `scripts/vertical-video-feed-load-lib.mjs` compiles the vertical modules to

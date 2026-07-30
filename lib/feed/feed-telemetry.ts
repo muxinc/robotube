@@ -44,9 +44,7 @@ export type FeedTelemetryEventName =
   | "feed_preload_promoted_to_active"
   // Shorts-specific vocabulary. These describe interactions the card feed has
   // no equivalent for, so they are additive rather than reusing a feed_* name.
-  // They are not part of `FEED_PERFORMANCE_EVENTS`, so they reach telemetry
-  // listeners and the development overlay without widening the sanitized
-  // performance-event schema.
+  // They flow through the same privacy sanitizer and performance sink.
   | "shorts_tab_opened"
   | "shorts_page_impression"
   | "shorts_manual_pause"
@@ -71,6 +69,13 @@ export type FeedTelemetryFields = {
   isPreloaded?: boolean;
   elapsedMs?: number;
   errorCode?: string;
+  feedPlacement?: FeedPerformanceEventFields["feed_placement"];
+  itemCount?: number;
+  isMuted?: boolean;
+  retryAttempt?: number;
+  emptyReason?: FeedPerformanceEventFields["empty_reason"];
+  pageHeightDp?: number;
+  queryOutcome?: FeedPerformanceEventFields["query_outcome"];
 };
 
 export type FeedCounterName =
@@ -236,20 +241,21 @@ function toPerformanceFields(
     is_preloaded: fields.isPreloaded,
     elapsed_ms: fields.elapsedMs,
     error_code: normalizeErrorCode(fields.errorCode),
+    feed_placement: fields.feedPlacement,
+    item_count: fields.itemCount,
+    is_muted: fields.isMuted,
+    retry_attempt: fields.retryAttempt,
+    empty_reason: fields.emptyReason,
+    page_height_dp: fields.pageHeightDp,
+    query_outcome: fields.queryOutcome,
   };
 }
 
 /**
  * Maps a runtime screen onto the sanitized performance-event vocabulary.
  *
- * `shorts` intentionally resolves to `undefined`: `FEED_SCREENS` in
- * `lib/feed-performance-events.ts` owns that allowlist, and an unlisted value
- * would be redacted by `sanitizeFeedEventFields` anyway. Dropping the dimension
- * here keeps the event itself flowing with its asset, index, and timing fields
- * instead of silently shipping a value that fails the allowlist. The Shorts
- * screen dimension is still observable through `addFeedTelemetryListener`, which
- * receives the unmapped `screen: "shorts"`. Add `"shorts_feed"` to `FEED_SCREENS`
- * to carry it into the sanitized path as well.
+ * Values here must be members of `FEED_SCREENS`; the sanitizer drops unknown
+ * dimensions while preserving the rest of the event.
  */
 function toPerformanceScreen(
   screen: FeedTelemetryScreen | undefined,
@@ -259,6 +265,8 @@ function toPerformanceScreen(
       return "home_feed";
     case "search":
       return "search_results";
+    case "shorts":
+      return "shorts";
     default:
       return undefined;
   }

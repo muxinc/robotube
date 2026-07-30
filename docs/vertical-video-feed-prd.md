@@ -468,7 +468,7 @@ Goal: lock scope and identify reusable foundations before runtime changes.
 - [x] Define unknown-ratio migration behavior.
 - [x] Choose the user-facing tab name and route.
 - [x] Record persistent engagement features as out of scope.
-- [ ] Capture the current number of ready Mux assets and their aspect-ratio
+- [x] Capture the current number of ready Mux assets and their aspect-ratio
   distribution.
 - [x] Build a deterministic fixture set containing at least 10 exact 9:16 assets
   and at least 10 non-qualifying assets.
@@ -500,86 +500,103 @@ Phase 0 exit gate:
   **no physical Android device is attached**, which is recorded as a rollout
   dependency and enforced by `requiresAndroidPhysicalValidation` on
   `shortsTabEnabled`.
-- Still open — the asset-inventory capture needs a Convex deployment and the
-  Home baseline needs a physical-device run. Neither has been done, and the
-  original Home baseline in `docs/news-feed-performance-baseline.md` section 4.3
-  is itself still `NOT MEASURED`.
+- Live development inventory, captured 2026-07-30 — 72 ready assets: `16:9` 37,
+  `1:1` 24, `9:16` 4, `12:5` 4, `1439:1080` 1, `167:108` 1, and `3:4` 1.
+- Still open — the Home baseline needs a physical-device run. The original Home
+  baseline in `docs/news-feed-performance-baseline.md` section 4.3 is itself
+  still `NOT MEASURED`.
 
 ### Phase 1: Aspect Classification and Cache Migration
 
 Goal: give every ready asset an authoritative indexed placement.
 
-- [ ] Add pure ratio parsing, GCD normalization, and placement helpers.
-- [ ] Add unit tests for exact, reducible, non-qualifying, missing, malformed,
+- [x] Add pure ratio parsing, GCD normalization, and placement helpers.
+- [x] Add unit tests for exact, reducible, non-qualifying, missing, malformed,
   zero, negative, and oversized integer inputs.
-- [ ] Extend `CachedMuxAsset`, the Convex schema, and comparable cache payload
+- [x] Extend `CachedMuxAsset`, the Convex schema, and comparable cache payload
   with aspect-ratio fields.
-- [ ] Read `aspect_ratio` and compatible camel-case input in
+- [x] Read `aspect_ratio` and compatible camel-case input in
   `normalizeMuxAssetPayload`.
-- [ ] Confirm `video.asset.ready` and later asset updates refresh
+- [x] Confirm `video.asset.ready` and later asset updates refresh
   classification.
-- [ ] Preserve existing `feed*` read-model fields during classification upserts.
-- [ ] Add `by_feed_placement_ready_deleted_created`.
-- [ ] Extend `migrations.backfillMuxAssetCache` to populate classifications for
+- [x] Preserve existing `feed*` read-model fields during classification upserts.
+- [x] Add `by_feed_placement_ready_deleted_created`.
+- [x] Extend `migrations.backfillMuxAssetCache` to populate classifications for
   legacy assets.
-- [ ] Make the backfill idempotent, bounded, resumable, and safe to rerun.
-- [ ] Return scanned/classified/unknown/unchanged/failed counts.
-- [ ] Add a read-only audit query for placement totals, overlap, and omissions.
-- [ ] Document rollback behavior; schema fields and index may remain if the
+- [x] Make the backfill idempotent, bounded, resumable, and safe to rerun.
+- [x] Return scanned/classified/unknown/unchanged/failed counts.
+- [x] Add a read-only audit query for placement totals, overlap, and omissions.
+- [x] Document rollback behavior; schema fields and index may remain if the
   feature is disabled.
 
 Phase 1 exit gate:
 
-- [ ] All new ready-asset events write a deterministic placement.
-- [ ] Unit tests pass for every classification edge case.
-- [ ] Backfill completes in the target deployment.
-- [ ] Ready assets have zero unknown placements, or every exception is recorded
+- [x] All new ready-asset events write a deterministic placement.
+- [x] Unit tests pass for every classification edge case.
+- [x] Backfill completes in the target deployment.
+- [x] Ready assets have zero unknown placements, or every exception is recorded
   with a reason and remains visible on legacy Home.
+
+**Phase 1 evidence.** `migrations:backfillMuxAssetCache` ran to completion on
+the configured development deployment: 72 scanned/classified, 68 standard, 4
+vertical, 0 unknown, and 0 failed. The subsequent placement audit found zero
+playable unknown or inconsistent rows. Classification and resumability are
+covered by `tests/aspect-classification.test.ts`,
+`tests/vertical-feed-data.test.ts`, and
+`tests/vertical-feed-data-backfill.test.ts`.
 
 ### Phase 2: Indexed Feed Queries and Exclusive Routing
 
 Goal: return stable, paginated card pages without client-side ratio filtering.
 
-- [ ] Extract a shared indexed placement-query helper where useful.
-- [ ] Add `listVerticalFeedVideosPaginated`.
-- [ ] Reuse `FeedVideoCardItem` and the existing channel/avatar resolution.
-- [ ] Apply the same readiness, deletion, playback, and visibility rules as Home.
-- [ ] Add query contract tests for exact 9:16 inclusion.
-- [ ] Add tests proving 16:9, 4:5, 1:1, and unknown assets are excluded.
-- [ ] Add multi-page cursor tests with interleaved standard/vertical creation
+- [x] Extract a shared indexed placement-query helper where useful.
+- [x] Add `listVerticalFeedVideosPaginated`.
+- [x] Reuse `FeedVideoCardItem` and the existing channel/avatar resolution.
+- [x] Apply the same readiness, deletion, playback, and visibility rules as Home.
+- [x] Add query contract tests for exact 9:16 inclusion.
+- [x] Add tests proving 16:9, 4:5, 1:1, and unknown assets are excluded.
+- [x] Add multi-page cursor tests with interleaved standard/vertical creation
   times.
-- [ ] Add deleted, missing-playback-ID, private, and duplicate fixture cases.
+- [x] Add deleted, missing-playback-ID, private, and duplicate fixture cases.
 - [ ] Measure serialized response size and query time for 16 and 48 Shorts cards.
-- [ ] Add a placement-filtered Home query, but keep it behind a feature flag
+- [x] Add a placement-filtered Home query, but keep it behind a feature flag
   until the backfill coverage gate passes.
-- [ ] Add an audit proving each eligible known asset appears in exactly one feed.
+- [x] Add an audit proving each eligible known asset appears in exactly one feed.
 - [ ] Switch Home to `standard` only after the audit passes.
 
 Phase 2 exit gate:
 
-- [ ] Shorts returns only exact 9:16 cards across multiple pages.
+- [x] Shorts returns only exact 9:16 cards across multiple pages.
 - [ ] Home returns no exact 9:16 cards after cutover.
-- [ ] There are no duplicates, omissions, or cursor losses.
-- [ ] The hot query performs no per-video Mux component reads.
-- [ ] Response size stays within the existing card-feed budget.
+- [x] There are no duplicates, omissions, or cursor losses.
+- [x] The hot query performs no per-video Mux component reads.
+- [x] Response size stays within the existing card-feed budget.
+
+**Phase 2 evidence.** Contract tests cover interleaved multi-page cursors,
+visibility, duplicates, and exact placement. Representative serialized pages
+are 5,937 bytes for 16 cards and 17,809 bytes for 48 cards. Live development
+queries returned all 4 vertical assets and a full 16-card standard page. Query
+execution time is not yet measured, so the combined measurement box and the
+actual Home cutover remain unchecked; the audit passed, but the exclusive flag
+stays off until rollout gates pass.
 
 ### Phase 3: Shorts Tab and Paged Screen Shell
 
 Goal: ship a navigable, data-backed, non-playing vertical screen.
 
-- [ ] Add the Shorts native-tab trigger after Home.
-- [ ] Add `app/(tabs)/shorts.tsx`.
-- [ ] Add loading, empty, error, exhausted, and offline-safe states.
-- [ ] Implement viewport measurement that accounts for safe areas and the native
+- [x] Add the Shorts native-tab trigger after Home.
+- [x] Add `app/(tabs)/shorts.tsx`.
+- [x] Add loading, empty, error, exhausted, and offline-safe states.
+- [x] Implement viewport measurement that accounts for safe areas and the native
   tab bar.
-- [ ] Implement a recyclable FlashList with one viewport per item.
-- [ ] Configure paging, snap interval, alignment, deceleration, item layout, and
+- [x] Implement a recyclable FlashList with one viewport per item.
+- [x] Configure paging, snap interval, alignment, deceleration, item layout, and
   draw distance from the measured viewport.
-- [ ] Preserve the active asset across viewport-size and orientation changes.
-- [ ] Add paginated loading before the last item.
-- [ ] Ensure footers never become accidental snap pages.
-- [ ] Render thumbnail-first vertical cells with stable recycling keys.
-- [ ] Add development diagnostics for active index, page height, and item count.
+- [x] Preserve the active asset across viewport-size and orientation changes.
+- [x] Add paginated loading before the last item.
+- [x] Ensure footers never become accidental snap pages.
+- [x] Render thumbnail-first vertical cells with stable recycling keys.
+- [x] Add development diagnostics for active index, page height, and item count.
 
 Phase 3 exit gate:
 
@@ -593,24 +610,24 @@ Phase 3 exit gate:
 
 Goal: make one settled Shorts page play smoothly with bounded resources.
 
-- [ ] Extend telemetry screen types with `shorts`.
-- [ ] Parameterize the focus controller for vertical-page thresholds if
+- [x] Extend telemetry screen types with `shorts`.
+- [x] Parameterize the focus controller for vertical-page thresholds if
   measurements require different timings.
-- [ ] Reuse the existing candidate-versus-committed focus state machine.
-- [ ] Reuse the single Mux player controller with a Shorts-specific player name.
-- [ ] Attach the single player surface only to the committed cell.
-- [ ] Keep the thumbnail until first frame.
-- [ ] Use centered, full-viewport `cover` presentation.
-- [ ] Loop the committed video and start muted.
-- [ ] Add session-scoped mute/unmute state and a visible control.
-- [ ] Pause immediately on drag, tab blur, app background, policy denial, detail
+- [x] Reuse the existing candidate-versus-committed focus state machine.
+- [x] Reuse the single Mux player controller with a Shorts-specific player name.
+- [x] Attach the single player surface only to the committed cell.
+- [x] Keep the thumbnail until first frame.
+- [x] Use centered, full-viewport `cover` presentation.
+- [x] Loop the committed video and start muted.
+- [x] Add session-scoped mute/unmute state and a visible control.
+- [x] Pause immediately on drag, tab blur, app background, policy denial, detail
   navigation, or surface loss as appropriate.
-- [ ] Confirm source replacement happens only after scroll settle.
-- [ ] Reuse the bounded direction-aware preloader with current plus one likely
+- [x] Confirm source replacement happens only after scroll settle.
+- [x] Reuse the bounded direction-aware preloader with current plus one likely
   next item.
-- [ ] Cancel/suspend preload during a fast fling or direction change.
-- [ ] Hand preview position to video detail where useful.
-- [ ] Release the player on screen destruction.
+- [x] Cancel/suspend preload during a fast fling or direction change.
+- [x] Hand preview position to video detail where useful.
+- [x] Release the player on screen destruction.
 - [ ] Verify Home and Shorts cannot play simultaneously during rapid tab
   switching.
 
@@ -623,22 +640,36 @@ Phase 4 exit gate:
 - [ ] Preload and memory windows remain bounded.
 - [ ] Playback failure on one item does not block paging.
 
+**Phase 4 implementation note.** The installed Mux React Native SDK does not
+expose a real media-prefetch API. The bounded direction-aware policy still
+selects current plus likely-next and warms posters; it performs no hidden
+multi-player media preload. Device measurements must decide whether an SDK
+upgrade or native prefetch integration is warranted.
+
+The iPhone 16e simulator exposed the cross-tab allocation defect: retained
+native routes initially produced two live players. Player allocation is now tied
+to screen focus, and settled gauges after repeated Home ↔ Shorts switching read
+one live player, one attached surface, and one playing video with no current
+invariant violation. This smoke check did not capture retained peaks during each
+transition, so the rapid-switch and exit-gate boxes remain unchecked pending the
+physical scenario run.
+
 ### Phase 5: Overlay, Gestures, Detail Handoff, and Accessibility
 
 Goal: complete the v1 TikTok-style interaction layer without fake social state.
 
-- [ ] Add a safe-area-aware bottom gradient and metadata overlay.
-- [ ] Show avatar, channel name, title, and supported metadata.
-- [ ] Add single-tap pause/resume without conflicting with vertical paging.
-- [ ] Add mute/unmute and visible state feedback.
-- [ ] Add open-detail navigation with preview-position handoff.
-- [ ] Add a recoverable playback-error retry action.
-- [ ] Provide VoiceOver/TalkBack roles, labels, hints, and state values.
-- [ ] Meet touch-target and contrast requirements.
+- [x] Add a safe-area-aware bottom gradient and metadata overlay.
+- [x] Show avatar, channel name, title, and supported metadata.
+- [x] Add single-tap pause/resume without conflicting with vertical paging.
+- [x] Add mute/unmute and visible state feedback.
+- [x] Add open-detail navigation with preview-position handoff.
+- [x] Add a recoverable playback-error retry action.
+- [x] Provide VoiceOver/TalkBack roles, labels, hints, and state values.
+- [x] Meet touch-target and contrast requirements.
 - [ ] Validate long titles, long channel names, dynamic type, and translated text.
-- [ ] Respect reduced motion, low-data, and autoplay-disabled modes.
-- [ ] Add a clear Upload action to the empty state.
-- [ ] Confirm no local-only like count or nonfunctional action is displayed.
+- [x] Respect reduced motion, low-data, and autoplay-disabled modes.
+- [x] Add a clear Upload action to the empty state.
+- [x] Confirm no local-only like count or nonfunctional action is displayed.
 
 Phase 5 exit gate:
 
@@ -651,11 +682,11 @@ Phase 5 exit gate:
 
 Goal: prove the new feed is correct and does not regress Home.
 
-- [ ] Run unit tests for classification, feed contracts, focus, preload, and
+- [x] Run unit tests for classification, feed contracts, focus, preload, and
   adaptive policy.
-- [ ] Add integration coverage from Mux asset payload through cache placement and
+- [x] Add integration coverage from Mux asset payload through cache placement and
   paginated query.
-- [ ] Test asset-ready, asset-update, deletion, playback-ID, visibility, and
+- [x] Test asset-ready, asset-update, deletion, playback-ID, visibility, and
   backfill paths.
 - [ ] Test cold launch, warm launch, slow swipe, fast fling, reverse fling,
   pagination, tab switch, background/foreground, rotation, detail/back, offline,
@@ -672,22 +703,20 @@ Goal: prove the new feed is correct and does not regress Home.
 Phase 6 exit gate:
 
 - [ ] Every functional acceptance criterion in Section 12 passes.
-- [ ] Classification and exclusivity audits pass.
+- [x] Classification and exclusivity audits pass.
 - [ ] Performance metrics meet targets or have explicitly approved revisions.
 - [ ] Home behavior and performance do not materially regress.
 - [ ] No P0/P1 accessibility, lifecycle, pagination, or playback defects remain.
 
 **Phase 6 evidence.**
 
-- Verification battery, run 2026-07-30 on `39b2290` plus this branch —
+- Verification battery, run 2026-07-30 on `ja/laracon` —
   `npx tsc --noEmit` clean; `npm run lint` clean;
   `node scripts/vertical-video-feed-tests.mjs` 93/93;
   `node scripts/news-feed-tests.mjs` 52/52 (unchanged);
-  `node scripts/run-tests.mjs` 56/56 across 15 suites;
-  `tests/feed-contracts.test.ts` 22/22. Recorded in
-  `docs/vertical-video-feed-verification.md` section 4. No Shorts-specific Convex
-  contract test exists yet because `listVerticalFeedVideosPaginated` does not;
-  those arrive with Phase 2.
+  `node scripts/run-tests.mjs` 185/185; backend classification, data, backfill,
+  feed-contract, and runtime-wiring tests pass. Recorded in
+  `docs/vertical-video-feed-verification.md` section 4.
 - Scenario and checklist tooling, not results —
   `lib/vertical-video-feed-scenarios.ts` defines all 13 Phase 6 scenarios (cold
   launch, warm launch, slow swipe, fast fling, reverse fling, pagination, tab
@@ -698,7 +727,8 @@ Phase 6 exit gate:
   devices and emits a run sheet whose every result cell and checkbox is empty.
   Simulator and emulator cells are stamped `functional-only` so their numbers
   cannot be filed as physical-device results.
-- Audit arithmetic, not audit results — `lib/vertical-video-feed-audit.ts`
+- Audit implementation and live development result —
+  `lib/vertical-video-feed-audit.ts`
   implements the placement distribution, the zero-unknown coverage gate, the
   Home/Shorts exclusivity audit, and the backfill counter balance check. It has
   no runtime imports, so it is callable from a Convex query, and it takes an
@@ -707,23 +737,25 @@ Phase 6 exit gate:
   rejects a non-null unparseable `aspectRatio` as a section 7.1 contract
   violation, matches coverage exceptions by asset id rather than counting them,
   and fails both gates on duplicate ids. Every gate can return `unmeasured`, and
-  an unmeasured gate never reports as a pass.
+  an unmeasured gate never reports as a pass. The development deployment audit
+  scanned 123 cache rows / 72 playable assets and passed with 68 standard, 4
+  vertical, and zero playable unknowns, inconsistent classifications,
+  duplicate IDs, overlaps, or omissions.
 - Telemetry gap closed — `feed_playback_paused` and `feed_player_released` were
   already emitted by `lib/feed/feed-telemetry.ts` but were not in the recognized
   vocabulary, so `trackFeedEvent` discarded them before the sink. Both are now
   recognized, with a regression test that parses the runtime layer's own event
   union so the gap cannot reopen.
-- **Deliberately unchecked.** Every remaining Phase 6 box and all five exit gates
-  need a running Shorts screen, a classified Convex deployment, or a physical
-  device. None exists on this branch. `docs/vertical-video-feed-verification.md`
-  section 5 lists each one individually as `NOT RUN`, `NOT MEASURED`,
-  `NOT IMPLEMENTED`, or `NOT POSSIBLE`, with the reason.
+- **Deliberately unchecked.** Runtime scenario, device-performance, Mux Data,
+  Home-regression, accessibility, and physical-device gates remain open.
+  `docs/vertical-video-feed-verification.md` section 5 lists each with the
+  reason.
 
 ### Phase 7: Feature Flags, Rollout, and Operations
 
 Goal: release incrementally with a fast, safe rollback.
 
-- [ ] Add a remote `shortsTabEnabled` flag that hides the tab and prevents its
+- [x] Add a remote `shortsTabEnabled` flag that hides the tab and prevents its
   query/playback work when disabled.
 - [x] Add a separate `exclusiveFeedPlacementEnabled` flag for the Home cutover.
 - [x] Keep both flags default-off until migration and QA gates pass.
@@ -745,7 +777,7 @@ Phase 7 exit gate:
 - [ ] The final Home/Shorts exclusivity rule is active.
 - [ ] Unknown placement remains at zero or alerts are actionable.
 - [ ] Rollback has been rehearsed without data loss.
-- [ ] Temporary flags and migration code have owners and removal dates.
+- [x] Temporary flags and migration code have owners and removal dates.
 
 **Phase 7 evidence.**
 
@@ -765,10 +797,12 @@ Phase 7 exit gate:
   an operator's emergency off switch cannot be undone by a stale ramp value.
   `findFlagCombinationViolations` still names the illegal combination as defense
   in depth for hand-built resolutions.
-- **`shortsTabEnabled` stays unchecked on purpose.** The flag exists, resolves,
-  and is tested, but its box describes hiding a tab and preventing query and
-  playback work, and there is no tab, query, or player to gate yet. The registry
-  half is done; the consumption half lands with Phase 3.
+- Runtime consumption — `convex/feedRuntimeConfig.ts` exposes one reactive,
+  default-off singleton and an atomic internal mutation.
+  `FeedFeatureFlagsProvider` resolves one shared snapshot used to hide the native
+  tab, redirect direct routes before Shorts work mounts, and select Home's query.
+  Server, resolver, and client layers all reject the unsafe "exclusive without
+  Shorts" state.
 - Cohort order — `SHORTS_COHORT_STAGES` in `lib/vertical-video-feed-rollout.ts`:
   team (local override, 24 h) → internal beta (remote targeting, 72 h) → 5% →
   25% → 100% (168 h), each with a mechanism, a minimum observation window, and
@@ -803,10 +837,10 @@ Phase 7 exit gate:
   `shorts_query_received` with `query_outcome: "error"` rather than as a
   `feed_playback_error`, so a page that failed to load and a video that failed to
   decode stay separate incidents with separate rates and owners.
-- **Deliberately unchecked.** Cohort monitoring, migration-code removal, and all
-  five exit gates require a live rollout. Rollback is implemented and unit-tested
-  but has never been rehearsed against a deployment. The final exit gate also
-  covers migration code that does not exist yet.
+- **Deliberately unchecked.** Cohort monitoring, production dashboards,
+  production rollback rehearsal, final exclusivity cutover, and migration-code
+  removal require a live rollout. The development kill switch was exercised,
+  but that is not production evidence.
 
 ### Phase 8: Optional Post-v1 Engagement
 
@@ -865,4 +899,3 @@ The project is complete when:
 - physical iOS and Android verification is recorded;
 - rollout and rollback controls are operational; and
 - completed checklist items link to code, tests, metrics, or rollout evidence.
-

@@ -28,6 +28,11 @@ export type FeedPlaybackTarget = {
 };
 
 export type UseFeedPlaybackControllerOptions = {
+  /**
+   * Own a native player only while this screen is focused. Native tabs retain
+   * inactive routes, so lifecycle gating must cover allocation as well as play.
+   */
+  isPlayerEnabled?: boolean;
   /** The committed card, or null when nothing may play. */
   target: FeedPlaybackTarget | null;
   /** False pauses immediately while keeping the surface attached. */
@@ -60,7 +65,7 @@ export type UseFeedPlaybackControllerOptions = {
 };
 
 export type FeedPlaybackController = {
-  player: MuxVideoPlayer;
+  player: MuxVideoPlayer | null;
   /** muxAssetId whose card should render the single surface, or null. */
   activeMuxAssetId: string | null;
   /** True once the active source has produced its first frame. */
@@ -83,6 +88,7 @@ export type FeedPlaybackSurfaceCallbacks = {
 const FEED_PLAYER_NAME = "Robotube feed preview";
 
 export function useFeedPlaybackController({
+  isPlayerEnabled = true,
   target,
   isPlaybackAllowed,
   muted = true,
@@ -99,13 +105,9 @@ export function useFeedPlaybackController({
   onSourceErrorReportedRef.current = onSourceErrorReported;
   const onActiveSurfaceLostRef = useRef(onActiveSurfaceLost);
   onActiveSurfaceLostRef.current = onActiveSurfaceLost;
-  const playerRef = useRef<MuxVideoPlayer | null>(null);
-  if (playerRef.current === null) {
-    playerRef.current = createMuxVideoPlayer();
-  }
-  const player = playerRef.current;
-
-  const activeMuxAssetId = target?.muxAssetId ?? null;
+  const [ownedPlayer, setOwnedPlayer] = useState<MuxVideoPlayer | null>(null);
+  const player = isPlayerEnabled ? ownedPlayer : null;
+  const activeMuxAssetId = player ? (target?.muxAssetId ?? null) : null;
   const [firstFrameMuxAssetId, setFirstFrameMuxAssetId] = useState<string | null>(
     null,
   );
@@ -138,10 +140,18 @@ export function useFeedPlaybackController({
   /** Preview position per asset, so returning to a card resumes where it was. */
   const positionsRef = useRef(new Map<string, number>());
 
-  // Observe and release the single player with the feed screen lifecycle.
-  // Counter notifications belong in an effect: emitting them during render
-  // would synchronously update the development overlay while Home is rendering.
+  // Allocate only for the focused route. React runs passive-effect cleanups
+  // before setups, so a tab switch releases the old route's player before the
+  // newly focused route creates its own. Native tabs retain inactive screens;
+  // tying allocation only to component mount would leave one player per tab.
   useEffect(() => {
+    if (!isPlayerEnabled) {
+      setOwnedPlayer(null);
+      return;
+    }
+
+    const nextPlayer = createMuxVideoPlayer();
+    setOwnedPlayer(nextPlayer);
     bumpFeedCounter("livePlayers");
     trackFeedEvent("feed_player_created", { screen });
 
@@ -150,13 +160,14 @@ export function useFeedPlaybackController({
         isPlayingRef.current = false;
         bumpFeedCounter("playingVideos", -1);
       }
-      runMuxPlayerCommand(player.release());
+      runMuxPlayerCommand(nextPlayer.release());
       bumpFeedCounter("livePlayers", -1);
       trackFeedEvent("feed_player_released", { screen });
     };
-  }, [player, screen]);
+  }, [isPlayerEnabled, screen]);
 
   useEffect(() => {
+    if (!player) return;
     runMuxPlayerCommand(player.setMuted(muted));
     runMuxPlayerCommand(player.setLoop(true));
     runMuxPlayerCommand(player.setPlaybackRate(1));
@@ -164,6 +175,13 @@ export function useFeedPlaybackController({
 
   // Replace the active source only after focus is committed.
   useEffect(() => {
+    if (!player) {
+      updateFirstFrameMuxAssetId(null);
+      loadedMuxAssetIdRef.current = null;
+      loadedSourceKeyRef.current = null;
+      sourceReadyMuxAssetIdRef.current = null;
+      return;
+    }
     if (target === null) {
       updateFirstFrameMuxAssetId(null);
       loadedMuxAssetIdRef.current = null;
@@ -173,7 +191,7 @@ export function useFeedPlaybackController({
         isPlayingRef.current = false;
         bumpFeedCounter("playingVideos", -1);
       }
-      runMuxPlayerCommand(player.pause());
+      if (player) runMuxPlayerCommand(player.pause());
       return;
     }
     const sourceKey = `${target.muxAssetId}|${sourceAttempt}`;
@@ -276,6 +294,7 @@ export function useFeedPlaybackController({
 
   // Play/pause is driven purely by committed focus + lifecycle gating.
   useEffect(() => {
+    if (!player) return;
     if (target !== null && isPlaybackAllowed) {
       trackFeedEvent("feed_playback_requested", {
         screen,
@@ -317,7 +336,7 @@ export function useFeedPlaybackController({
       // already set, so this only fires when the committed row was recycled or
       // unmounted out from under the player. Stop and fall back to thumbnails.
       if (targetMuxAssetIdRef.current !== muxAssetId) return;
-      runMuxPlayerCommand(player.pause());
+      if (player) runMuxPlayerCommand(player.pause());
       updateFirstFrameMuxAssetId(null);
       onActiveSurfaceLostRef.current?.(muxAssetId);
     },
@@ -343,7 +362,7 @@ export function useFeedPlaybackController({
         targetMuxAssetIdRef.current === muxAssetId &&
         isPlaybackAllowedRef.current
       ) {
-        runMuxPlayerCommand(player.play());
+        if (player) runMuxPlayerCommand(player.play());
       }
     },
     [player, screen],

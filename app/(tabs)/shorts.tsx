@@ -1,7 +1,7 @@
 import { useIsFocused } from "@react-navigation/native";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { usePaginatedQuery } from "convex/react";
-import { useRouter } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 import { setStatusBarStyle } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -25,6 +25,7 @@ import {
 import { ShortsVerticalVideoCell } from "@/components/shorts-vertical-video-cell";
 import { api } from "@/convex/_generated/api";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useFeedFeatureFlags } from "@/hooks/use-feed-feature-flags";
 import { useShortsScreenPlayback } from "@/hooks/use-shorts-screen-playback";
 import { trackFeedEvent } from "@/lib/feed/feed-telemetry";
 import {
@@ -54,13 +55,17 @@ const keyExtractor = (item: FeedVideoItem) => item.muxAssetId;
  * it: this component owns only the viewport measurement, the black surface, and
  * the error boundary, while `ShortsFeed` owns the query, the list, and playback.
  *
- * Feature gating is intentionally not implemented here — the rollout lane owns
- * the flags. An integrator can gate this at exactly two places: the
- * `NativeTabs.Trigger` in `app/(tabs)/_layout.tsx` (hides the tab), and an early
- * return in front of `<ShortsFeed />` below (prevents the query and all playback
- * work). Nothing in this file starts work before that point.
+ * The outer route is deliberately separate from this enabled screen. That
+ * keeps every query, player, preloader, and viewport hook unmounted while the
+ * remote kill switch is off, including for a direct/deep link.
  */
 export default function ShortsScreen() {
+  const { shortsTabEnabled } = useFeedFeatureFlags();
+  if (!shortsTabEnabled) return <Redirect href="/" />;
+  return <EnabledShortsScreen />;
+}
+
+function EnabledShortsScreen() {
   const insets = useSafeAreaInsets();
   const isScreenFocused = useIsFocused();
   const colorScheme = useColorScheme();
@@ -103,6 +108,25 @@ export default function ShortsScreen() {
     setQueryAttempt((value) => value + 1);
   }, []);
 
+  const handleQueryError = useCallback(
+    (message: string) => {
+      trackFeedEvent("shorts_query_received", {
+        screen: "shorts",
+        errorCode: message,
+        queryOutcome: "error",
+        itemCount: 0,
+        pageHeightDp: pageHeight,
+      });
+      trackFeedEvent("shorts_empty_state_viewed", {
+        screen: "shorts",
+        emptyReason: "query_error",
+        itemCount: 0,
+        pageHeightDp: pageHeight,
+      });
+    },
+    [pageHeight],
+  );
+
   // Once per visit, not once per mount: native tabs keep this screen mounted, so
   // a mount-only event would count the first visit and nothing after it.
   useEffect(() => {
@@ -131,7 +155,7 @@ export default function ShortsScreen() {
     <View style={styles.root} onLayout={handleLayout}>
       <ShortsQueryErrorBoundary
         resetKey={queryAttempt}
-        onError={handleQueryBoundaryError}
+        onError={handleQueryError}
         fallback={
           <ShortsErrorState insets={overlayInsets} onRetry={handleRetryQuery} />
         }
@@ -147,19 +171,6 @@ export default function ShortsScreen() {
       <FeedPerformanceDebugOverlay />
     </View>
   );
-}
-
-/**
- * A failed query is still a query outcome, so it is reported on the same event
- * with an error code rather than being silently swallowed — that is what makes
- * the Shorts query-error rate measurable during rollout. `trackFeedEvent`
- * normalizes the code, so the raw thrown message never reaches a sink.
- */
-function handleQueryBoundaryError(message: string) {
-  trackFeedEvent("shorts_query_received", {
-    screen: "shorts",
-    errorCode: message,
-  });
 }
 
 type ShortsFeedProps = {
@@ -182,12 +193,12 @@ function ShortsFeed({
   const queryStartedAtMsRef = useRef(Date.now());
   const didRecordQueryRef = useRef(false);
   const didRecordEmptyRef = useRef(false);
+  const lastImpressionKeyRef = useRef<string | null>(null);
 
   /**
-   * `listVerticalFeedVideosPaginated` is Phase 2 work owned outside this branch.
-   * The repository's any-cast convention for feed queries keeps this compiling
-   * against the current generated api, and the surrounding error boundary keeps
-   * the tab usable until the query lands.
+   * The generated API is cast at this call site to match the repository's feed
+   * query convention while preserving the shared FeedVideoItem view contract.
+   * The surrounding boundary keeps a transient query failure recoverable.
    */
   const {
     results: shorts,
@@ -245,24 +256,48 @@ function ShortsFeed({
     trackFeedEvent("shorts_query_received", {
       screen: "shorts",
       elapsedMs: Date.now() - queryStartedAtMsRef.current,
+      queryOutcome: "success",
+      itemCount,
+      pageHeightDp: pageHeight,
     });
-  }, [status]);
+  }, [itemCount, pageHeight, status]);
 
   useEffect(() => {
     if (didRecordEmptyRef.current || listState !== "empty") return;
     didRecordEmptyRef.current = true;
-    trackFeedEvent("shorts_empty_state_viewed", { screen: "shorts" });
-  }, [listState]);
+    trackFeedEvent("shorts_empty_state_viewed", {
+      screen: "shorts",
+      emptyReason: "no_vertical_assets",
+      itemCount,
+      pageHeightDp: pageHeight,
+    });
+  }, [itemCount, listState, pageHeight]);
 
   // One impression per committed page.
   useEffect(() => {
-    if (committedMuxAssetId === null) return;
+    if (committedMuxAssetId === null) {
+      lastImpressionKeyRef.current = null;
+      return;
+    }
+    const impressionKey = `${committedIndex ?? "none"}:${committedMuxAssetId}`;
+    if (lastImpressionKeyRef.current === impressionKey) return;
+    lastImpressionKeyRef.current = impressionKey;
     trackFeedEvent("shorts_page_impression", {
       screen: "shorts",
       muxAssetId: committedMuxAssetId,
       feedIndex: committedIndex ?? undefined,
+      feedPlacement: "vertical",
+      itemCount,
+      isMuted,
+      pageHeightDp: pageHeight,
     });
-  }, [committedIndex, committedMuxAssetId]);
+  }, [
+    committedIndex,
+    committedMuxAssetId,
+    isMuted,
+    itemCount,
+    pageHeight,
+  ]);
 
   // Pagination starts a few pages before the end and never blocks paging: it
   // requests the next page and nothing in the render path waits on it.
