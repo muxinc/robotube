@@ -5,6 +5,7 @@ import { v } from "convex/values";
 import { components, internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
 import type { EmbeddingChunk } from "./videoEmbeddings";
+import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 const EMBEDDING_DIMENSIONS = 1536;
 const MAX_EMBEDDING_ATTEMPTS = 8;
@@ -129,7 +130,7 @@ export const generateAssetEmbeddingsInternal = internalAction({
       const latestMetadata = getMetadataRecord(latestVideo?.metadata);
       const latestCustom = getCustomRecord(latestMetadata);
 
-      await ctx.runMutation(components.mux.videos.upsertVideoMetadata, {
+      await upsertVideoMetadataAndSyncFeedReadModel(ctx, {
         muxAssetId: args.muxAssetId,
         userId: args.userId,
         title: asString(latestMetadata.title) ?? asString(metadata.title),
@@ -174,7 +175,7 @@ export const generateAssetEmbeddingsInternal = internalAction({
       const latestMetadata = getMetadataRecord(latestVideo?.metadata);
       const latestCustom = getCustomRecord(latestMetadata);
 
-      await ctx.runMutation(components.mux.videos.upsertVideoMetadata, {
+      await upsertVideoMetadataAndSyncFeedReadModel(ctx, {
         muxAssetId: args.muxAssetId,
         userId: args.userId,
         title: asString(latestMetadata.title) ?? asString(metadata.title),

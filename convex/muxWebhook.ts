@@ -7,6 +7,7 @@ import { v } from "convex/values";
 
 import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-translation-languages";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 const AUDIO_TRANSLATION_READY_DELAY_MS = 5 * 1000;
 
@@ -390,8 +391,8 @@ export const ingestMuxWebhook = internalAction({
         });
         const existingMetadata = asRecord((existingVideo as any)?.metadata) ?? {};
         const existingCustom = asRecord(existingMetadata.custom) ?? {};
-        await ctx.runMutation(
-          components.mux.videos.upsertVideoMetadata,
+        await upsertVideoMetadataAndSyncFeedReadModel(
+          ctx,
           buildMetadataArgs({
             muxAssetId: objectId,
             userId,

@@ -30,6 +30,7 @@ import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-trans
 import { components, internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 const START_RUN_PATH = "/api/robotube/robot-runs";
 const TRANSLATIONS_PATH = "/api/robotube/translations";
@@ -199,7 +200,7 @@ async function storeLaravelRunOnVideo(
   const visibility = asVisibility(metadata.visibility);
   if (visibility !== undefined) payload.visibility = visibility;
 
-  await ctx.runMutation(components.mux.videos.upsertVideoMetadata, payload);
+  await upsertVideoMetadataAndSyncFeedReadModel(ctx, payload);
 }
 
 export const startLaravelRobotRun = internalAction({

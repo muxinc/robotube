@@ -6,6 +6,7 @@ import { v } from "convex/values";
 import { components, internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 const MAX_ATTEMPTS = 10;
 const AI_METADATA_READY_DELAY_MS = 5 * 1000;
@@ -365,8 +366,8 @@ async function updateAiMetadataTrackingFields(
   const latestMetadata = getMetadataRecord(latestVideo?.metadata);
   const latestCustom = asCustomRecord(latestMetadata.custom);
 
-  await ctx.runMutation(
-    components.mux.videos.upsertVideoMetadata,
+  await upsertVideoMetadataAndSyncFeedReadModel(
+    ctx,
     buildMetadataArgs({
       muxAssetId: args.muxAssetId,
       userId: args.userId,
@@ -399,8 +400,8 @@ async function upsertAiMetadataFields(
   const latestMetadata = getMetadataRecord(latestVideo?.metadata);
   const latestCustom = asCustomRecord(latestMetadata.custom);
 
-  await ctx.runMutation(
-    components.mux.videos.upsertVideoMetadata,
+  await upsertVideoMetadataAndSyncFeedReadModel(
+    ctx,
     buildMetadataArgs({
       muxAssetId: args.muxAssetId,
       userId: args.userId,
@@ -1011,8 +1012,8 @@ async function ensureAiMetadataForAssetImpl(
     asString(args.defaultUserId) ??
     "default";
 
-  await ctx.runMutation(
-    components.mux.videos.upsertVideoMetadata,
+  await upsertVideoMetadataAndSyncFeedReadModel(
+    ctx,
     buildMetadataArgs({
       muxAssetId: args.muxAssetId,
       userId,
@@ -1082,8 +1083,8 @@ async function ensureAiMetadataForAssetImpl(
     !refreshedCustom.aiMetadataRetryScheduled;
 
   if (shouldScheduleCaptions || shouldScheduleAiMetadata) {
-    await ctx.runMutation(
-      components.mux.videos.upsertVideoMetadata,
+    await upsertVideoMetadataAndSyncFeedReadModel(
+      ctx,
       buildMetadataArgs({
         muxAssetId: args.muxAssetId,
         userId,

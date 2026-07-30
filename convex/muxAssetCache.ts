@@ -23,10 +23,23 @@ export type CachedMuxAsset = {
   deletedAtMs?: number;
   passthrough?: string;
   playbackIds: CachedPlaybackId[];
+  // Feed read model, maintained by ./feedReadModel.ts. Never written by the
+  // asset-sync path below, so an asset upsert cannot clobber it.
+  feedTitle?: string;
+  feedChannelName?: string;
+  feedUploaderUserId?: string;
+  feedReadModelUpdatedAtMs?: number;
   updatedAtMs: number;
 };
 
-type CachedMuxAssetComparable = Omit<CachedMuxAsset, "updatedAtMs">;
+type CachedMuxAssetComparable = Omit<
+  CachedMuxAsset,
+  | "updatedAtMs"
+  | "feedTitle"
+  | "feedChannelName"
+  | "feedUploaderUserId"
+  | "feedReadModelUpdatedAtMs"
+>;
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;

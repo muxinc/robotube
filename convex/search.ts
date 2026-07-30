@@ -2,8 +2,13 @@
 
 import { v } from "convex/values";
 
-import { api, internal } from "./_generated/api";
+import { internal } from "./_generated/api";
 import { action } from "./_generated/server";
+import {
+  type FeedSearchIndexItem,
+  type FeedVideoCardItem,
+  projectToFeedVideoCardItem,
+} from "./feedContracts";
 
 const SEARCH_SCAN_MULTIPLIER = 4;
 const SEARCH_MIN_SCAN_LIMIT = 48;
@@ -71,7 +76,11 @@ async function getQueryEmbedding(searchText: string): Promise<number[]> {
   return values;
 }
 
-function scoreLexicalMatch(item: any, normalizedQuery: string, tokens: string[]) {
+function scoreLexicalMatch(
+  item: FeedSearchIndexItem,
+  normalizedQuery: string,
+  tokens: string[],
+) {
   const title = String(item.title ?? "").toLowerCase();
   const summary = String(item.summary ?? "").toLowerCase();
   const tags = Array.isArray(item.tags)
@@ -102,16 +111,17 @@ export const searchVideos = action({
     queryText: v.string(),
     limit: v.optional(v.number()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<FeedVideoCardItem[]> => {
     const normalizedQuery = normalizeSearchText(args.queryText);
     if (normalizedQuery.length < 2) return [];
     const queryTokens = tokenizeSearchText(normalizedQuery);
 
     const limit = Math.max(1, Math.min(20, Math.floor(args.limit ?? 12)));
     const scanLimit = getSearchScanLimit(limit);
-    const feedVideos = (await ctx.runQuery(api.feed.listFeedVideos, {
-      limit: scanLimit,
-    })) as any[];
+    const feedVideos = await ctx.runQuery(
+      internal.feed.listFeedSearchIndexInternal,
+      { limit: scanLimit },
+    );
 
     const byAssetId = new Map(feedVideos.map((video) => [video.muxAssetId, video]));
 
@@ -179,7 +189,10 @@ export const searchVideos = action({
     return Array.from(mergedScores.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, limit)
-      .map(([muxAssetId]) => byAssetId.get(muxAssetId))
-      .filter(Boolean);
+      .flatMap(([muxAssetId]) => {
+        const video = byAssetId.get(muxAssetId);
+        // Summary/tags are ranking inputs only; the response is card data.
+        return video ? [projectToFeedVideoCardItem(video)] : [];
+      });
   },
 });

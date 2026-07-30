@@ -10,6 +10,7 @@ import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-trans
 import { components, internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 function requiredEnv(name: string, value: string | undefined): string {
   if (!value) throw new Error(`Missing env var: ${name}`);
@@ -263,7 +264,7 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
         metadataArgs.custom = mergedCustom;
       }
 
-      await ctx.runMutation(components.mux.videos.upsertVideoMetadata, metadataArgs);
+      await upsertVideoMetadataAndSyncFeedReadModel(ctx, metadataArgs);
 
       if (asString(asset.status) !== "ready") {
         const nextAttempt = attempt + 1;

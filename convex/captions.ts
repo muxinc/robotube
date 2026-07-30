@@ -6,6 +6,7 @@ import { v } from "convex/values";
 import { components, internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 const MAX_ATTEMPTS = 10;
 const GENERATED_CAPTIONS_PASSTHROUGH = "robotube:auto-generated";
@@ -250,7 +251,7 @@ async function upsertCaptionMetadataFields(
     ...customFields,
   };
 
-  await ctx.runMutation(components.mux.videos.upsertVideoMetadata, {
+  await upsertVideoMetadataAndSyncFeedReadModel(ctx, {
     muxAssetId: args.muxAssetId,
     userId: args.userId,
     title: asString(latestMetadata.title),

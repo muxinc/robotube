@@ -6,6 +6,7 @@ import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-trans
 import { components, internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 const MAX_ATTEMPTS = 8;
 const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v0";
@@ -283,8 +284,8 @@ async function updateModerationTrackingFields(
   const latestMetadata = getMetadataRecord(latestVideo?.metadata);
   const latestCustom = asCustomRecord(latestMetadata.custom);
 
-  await ctx.runMutation(
-    components.mux.videos.upsertVideoMetadata,
+  await upsertVideoMetadataAndSyncFeedReadModel(
+    ctx,
     buildMetadataArgs({
       muxAssetId: args.muxAssetId,
       userId: args.userId,
@@ -405,8 +406,8 @@ async function applyModerationJobUpdate(
   }
 
   if (job.status === "pending" || job.status === "processing") {
-    await ctx.runMutation(
-      components.mux.videos.upsertVideoMetadata,
+    await upsertVideoMetadataAndSyncFeedReadModel(
+      ctx,
       buildMetadataArgs({
         muxAssetId: args.muxAssetId,
         userId: args.userId,
@@ -437,8 +438,8 @@ async function applyModerationJobUpdate(
     const exceedsThreshold = job.outputs?.exceeds_threshold === true;
     const moderationPassed = !exceedsThreshold;
 
-    await ctx.runMutation(
-      components.mux.videos.upsertVideoMetadata,
+    await upsertVideoMetadataAndSyncFeedReadModel(
+      ctx,
       buildMetadataArgs({
         muxAssetId: args.muxAssetId,
         userId: args.userId,
@@ -500,8 +501,8 @@ async function applyModerationJobUpdate(
     );
   }
 
-  await ctx.runMutation(
-    components.mux.videos.upsertVideoMetadata,
+  await upsertVideoMetadataAndSyncFeedReadModel(
+    ctx,
     buildMetadataArgs({
       muxAssetId: args.muxAssetId,
       userId: args.userId,
@@ -672,8 +673,8 @@ export const moderateAssetInternal = internalAction({
           );
         }
 
-        await ctx.runMutation(
-          components.mux.videos.upsertVideoMetadata,
+        await upsertVideoMetadataAndSyncFeedReadModel(
+          ctx,
           buildMetadataArgs({
             muxAssetId: args.muxAssetId,
             userId: args.userId,
@@ -806,8 +807,8 @@ export const pollModerationJobStatusInternal = internalAction({
         );
       }
 
-      await ctx.runMutation(
-        components.mux.videos.upsertVideoMetadata,
+      await upsertVideoMetadataAndSyncFeedReadModel(
+        ctx,
         buildMetadataArgs({
           muxAssetId: args.muxAssetId,
           userId: args.userId,

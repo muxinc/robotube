@@ -42,6 +42,7 @@ import { v } from "convex/values";
 import { components, internal } from "./_generated/api";
 import { httpAction, internalMutation } from "./_generated/server";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 const TERMINAL_STATUSES = new Set(["ready", "rejected", "failed"]);
 
@@ -474,7 +475,7 @@ export const syncRobotRunInternal = internalMutation({
       return { ok: true, matched: true, skipped: true, reason: "no_op" as const };
     }
 
-    await ctx.runMutation(components.mux.videos.upsertVideoMetadata, payload);
+    await upsertVideoMetadataAndSyncFeedReadModel(ctx, payload);
 
     // Unblock Convex-owned STT caption generation once moderation has passed.
     // With the flag on, moderationPassed only arrives via this sync — after the

@@ -7,6 +7,7 @@ import { v } from "convex/values";
 
 import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-translation-languages";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 function requiredEnv(name: string, value: string | undefined): string {
   if (!value) throw new Error(`Missing env var: ${name}`);
@@ -117,7 +118,7 @@ export const backfillMux = action({
       const metadata = parseMetadataPassthrough(asset.passthrough);
       const userId = metadata.userId ?? asString(args.defaultUserId) ?? "default";
 
-      await ctx.runMutation(components.mux.videos.upsertVideoMetadata, {
+      await upsertVideoMetadataAndSyncFeedReadModel(ctx, {
         muxAssetId: asset.id,
         userId,
         title: metadata.title,
