@@ -30,7 +30,14 @@ import {
   deriveChannelNameFromUser,
   selectFeedPlaybackId,
   sortFeedCardsByNewestFirst,
+  FEED_PLACEMENT_INDEX_NAME,
+  FEED_PLACEMENT_MAX_PAGE_SIZE,
+  STANDARD_FEED_PLACEMENT,
+  VERTICAL_FEED_PLACEMENT,
+  applyPlacementIndexRange,
+  clampFeedPageSize,
 } from "./feedContracts";
+import type { FeedPlacement } from "./aspectClassification";
 
 export type { FeedVideoCardItem, FeedSearchIndexItem } from "./feedContracts";
 
@@ -78,7 +85,7 @@ type FeedDetailBuildResult =
     };
 
 const FEED_SCAN_MULTIPLIER = 3;
-const FEED_PAGINATION_MAX_PAGE_SIZE = 24;
+const FEED_PAGINATION_MAX_PAGE_SIZE = FEED_PLACEMENT_MAX_PAGE_SIZE;
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
@@ -412,6 +419,88 @@ export const listFeedVideosPaginated = query({
     );
 
     return buildFeedVideoCardPageResult(paginatedAssets, channels);
+  },
+});
+
+/* ------------------------------------------------------------------ *
+ * Placement-scoped card feeds
+ * ------------------------------------------------------------------ */
+
+/**
+ * One page of cards for a single feed placement.
+ *
+ * Selection happens entirely inside `by_feed_placement_ready_deleted_created`,
+ * before Convex applies the cursor, so pages are stable newest-first with no
+ * duplicated, skipped, or re-sorted cards. Like the Home hot path it reads only
+ * the denormalized read model: no per-video Mux component query, and each
+ * uploader/avatar is resolved at most once per page.
+ */
+async function paginatePlacementFeedCards(
+  ctx: any,
+  placement: FeedPlacement,
+  paginationOpts: { numItems: number; cursor: string | null },
+) {
+  const paginatedAssets: {
+    page: CachedMuxAsset[];
+    isDone: boolean;
+    continueCursor: string;
+  } = await (ctx.db as any)
+    .query("muxAssetCache")
+    .withIndex(FEED_PLACEMENT_INDEX_NAME, (q: any) =>
+      applyPlacementIndexRange(q, placement),
+    )
+    .order("desc")
+    .paginate({
+      ...paginationOpts,
+      numItems: clampFeedPageSize(paginationOpts.numItems),
+    });
+
+  const channels = await resolveFeedChannels(
+    ctx,
+    collectDistinctUploaderUserIds(paginatedAssets.page),
+  );
+
+  return buildFeedVideoCardPageResult(paginatedAssets, channels);
+}
+
+/**
+ * The vertical (Shorts) feed: exact normalized `9:16` only.
+ *
+ * Returns the same lightweight `FeedVideoCardItem` contract as Home. Aspect
+ * ratio and placement are server-side selection inputs and are deliberately not
+ * serialized to the client.
+ *
+ * Rollback: disabling the Shorts tab stops all calls to this query. The schema
+ * fields and the placement index can stay in place; nothing else reads them.
+ */
+export const listVerticalFeedVideosPaginated = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
+    return await paginatePlacementFeedCards(
+      ctx,
+      VERTICAL_FEED_PLACEMENT,
+      args.paginationOpts,
+    );
+  },
+});
+
+/**
+ * The placement-filtered Home feed, for the exclusive-routing cutover.
+ *
+ * It is deployed but not yet wired to Home: `listFeedVideosPaginated` above
+ * still serves Home, so legacy `unknown` and unclassified rows stay visible
+ * while the backfill runs. Home moves to this query only after
+ * `feedPlacement.auditFeedPlacementCoverage` reports
+ * `coverageGatePassed: true`, behind the exclusive-placement flag.
+ */
+export const listStandardFeedVideosPaginated = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
+    return await paginatePlacementFeedCards(
+      ctx,
+      STANDARD_FEED_PLACEMENT,
+      args.paginationOpts,
+    );
   },
 });
 

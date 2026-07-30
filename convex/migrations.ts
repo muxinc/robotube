@@ -7,6 +7,10 @@ import { v } from "convex/values";
 
 import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-translation-languages";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import {
+  resolveBackfillPageOutcome,
+  resolveBackfillPagePlan,
+} from "./backfillPaging";
 import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 function requiredEnv(name: string, value: string | undefined): string {
@@ -134,9 +138,31 @@ export const backfillMux = action({
   },
 });
 
+/**
+ * Re-syncs cached asset rows straight from the Mux API, which also populates the
+ * aspect classification for legacy rows: `upsertFromPayloadInternal` reads
+ * `aspect_ratio` off every payload it is given.
+ *
+ * Bounded by `maxAssets`, resumable through Mux's page numbers (pass the
+ * returned `nextPage` back in as `startPage`), idempotent because an unchanged
+ * row is detected and not written, and safe to rerun. One failing asset is
+ * counted and skipped rather than aborting the run.
+ *
+ * The request limit is lowered to the run's asset budget (see
+ * `./backfillPaging.ts`), so every page a run touches is consumed whole. A resumed
+ * run therefore never re-reads a finished page and never stalls on one, including
+ * when `maxAssets` is smaller than `pageSize`.
+ *
+ * `feedPlacement.backfillAspectClassification` is the cheaper classification
+ * backfill: it reads ratios from the Mux component tables instead of the Mux API
+ * and resumes on an exact Convex cursor. Use this action when the cached rows
+ * themselves need to be refreshed from Mux.
+ */
 export const backfillMuxAssetCache = action({
   args: {
     maxAssets: v.optional(v.number()),
+    pageSize: v.optional(v.number()),
+    startPage: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const mux = new Mux({
@@ -144,22 +170,90 @@ export const backfillMuxAssetCache = action({
       tokenSecret: requiredEnv("MUX_TOKEN_SECRET", process.env.MUX_TOKEN_SECRET),
     });
 
-    const maxAssets = Math.max(1, Math.floor(args.maxAssets ?? 500));
+    const plan = resolveBackfillPagePlan({
+      maxAssets: args.maxAssets ?? 500,
+      pageSize: args.pageSize,
+      startPage: args.startPage,
+    });
 
     let scanned = 0;
     let cached = 0;
+    let classified = 0;
+    let unchanged = 0;
+    let failed = 0;
+    let vertical = 0;
+    let standard = 0;
+    let unknown = 0;
 
-    for await (const asset of mux.video.assets.list({ limit: 100 })) {
-      if (scanned >= maxAssets) break;
-      scanned += 1;
+    let page = await mux.video.assets.list({
+      limit: plan.limit,
+      page: plan.startPage,
+    });
+    let pagesProcessed = 0;
+    let nextPage: number | null = null;
+    let isDone = false;
 
-      await ctx.runMutation((internal as any).muxAssetCache.upsertFromPayloadInternal, {
-        asset,
+    while (true) {
+      for (const asset of page.data) {
+        scanned += 1;
+
+        try {
+          const result = (await ctx.runMutation(
+            (internal as any).muxAssetCache.upsertFromPayloadInternal,
+            { asset },
+          )) as {
+            ok: boolean;
+            unchanged?: boolean;
+            classificationChanged?: boolean;
+            feedPlacement?: "standard" | "vertical" | "unknown";
+          };
+
+          if (!result?.ok) {
+            failed += 1;
+            continue;
+          }
+
+          cached += 1;
+          if (result.unchanged === true) unchanged += 1;
+          if (result.classificationChanged === true) classified += 1;
+          if (result.feedPlacement === "vertical") vertical += 1;
+          else if (result.feedPlacement === "standard") standard += 1;
+          else unknown += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+
+      pagesProcessed += 1;
+
+      const outcome = resolveBackfillPageOutcome({
+        startPage: plan.startPage,
+        pagesProcessed,
+        maxPages: plan.maxPages,
+        hasNextPage: page.hasNextPage(),
       });
-      cached += 1;
+      isDone = outcome.isDone;
+      nextPage = outcome.nextPage;
+
+      if (!outcome.shouldContinue) break;
+      page = await page.getNextPage();
     }
 
-    return { scanned, cached };
+    return {
+      scanned,
+      cached,
+      classified,
+      unchanged,
+      failed,
+      vertical,
+      standard,
+      unknown,
+      startPage: plan.startPage,
+      pageSize: plan.limit,
+      pagesProcessed,
+      nextPage,
+      isDone,
+    };
   },
 });
 

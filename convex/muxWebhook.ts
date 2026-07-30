@@ -379,6 +379,9 @@ export const ingestMuxWebhook = internalAction({
         await ctx.runMutation(components.mux.sync.upsertAssetFromPayloadPublic, {
           asset: data,
         });
+        // Covers every non-deleted video.asset.* event, so `video.asset.ready`
+        // and later asset updates both refresh the aspect classification from
+        // the payload's `aspect_ratio`.
         await ctx.runMutation((internal as any).muxAssetCache.upsertFromPayloadInternal, {
           asset: data,
         });

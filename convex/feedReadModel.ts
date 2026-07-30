@@ -19,10 +19,18 @@ import {
   type MutationCtx,
 } from "./_generated/server";
 import {
+  type FeedVisibility,
+  asFeedVisibility,
   asNonEmptyString,
   pickPrimaryMetadata,
   readChannelNameOverride,
 } from "./feedContracts";
+
+const VISIBILITY_VALIDATOR = v.union(
+  v.literal("public"),
+  v.literal("unlisted"),
+  v.literal("private"),
+);
 
 const BACKFILL_DEFAULT_BATCH_SIZE = 50;
 const BACKFILL_MAX_BATCH_SIZE = 200;
@@ -32,6 +40,7 @@ type FeedReadModelPatch = {
   feedTitle?: string;
   feedChannelName?: string;
   feedUploaderUserId?: string;
+  feedVisibility?: FeedVisibility;
   feedReadModelUpdatedAtMs: number;
 };
 
@@ -49,6 +58,7 @@ async function patchFeedReadModel(
     title?: string;
     uploaderUserId?: string;
     channelName?: string;
+    visibility?: FeedVisibility;
     applyChannelName: boolean;
   },
 ): Promise<"patched" | "unchanged" | "missing_asset"> {
@@ -84,6 +94,16 @@ async function patchFeedReadModel(
     changed = true;
   }
 
+  // Visibility follows the same rule as the title: a metadata write that does not
+  // carry a visibility must not clobber the denormalized one.
+  if (
+    args.visibility !== undefined &&
+    existing.feedVisibility !== args.visibility
+  ) {
+    patch.feedVisibility = args.visibility;
+    changed = true;
+  }
+
   if (!changed && existing.feedReadModelUpdatedAtMs !== undefined) {
     return "unchanged";
   }
@@ -103,6 +123,7 @@ export const applyVideoMetadataInternal = internalMutation({
     uploaderUserId: v.optional(v.string()),
     title: v.optional(v.string()),
     channelName: v.optional(v.string()),
+    visibility: v.optional(VISIBILITY_VALIDATOR),
     applyChannelName: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
@@ -111,6 +132,7 @@ export const applyVideoMetadataInternal = internalMutation({
       title: args.title,
       uploaderUserId: args.uploaderUserId,
       channelName: args.channelName,
+      visibility: args.visibility,
       applyChannelName: args.applyChannelName === true,
     });
 
@@ -138,7 +160,8 @@ export const listBackfillCandidatesInternal = internalQuery({
         (row) =>
           args.force === true ||
           row.feedTitle === undefined ||
-          row.feedUploaderUserId === undefined,
+          row.feedUploaderUserId === undefined ||
+          row.feedVisibility === undefined,
       )
       .map((row) => ({ muxAssetId: row.muxAssetId as string }));
 
@@ -159,6 +182,7 @@ export const applyBackfillEntriesInternal = internalMutation({
         title: v.optional(v.string()),
         uploaderUserId: v.optional(v.string()),
         channelName: v.optional(v.string()),
+        visibility: v.optional(VISIBILITY_VALIDATOR),
       }),
     ),
   },
@@ -173,6 +197,7 @@ export const applyBackfillEntriesInternal = internalMutation({
         title: entry.title,
         uploaderUserId: entry.uploaderUserId,
         channelName: entry.channelName,
+        visibility: entry.visibility,
         applyChannelName: true,
       });
 
@@ -249,6 +274,7 @@ export const backfillFeedReadModel = internalAction({
         title?: string;
         uploaderUserId?: string;
         channelName?: string;
+        visibility?: FeedVisibility;
       }[] = [];
 
       for (const candidate of page.candidates) {
@@ -264,6 +290,7 @@ export const backfillFeedReadModel = internalAction({
           title: asNonEmptyString(metadata.title) ?? undefined,
           uploaderUserId: asNonEmptyString(metadata.userId) ?? undefined,
           channelName: readChannelNameOverride(metadata.custom),
+          visibility: asFeedVisibility(metadata.visibility),
         });
       }
 

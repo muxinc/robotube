@@ -114,11 +114,35 @@ export default defineSchema({
     feedTitle: v.optional(v.string()),
     feedChannelName: v.optional(v.string()),
     feedUploaderUserId: v.optional(v.string()),
+    // Metadata visibility, denormalized so the card path can withhold private
+    // videos without a per-video Mux metadata read. Absent means "never written",
+    // which is treated as permitted.
+    feedVisibility: v.optional(
+      v.union(v.literal("public"), v.literal("unlisted"), v.literal("private")),
+    ),
     feedReadModelUpdatedAtMs: v.optional(v.number()),
+    // Normalized display aspect ratio from the processed Mux asset, plus the
+    // denormalized feed placement it selects. Optional so legacy rows stay
+    // readable before the classification backfill runs; an unclassified row is
+    // in neither indexed feed and remains visible on the legacy Home path.
+    aspectRatio: v.optional(v.string()),
+    feedPlacement: v.optional(
+      v.union(v.literal("standard"), v.literal("vertical"), v.literal("unknown")),
+    ),
+    aspectRatioUpdatedAtMs: v.optional(v.number()),
     updatedAtMs: v.number(),
   })
     .index("by_mux_asset", ["muxAssetId"])
-    .index("by_ready_deleted_created", ["isReady", "isDeleted", "createdAtMs"]),
+    .index("by_ready_deleted_created", ["isReady", "isDeleted", "createdAtMs"])
+    // Placement must lead the index: Convex applies a cursor after the index
+    // range, so a placement-scoped feed has to filter through the index rather
+    // than filter a mixed page afterwards.
+    .index("by_feed_placement_ready_deleted_created", [
+      "feedPlacement",
+      "isReady",
+      "isDeleted",
+      "createdAtMs",
+    ]),
   aiMetadataLocks: defineTable({
     muxAssetId: v.string(),
     userId: v.string(),

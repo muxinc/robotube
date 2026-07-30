@@ -6,7 +6,11 @@
  */
 
 import { components, internal } from "./_generated/api";
-import { asNonEmptyString, readChannelNameOverride } from "./feedContracts";
+import {
+  asFeedVisibility,
+  asNonEmptyString,
+  readChannelNameOverride,
+} from "./feedContracts";
 
 export type VideoMetadataUpsertArgs = {
   muxAssetId: string;
@@ -45,6 +49,7 @@ export async function upsertVideoMetadataAndSyncFeedReadModel(
       uploaderUserId: asNonEmptyString(args.userId) ?? undefined,
       title: asNonEmptyString(args.title) ?? undefined,
       channelName: readChannelNameOverride(args.custom),
+      visibility: asFeedVisibility(args.visibility),
       applyChannelName: args.custom !== undefined,
     },
   );
