@@ -97,8 +97,6 @@ export function useFeedPlaybackController({
   const playerRef = useRef<MuxVideoPlayer | null>(null);
   if (playerRef.current === null) {
     playerRef.current = createMuxVideoPlayer();
-    bumpFeedCounter("livePlayers");
-    trackFeedEvent("feed_player_created", { screen });
   }
   const player = playerRef.current;
 
@@ -106,11 +104,21 @@ export function useFeedPlaybackController({
   const [firstFrameMuxAssetId, setFirstFrameMuxAssetId] = useState<string | null>(
     null,
   );
+  const firstFrameMuxAssetIdRef = useRef<string | null>(null);
+  const updateFirstFrameMuxAssetId = useCallback(
+    (muxAssetId: string | null) => {
+      firstFrameMuxAssetIdRef.current = muxAssetId;
+      setFirstFrameMuxAssetId(muxAssetId);
+    },
+    [],
+  );
   const attachedMuxAssetIdRef = useRef<string | null>(null);
   // Updated during render so surface callbacks (which fire in child effects,
   // before this hook's own effects) can see the *intended* target.
   const targetMuxAssetIdRef = useRef<string | null>(activeMuxAssetId);
   targetMuxAssetIdRef.current = activeMuxAssetId;
+  const isPlaybackAllowedRef = useRef(isPlaybackAllowed);
+  isPlaybackAllowedRef.current = isPlaybackAllowed;
   const loadedMuxAssetIdRef = useRef<string | null>(null);
   // A source replacement can briefly deliver a final time event from the old
   // native item. Do not reveal the surface until the new item has emitted its
@@ -122,9 +130,14 @@ export function useFeedPlaybackController({
   /** Preview position per asset, so returning to a card resumes where it was. */
   const positionsRef = useRef(new Map<string, number>());
 
-  // Release the single player when the feed screen is destroyed.
-  useEffect(
-    () => () => {
+  // Observe and release the single player with the feed screen lifecycle.
+  // Counter notifications belong in an effect: emitting them during render
+  // would synchronously update the development overlay while Home is rendering.
+  useEffect(() => {
+    bumpFeedCounter("livePlayers");
+    trackFeedEvent("feed_player_created", { screen });
+
+    return () => {
       if (isPlayingRef.current) {
         isPlayingRef.current = false;
         bumpFeedCounter("playingVideos", -1);
@@ -132,9 +145,8 @@ export function useFeedPlaybackController({
       runMuxPlayerCommand(player.release());
       bumpFeedCounter("livePlayers", -1);
       trackFeedEvent("feed_player_released", { screen });
-    },
-    [player, screen],
-  );
+    };
+  }, [player, screen]);
 
   useEffect(() => {
     runMuxPlayerCommand(player.setMuted(muted));
@@ -145,7 +157,7 @@ export function useFeedPlaybackController({
   // Replace the active source only after focus is committed.
   useEffect(() => {
     if (target === null) {
-      setFirstFrameMuxAssetId(null);
+      updateFirstFrameMuxAssetId(null);
       loadedMuxAssetIdRef.current = null;
       sourceReadyMuxAssetIdRef.current = null;
       if (isPlayingRef.current) {
@@ -157,7 +169,7 @@ export function useFeedPlaybackController({
     }
     if (loadedMuxAssetIdRef.current === target.muxAssetId) return;
 
-    setFirstFrameMuxAssetId(null);
+    updateFirstFrameMuxAssetId(null);
     loadedMuxAssetIdRef.current = target.muxAssetId;
     sourceReadyMuxAssetIdRef.current = null;
     if (isPlayingRef.current) {
@@ -188,7 +200,14 @@ export function useFeedPlaybackController({
     player.replace(source);
     runMuxPlayerCommand(player.setMuted(muted));
     runMuxPlayerCommand(player.setLoop(true));
-  }, [maxResolution, muted, player, screen, target]);
+  }, [
+    maxResolution,
+    muted,
+    player,
+    screen,
+    target,
+    updateFirstFrameMuxAssetId,
+  ]);
 
   // Play/pause is driven purely by committed focus + lifecycle gating.
   useEffect(() => {
@@ -234,9 +253,9 @@ export function useFeedPlaybackController({
       // unmounted out from under the player. Stop and fall back to thumbnails.
       if (targetMuxAssetIdRef.current !== muxAssetId) return;
       runMuxPlayerCommand(player.pause());
-      setFirstFrameMuxAssetId(null);
+      updateFirstFrameMuxAssetId(null);
     },
-    [player, screen],
+    [player, screen, updateFirstFrameMuxAssetId],
   );
 
   const onSourceLoad = useCallback(
@@ -248,8 +267,20 @@ export function useFeedPlaybackController({
         muxAssetId,
         elapsedMs: elapsedSince(sourceRequestedAtMsRef.current),
       });
+
+      // A newly mounted native view may emit its initial `idle` status after
+      // the controller's first play request. Mux treats that status as a reason
+      // to clear `shouldPlay`, leaving a successfully loaded source paused at
+      // time zero. Reassert play only after this exact source is ready and
+      // remains the committed, lifecycle-eligible target.
+      if (
+        targetMuxAssetIdRef.current === muxAssetId &&
+        isPlaybackAllowedRef.current
+      ) {
+        runMuxPlayerCommand(player.play());
+      }
     },
-    [screen],
+    [player, screen],
   );
 
   const onStatusChange = useCallback(
@@ -279,8 +310,11 @@ export function useFeedPlaybackController({
       positionsRef.current.set(muxAssetId, currentTime);
       if (loadedMuxAssetIdRef.current !== muxAssetId) return;
       if (sourceReadyMuxAssetIdRef.current !== muxAssetId) return;
-      if (currentTime > 0 && firstFrameMuxAssetId !== muxAssetId) {
-        setFirstFrameMuxAssetId(muxAssetId);
+      if (
+        currentTime > 0 &&
+        firstFrameMuxAssetIdRef.current !== muxAssetId
+      ) {
+        updateFirstFrameMuxAssetId(muxAssetId);
         trackFeedEvent("feed_first_frame", {
           screen,
           muxAssetId,
@@ -288,7 +322,7 @@ export function useFeedPlaybackController({
         });
       }
     },
-    [firstFrameMuxAssetId, screen],
+    [screen, updateFirstFrameMuxAssetId],
   );
 
   const onSourceError = useCallback(
@@ -296,9 +330,9 @@ export function useFeedPlaybackController({
       trackFeedEvent("feed_playback_error", { screen, muxAssetId, errorCode: message });
       // Fall back to the thumbnail rather than holding a black surface.
       sourceReadyMuxAssetIdRef.current = null;
-      setFirstFrameMuxAssetId(null);
+      updateFirstFrameMuxAssetId(null);
     },
-    [screen],
+    [screen, updateFirstFrameMuxAssetId],
   );
 
   const getPreviewPositionSeconds = useCallback(
