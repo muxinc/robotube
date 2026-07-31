@@ -1,16 +1,12 @@
 import { MuxVideoView } from "@mux/mux-react-native-player";
 import { Image } from "expo-image";
 import { memo, useCallback, useEffect } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
 import type { FeedVideoItem } from "@/components/feed-video-card";
 import { ShortsVerticalVideoOverlay } from "@/components/shorts-vertical-video-overlay";
 import type { ShortsCellPlayback } from "@/hooks/use-shorts-screen-playback";
 import { bumpFeedCounter } from "@/lib/feed/feed-telemetry";
-import {
-  buildShortsVideoAccessibilityHint,
-  buildShortsVideoAccessibilityLabel,
-} from "@/lib/shorts/shorts-accessibility";
 import type { ShortsOverlayInsets } from "@/lib/shorts/shorts-viewport";
 
 export type ShortsVerticalVideoCellProps = {
@@ -19,8 +15,6 @@ export type ShortsVerticalVideoCellProps = {
   pageHeight: number;
   /** Width-resolved thumbnail from the adaptive policy. */
   thumbnailUrl: string;
-  index: number;
-  itemCount: number;
   overlayInsets: ShortsOverlayInsets;
   isFeedExhausted: boolean;
   /**
@@ -28,7 +22,6 @@ export type ShortsVerticalVideoCellProps = {
    * is not rendering into the viewport must never own the player surface.
    */
   playback?: ShortsCellPlayback;
-  onTogglePlayback: () => void;
   onToggleMute: () => void;
   onRetry: () => void;
   onOpenDetail: (item: FeedVideoItem) => void;
@@ -48,12 +41,9 @@ function ShortsVerticalVideoCellComponent({
   item,
   pageHeight,
   thumbnailUrl,
-  index,
-  itemCount,
   overlayInsets,
   isFeedExhausted,
   playback,
-  onTogglePlayback,
   onToggleMute,
   onRetry,
   onOpenDetail,
@@ -61,8 +51,6 @@ function ShortsVerticalVideoCellComponent({
   const { muxAssetId } = item;
   const isActive = playback?.isActive ?? false;
   const hasFirstFrame = playback?.hasFirstFrame ?? false;
-  const isPlaying = playback?.isPlaying ?? false;
-  const isPaused = playback?.isPaused ?? false;
   const hasError = playback?.hasError ?? false;
   const isMuted = playback?.isMuted ?? true;
 
@@ -87,48 +75,31 @@ function ShortsVerticalVideoCellComponent({
     [item, onOpenDetail],
   );
 
-  const accessibilityLabel = buildShortsVideoAccessibilityLabel({
-    title: item.title,
-    channelName: item.channelName,
-    index,
-    itemCount,
-    isPlaying,
-    isMuted,
-    hasError,
-  });
-
   return (
     <View style={[styles.page, { height: pageHeight }]}>
       {/*
-        Tap-to-pause lives on the media layer only. It is a plain Pressable, so
-        it never claims the vertical pan the list needs for paging: a swipe
-        cancels the press instead of firing it.
-
-        Only the active page is pressable. Pause and retry act on the committed
-        asset, so a tap that lands on a pre-rendered neighbour mid-swipe would
-        otherwise pause a different video than the one under the finger.
+        The Mux custom controls own media interaction. Keeping this as a View
+        rather than a parent Pressable lets Mux receive its background taps,
+        play/pause presses, scrubbing, settings, and accessibility actions
+        without a second gesture target competing with it.
       */}
-      <Pressable
-        onPress={isActive ? (hasError ? onRetry : onTogglePlayback) : undefined}
-        disabled={!isActive}
+      <View
         accessibilityElementsHidden={!isActive}
         importantForAccessibility={isActive ? "yes" : "no-hide-descendants"}
-        accessibilityRole="button"
-        accessibilityLabel={accessibilityLabel}
-        accessibilityHint={buildShortsVideoAccessibilityHint({ isPlaying, hasError })}
-        accessibilityState={{ selected: isActive, busy: isActive && !hasFirstFrame }}
         style={styles.mediaLayer}
       >
         {isActive && playback?.player ? (
-          <View style={styles.previewLayer} pointerEvents="none">
+          <View style={styles.previewLayer}>
             <MuxVideoView
               player={playback.player}
               style={styles.video}
               // Immersive full-viewport presentation. The source is already an
               // exact 9:16 asset, so cover crops nothing on a portrait page.
               contentFit="cover"
-              controls="none"
-              nativeControls={false}
+              // Use Mux's shared React Native player UI. This provides the
+              // center transport cluster, timeline, settings, AirPlay,
+              // hidden-control scrim, and their built-in accessibility.
+              controls="custom"
               allowsFullscreen={false}
               // The <Image> below is the poster; a second one inside the native
               // view would fetch and decode the same frame again.
@@ -154,24 +125,21 @@ function ShortsVerticalVideoCellComponent({
           contentFit="cover"
           cachePolicy="memory-disk"
           transition={0}
+          pointerEvents="none"
           style={[
             styles.thumbnail,
             isActive && hasFirstFrame && styles.thumbnailHidden,
           ]}
         />
-      </Pressable>
+      </View>
 
       <ShortsVerticalVideoOverlay
         item={item}
         insets={overlayInsets}
-        isActive={isActive}
         isMuted={isMuted}
-        isPlaying={isPlaying}
-        isPaused={isPaused}
         hasError={hasError}
         isFeedExhausted={isFeedExhausted}
         onToggleMute={onToggleMute}
-        onTogglePlayback={onTogglePlayback}
         onRetry={onRetry}
         onOpenDetail={handleOpenDetail}
       />
@@ -183,10 +151,9 @@ function ShortsVerticalVideoCellComponent({
  * Recycled cells re-render on every scroll tick, so the comparison is limited
  * to the cell's own data and its own playback state.
  *
- * `player` and `surface` are stable for the life of the screen. `hasFirstFrame`,
- * `isPlaying`, and `isPaused` describe the *committed* video, so they are only
- * compared for a cell that is active: otherwise every inactive page would
- * re-render each time the active page reached its first frame.
+ * `player` and `surface` are stable for the life of the screen. `hasFirstFrame`
+ * describes the *committed* video, so it is only compared for an active cell:
+ * otherwise every inactive page would re-render when the active page starts.
  */
 function areShortsCellPropsEqual(
   previous: ShortsVerticalVideoCellProps,
@@ -196,11 +163,8 @@ function areShortsCellPropsEqual(
     previous.item !== next.item ||
     previous.pageHeight !== next.pageHeight ||
     previous.thumbnailUrl !== next.thumbnailUrl ||
-    previous.index !== next.index ||
-    previous.itemCount !== next.itemCount ||
     previous.overlayInsets !== next.overlayInsets ||
     previous.isFeedExhausted !== next.isFeedExhausted ||
-    previous.onTogglePlayback !== next.onTogglePlayback ||
     previous.onToggleMute !== next.onToggleMute ||
     previous.onRetry !== next.onRetry ||
     previous.onOpenDetail !== next.onOpenDetail
@@ -219,7 +183,6 @@ function areShortsCellPropsEqual(
   const isActive = next.playback?.isActive ?? false;
   if (wasActive !== isActive) return false;
 
-  // Sound state is shown on every page's control column, active or not.
   if ((previous.playback?.isMuted ?? true) !== (next.playback?.isMuted ?? true)) {
     return false;
   }
@@ -233,9 +196,7 @@ function areShortsCellPropsEqual(
 
   return (
     (previous.playback?.hasFirstFrame ?? false) ===
-      (next.playback?.hasFirstFrame ?? false) &&
-    (previous.playback?.isPlaying ?? false) === (next.playback?.isPlaying ?? false) &&
-    (previous.playback?.isPaused ?? false) === (next.playback?.isPaused ?? false)
+    (next.playback?.hasFirstFrame ?? false)
   );
 }
 

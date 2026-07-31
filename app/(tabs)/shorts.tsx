@@ -232,7 +232,6 @@ function ShortsFeed({
     listProps,
     retryPlayback,
     toggleMute,
-    togglePlayback,
   } = playback;
 
   const itemCount = shorts.length;
@@ -385,15 +384,12 @@ function ShortsFeed({
     }) => (
       <ShortsVerticalVideoCell
         item={item}
-        index={index}
-        itemCount={itemCount}
         pageHeight={pageHeight}
         thumbnailUrl={getThumbnailUrl(item)}
         overlayInsets={overlayInsets}
         isFeedExhausted={isFeedExhausted && index === itemCount - 1}
         // A measurement pass must never own the player surface.
         playback={target === "Cell" ? getCellPlayback(item) : undefined}
-        onTogglePlayback={togglePlayback}
         onToggleMute={toggleMute}
         onRetry={retryPlayback}
         onOpenDetail={handleOpenDetail}
@@ -409,7 +405,6 @@ function ShortsFeed({
       pageHeight,
       retryPlayback,
       toggleMute,
-      togglePlayback,
     ],
   );
 

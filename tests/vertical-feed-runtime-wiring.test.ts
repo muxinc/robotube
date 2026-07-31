@@ -24,6 +24,8 @@ const shortsPlayback = read("hooks/use-shorts-screen-playback.ts");
 const tabLayout = read("app/(tabs)/_layout.tsx");
 const shortsRoute = read("app/(tabs)/shorts.tsx");
 const homeRoute = read("app/(tabs)/index.tsx");
+const shortsCell = read("components/shorts-vertical-video-cell.tsx");
+const shortsOverlay = read("components/shorts-vertical-video-overlay.tsx");
 
 test("runtime config is a singleton indexed Convex table", () => {
   assert.match(schema, /feedRuntimeConfig:\s*defineTable/);
@@ -82,4 +84,15 @@ test("retained native tabs allocate a player only for the focused feed", () => {
   );
   assert.match(homePlayback, /isPlayerEnabled:\s*isScreenFocused/);
   assert.match(shortsPlayback, /isPlayerEnabled:\s*isScreenFocused/);
+});
+
+test("Shorts exposes the Mux player UI without duplicate media controls", () => {
+  assert.match(shortsCell, /controls="custom"/);
+  assert.doesNotMatch(shortsCell, /pointerEvents="none"[^]*<MuxVideoView/);
+  assert.doesNotMatch(shortsOverlay, /onTogglePlayback/);
+  assert.doesNotMatch(shortsOverlay, /name=\{isPlaying \? "pause" : "play"\}/);
+  assert.match(
+    shortsOverlay,
+    /Mux's custom controls intentionally do not include a sound button/,
+  );
 });

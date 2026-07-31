@@ -10,38 +10,29 @@ import {
   SHORTS_MIN_TOUCH_TARGET_PX,
   buildShortsExpandTitleCopy,
   buildShortsOpenDetailCopy,
-  buildShortsPlaybackControlCopy,
   buildShortsRetryCopy,
   buildShortsSoundControlCopy,
 } from "@/lib/shorts/shorts-accessibility";
 import type { ShortsOverlayInsets } from "@/lib/shorts/shorts-viewport";
 
+const MUX_CONTROLS_CLEARANCE_PX = 58;
+
 export type ShortsVerticalVideoOverlayProps = {
   item: FeedVideoItem;
   /** Safe-area and tab-bar aware padding for the overlay band. */
   insets: ShortsOverlayInsets;
-  /**
-   * True for the page that owns the player. Play/pause and retry act on the
-   * committed asset, so a pre-rendered neighbour does not offer them; sound and
-   * open-detail are correct on any page and stay available.
-   */
-  isActive: boolean;
   isMuted: boolean;
-  isPlaying: boolean;
-  /** True while the viewer (or policy) holds this video paused. */
-  isPaused: boolean;
   hasError: boolean;
   /** True when the end of the feed has been reached on this page. */
   isFeedExhausted: boolean;
   onToggleMute: () => void;
-  onTogglePlayback: () => void;
   onRetry: () => void;
   onOpenDetail: () => void;
 };
 
 /**
- * The v1 Shorts overlay: channel identity, title, sound, playback state, and a
- * route into video detail.
+ * The v1 Shorts content overlay: channel identity, title, sound, and a route
+ * into video detail. Mux's custom UI owns transport and timeline controls.
  *
  * Every control here maps to real Robotube behaviour. There is deliberately no
  * like, comment, follow, share, or view count: those need persistent backends,
@@ -50,14 +41,10 @@ export type ShortsVerticalVideoOverlayProps = {
 function ShortsVerticalVideoOverlayComponent({
   item,
   insets,
-  isActive,
   isMuted,
-  isPlaying,
-  isPaused,
   hasError,
   isFeedExhausted,
   onToggleMute,
-  onTogglePlayback,
   onRetry,
   onOpenDetail,
 }: ShortsVerticalVideoOverlayProps) {
@@ -87,7 +74,6 @@ function ShortsVerticalVideoOverlayComponent({
   );
 
   const soundCopy = buildShortsSoundControlCopy(isMuted);
-  const playbackCopy = buildShortsPlaybackControlCopy(isPlaying);
   const detailCopy = buildShortsOpenDetailCopy(item.title);
   const retryCopy = buildShortsRetryCopy();
   const expandCopy = buildShortsExpandTitleCopy(isTitleExpanded);
@@ -107,12 +93,6 @@ function ShortsVerticalVideoOverlayComponent({
         style={styles.gradient}
         pointerEvents="none"
       />
-
-      {isPaused && !hasError ? (
-        <View style={styles.pausedBadge} pointerEvents="none">
-          <Ionicons name="play" size={54} color="#FFFFFFF2" />
-        </View>
-      ) : null}
 
       {hasError ? (
         <View style={styles.errorLayer} pointerEvents="box-none">
@@ -141,56 +121,37 @@ function ShortsVerticalVideoOverlayComponent({
         </View>
       ) : null}
 
-      <View
-        style={[styles.controlColumn, { paddingBottom: insets.paddingBottom }]}
-        pointerEvents="box-none"
+      {/*
+        Mux's custom controls intentionally do not include a sound button.
+        Preserve the session-scoped mute action without duplicating a Mux
+        transport control.
+      */}
+      <Pressable
+        onPress={onToggleMute}
+        accessibilityRole="button"
+        accessibilityLabel={soundCopy.label}
+        accessibilityHint={soundCopy.hint}
+        accessibilityValue={{ text: soundCopy.value }}
+        accessibilityState={{ selected: !isMuted }}
+        hitSlop={8}
+        style={({ pressed }) => [
+          styles.soundButton,
+          { top: insets.paddingTop },
+          pressed && styles.pressed,
+        ]}
       >
-        <Pressable
-          onPress={onToggleMute}
-          accessibilityRole="button"
-          accessibilityLabel={soundCopy.label}
-          accessibilityHint={soundCopy.hint}
-          accessibilityValue={{ text: soundCopy.value }}
-          accessibilityState={{ selected: !isMuted }}
-          hitSlop={8}
-          style={pressedStyle(styles.circleButton)}
-        >
-          <Ionicons
-            name={isMuted ? "volume-mute" : "volume-high"}
-            size={22}
-            color="#FFFFFF"
-          />
-        </Pressable>
-
-        {isActive ? (
-          <Pressable
-            onPress={onTogglePlayback}
-            accessibilityRole="button"
-            accessibilityLabel={playbackCopy.label}
-            accessibilityHint={playbackCopy.hint}
-            accessibilityValue={{ text: playbackCopy.value }}
-            accessibilityState={{ selected: isPlaying }}
-            hitSlop={8}
-            style={pressedStyle(styles.circleButton)}
-          >
-            <Ionicons name={isPlaying ? "pause" : "play"} size={22} color="#FFFFFF" />
-          </Pressable>
-        ) : null}
-
-        <Pressable
-          onPress={onOpenDetail}
-          accessibilityRole="button"
-          accessibilityLabel={detailCopy.label}
-          accessibilityHint={detailCopy.hint}
-          hitSlop={8}
-          style={pressedStyle(styles.circleButton)}
-        >
-          <Ionicons name="information-circle-outline" size={24} color="#FFFFFF" />
-        </Pressable>
-      </View>
+        <Ionicons
+          name={isMuted ? "volume-mute" : "volume-high"}
+          size={22}
+          color="#FFFFFF"
+        />
+      </Pressable>
 
       <View
-        style={[styles.metaBand, { paddingBottom: insets.paddingBottom }]}
+        style={[
+          styles.metaBand,
+          { paddingBottom: insets.paddingBottom + MUX_CONTROLS_CLEARANCE_PX },
+        ]}
         pointerEvents="box-none"
       >
         {isFeedExhausted ? (
@@ -293,11 +254,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     height: "42%",
   },
-  pausedBadge: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   errorLayer: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
@@ -328,20 +284,14 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
   },
-  controlColumn: {
+  soundButton: {
     position: "absolute",
     right: 12,
-    bottom: 0,
-    alignItems: "center",
-    gap: 14,
-  },
-  circleButton: {
     width: SHORTS_MIN_TOUCH_TARGET_PX,
     height: SHORTS_MIN_TOUCH_TARGET_PX,
     borderRadius: SHORTS_MIN_TOUCH_TARGET_PX / 2,
     alignItems: "center",
     justifyContent: "center",
-    // Opaque enough to hold icon contrast over a bright video frame.
     backgroundColor: "#00000099",
   },
   pressed: {
@@ -351,8 +301,8 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 0,
     bottom: 0,
-    // Leaves the control column clear so long titles never overlap the buttons.
-    right: SHORTS_MIN_TOUCH_TARGET_PX + 28,
+    // The Mux timeline/time/settings row owns the bottom of the player.
+    right: 16,
     paddingLeft: 16,
     gap: 8,
   },
