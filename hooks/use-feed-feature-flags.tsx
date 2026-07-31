@@ -47,9 +47,9 @@ function readDevelopmentOverride(
 /**
  * One Convex subscription and one resolved snapshot for the entire app.
  *
- * Keeping the tab, Home query, and Shorts route on the same context value avoids
- * a transient state where one consumer has received a rollback and another has
- * not. The provider fails closed while the remote row is loading or absent.
+ * Keeping the tab and Shorts route on the same context value avoids a transient
+ * state where one consumer has received a rollback and another has not. Home is
+ * permanently standard-only and no longer consumes the migration flag.
  */
 export function FeedFeatureFlagsProvider({
   children,
@@ -97,8 +97,8 @@ export function FeedFeatureFlagsProvider({
 
     return {
       shortsTabEnabled: resolutions.shortsTabEnabled.enabled,
-      // Defense in depth: even if a future resolver regresses its dependency
-      // gate, the client never selects exclusive Home without a reachable tab.
+      // Retained in the snapshot for runtime-config compatibility. Home no
+      // longer reads this value when selecting its query.
       exclusiveFeedPlacementEnabled:
         resolutions.shortsTabEnabled.enabled &&
         resolutions.exclusiveFeedPlacementEnabled.enabled,

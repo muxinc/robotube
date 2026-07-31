@@ -50,13 +50,13 @@ add events only "where not already represented." That is what happened:
   `feed_first_frame`, `feed_buffering_started`, `feed_buffering_ended`,
   `feed_playback_error`, and the five preload events. All 20 keep their names and
   their meaning; Shorts just tags them `screen: "shorts"`.
-- **New, Shorts-only** — the ten names PRD section 13 lists.
+- **New, Shorts-only** — the nine names PRD section 13 lists.
 - **Newly recognized runtime events** — `feed_playback_paused` and
   `feed_player_released`.
 
 The Home contract is frozen at exactly 20 events and 12 common fields.
 `FEED_PERFORMANCE_EVENT_NAMES` still returns those 20;
-`ALL_FEED_PERFORMANCE_EVENT_NAMES` returns all 32.
+`ALL_FEED_PERFORMANCE_EVENT_NAMES` returns all 31.
 
 ### 2.1.1 The two runtime events that were being dropped
 
@@ -101,7 +101,6 @@ emitFeedPerformanceEvent(SHORTS_PERFORMANCE_EVENTS.shortsPageImpression, {
 | `shorts_manual_resume` | The user taps to resume. |
 | `shorts_muted` | The user mutes via the sound control. |
 | `shorts_unmuted` | The user unmutes via the sound control. |
-| `shorts_open_detail` | The user opens `/video/[muxAssetId]` from Shorts. |
 | `shorts_retry_playback` | The user taps retry after a recoverable error. |
 | `shorts_query_received` | The initial `listVerticalFeedVideosPaginated` attempt **resolves or fails**, carrying `query_outcome`. |
 | `shorts_empty_state_viewed` | The empty state renders. |
@@ -232,16 +231,14 @@ the cleanup gate is checked mechanically rather than remembered.
 playback, and preload work. Off means the tab is absent and no Shorts query
 runs. Home is untouched either way.
 
-**`exclusiveFeedPlacementEnabled`** — moves Home to the placement index with
-`feedPlacement == "standard"`. Off means Home keeps its migration query and may
-also show exact 9:16 assets, which is the intended state for most of the
-rollout.
+**`exclusiveFeedPlacementEnabled`** — legacy Home-cutover value retained for
+runtime-config compatibility. Current clients always select Home from
+`feedPlacement == "standard"`; changing this value no longer changes routing.
 
-> **Status.** Both flags are consumed from one reactive Convex singleton through
-> `FeedFeatureFlagsProvider`. The same resolved snapshot hides the native tab,
-> redirects direct Shorts routes before query/player work mounts, and selects
-> Home's legacy or standard-placement query. Missing or loading config is
-> all-off.
+> **Status.** The reactive Convex singleton still carries both values for
+> compatibility. `FeedFeatureFlagsProvider` uses `shortsTabEnabled` to hide the
+> native tab and redirect direct Shorts routes before query/player work mounts.
+> Home is standard-only regardless of either value.
 
 Operators update the complete state atomically. These commands target the
 configured development deployment unless `--prod` or an explicit deployment is
@@ -455,38 +452,29 @@ the first lever is that flag.
 const plan = buildShortsRollbackPlan(resolveFeedFeatureFlags(context));
 ```
 
-PRD Phase 7 says: "Roll back by disabling the Shorts tab first; disable
-exclusive placement if Home must temporarily show all assets again."
+Disabling the tab is the fastest lever for playback, memory, or query incidents.
+It does not change Home: exact 9:16 assets are intentionally Shorts-only and are
+temporarily unavailable while the tab is disabled. The rollback plan reports
+that cost with `leavesVerticalAssetsUnreachable: true` and
+`hasUnreachableWindow: true`.
 
-Disabling the tab first is right — it is the lever that stops playback, memory,
-and query load immediately, and it does so without touching Home.
-
-The obvious worry is that doing so while `exclusiveFeedPlacementEnabled` is
-still on would strand exact 9:16 assets in no feed at all. **It does not**,
-because the dependency gate (section 3.4) makes exclusive placement resolve
-`false` in the same pass: Home reverts to the migration query and serves every
-ready asset again the moment the tab goes away.
-
-Step 2 therefore exists as **cleanup, not rescue** — it clears the stored config
-value so that re-enabling the tab later does not silently restore exclusivity
-along with it. Every step still reports `leavesVerticalAssetsUnreachable`, and
-the suite asserts it is `false`, so the guarantee is checked rather than
-remembered.
+Clearing `exclusiveFeedPlacementEnabled` is compatibility cleanup only. It does
+not rescue availability or alter Home in current clients.
 
 | Current state | Steps | Unreachable window |
 | --- | --- | :---: |
-| Both flags on | 1. disable `shortsTabEnabled` (Home reverts immediately) 2. clear `exclusiveFeedPlacementEnabled` | no |
-| Tab on, exclusive off | 1. disable `shortsTabEnabled` | no |
+| Both flags on | 1. disable `shortsTabEnabled` 2. clear legacy `exclusiveFeedPlacementEnabled` | **yes** |
+| Tab on, exclusive off | 1. disable `shortsTabEnabled` | **yes** |
 | Both off | none | no |
 
 ### 5.2 What rollback costs
 
-- **Disabling `shortsTabEnabled`** — the tab disappears. Every 9:16 asset stays
-  reachable through Home (while exclusive placement is off), search, profile,
-  and the detail route. No data is lost; no schema changes.
-- **Disabling `exclusiveFeedPlacementEnabled`** — Home returns to the migration
-  query and shows standard, unknown, *and* vertical placements. The worst case
-  is a temporary duplicate between Home and Shorts, never a missing video.
+- **Disabling `shortsTabEnabled`** — the tab disappears and its query/player
+  work stops. Home remains standard-only, so this is now a true Shorts kill
+  switch rather than a routing rollback.
+- **Disabling `exclusiveFeedPlacementEnabled`** — retained for runtime-config
+  compatibility only. Home no longer consumes this migration flag and remains
+  standard-only.
 
 Schema fields (`aspectRatio`, `feedPlacement`, `aspectRatioUpdatedAtMs`) and the
 `by_feed_placement_ready_deleted_created` index may remain in place when the
@@ -587,17 +575,11 @@ A metric that was not supplied is reported in `unmeasuredMetrics` and never
 counts as a pass. Getting a green light by omission is the specific failure mode
 this design refuses to allow.
 
-### 7.3 Enabling exclusive placement
+### 7.3 Permanent exclusive placement
 
-Only after Shorts is stable at `full`:
-
-1. Confirm `evaluateClassificationCoverageGate` still returns `pass`.
-2. Confirm `auditFeedExclusivity` with `exclusivePlacementActive: false` shows
-   the expected duplicates and **zero** omissions.
-3. Enable `exclusiveFeedPlacementEnabled` for the team cohort first.
-4. Re-run the exclusivity audit with `exclusivePlacementActive: true`. Duplicates
-   must now be zero.
-5. Ramp on the same ladder.
+Home now always reads the standard placement index. Keep the classification
+coverage gate and exclusivity audit green; there is no separate Home-routing
+flag ramp remaining.
 
 ### 7.4 If something goes wrong
 

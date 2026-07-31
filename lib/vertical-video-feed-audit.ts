@@ -405,14 +405,10 @@ function findRepeatedIds(ids: readonly string[]): string[] {
 }
 
 /**
- * PRD section 15: the rollout intentionally allows a temporary duplicate
- * between Home and Shorts, "but never allows a classified video to disappear
- * from both feeds."
- *
- * So omissions fail at every stage, while duplicates only fail once exclusive
- * placement is active. Encoding that asymmetry here is the point — a single
- * "are the feeds identical" check would either block the migration or miss the
- * one thing the migration must not do.
+ * The current product requires exclusive placement. The audit still accepts a
+ * migration-mode input so historical/backfill rehearsals can distinguish a
+ * tolerated pre-cutover duplicate from an omission, but current callers pass
+ * `exclusivePlacementActive: true` and fail either condition.
  */
 export function auditFeedExclusivity(
   input: ExclusivityAuditInput,

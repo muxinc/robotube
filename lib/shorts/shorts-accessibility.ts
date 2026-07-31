@@ -140,15 +140,6 @@ export function buildShortsPlaybackControlCopy(
   };
 }
 
-export function buildShortsOpenDetailCopy(title: string): ShortsControlCopy {
-  const safeTitle = clampShortsLabelText(title, 60);
-  return {
-    label: safeTitle.length > 0 ? `Open details for ${safeTitle}` : "Open video details",
-    hint: "Opens the full video screen",
-    value: "",
-  };
-}
-
 export function buildShortsRetryCopy(): ShortsControlCopy {
   return {
     label: "Retry playback",

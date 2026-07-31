@@ -132,7 +132,7 @@ export const FEED_FEATURE_FLAGS: Record<
   exclusiveFeedPlacementEnabled: {
     key: "exclusiveFeedPlacementEnabled",
     description:
-      'Serve Home from the placement index with feedPlacement == "standard", making Home and Shorts mutually exclusive. Off means Home keeps the migration query and may also show exact 9:16 assets.',
+      'Legacy Home-cutover flag retained for runtime-config compatibility. Home now always uses feedPlacement == "standard", so this flag has no mobile-client routing effect.',
     defaultValue: false,
     owner: "vertical-feed-data",
     removalDate: "2026-12-31",
@@ -141,7 +141,7 @@ export const FEED_FEATURE_FLAGS: Record<
     // A Convex placement filter does not depend on Android hardware behavior.
     requiresAndroidPhysicalValidation: false,
     rollbackNote:
-      "Disabling returns Home to the migration query that shows standard and unknown placements alongside 9:16. The worst case is a temporary duplicate between Home and Shorts, never a video missing from both.",
+      "No current mobile-client effect. Home remains standard-only when this legacy migration flag changes.",
   },
 };
 

@@ -13,11 +13,11 @@ display aspect ratio of **9:16**.
 
 Robotube will keep both viewing modes:
 
-- **Home** remains the YouTube-style card feed and, after migration, contains
+- **Home** remains the YouTube-style card feed and contains
   ready videos whose aspect ratio is not 9:16.
 - **Shorts** contains only ready 9:16 videos.
-- Search, profile, and video detail remain format-agnostic and may show either
-  kind of video.
+- A Shorts page is the complete viewing experience; it does not hand 9:16
+  playback off to the long-form video-detail route.
 
 The interaction model is informed by
 [Mux Slop Social](https://github.com/muxinc/Slop-Social), especially its
@@ -65,7 +65,8 @@ These are v1 decisions, not open questions:
 3. Feed placement is exclusive after migration:
    - normalized ratio `9:16` → Shorts;
    - every other known ratio → Home.
-4. Search, profile, upload history, and video detail may show all ratios.
+4. Search, profile, and upload history are outside this feed-routing change.
+   Shorts itself never opens the long-form video-detail route.
 5. Classification uses Mux asset metadata on the server. The client must not
    infer eligibility from screen dimensions, thumbnail dimensions, or player
    layout.
@@ -90,7 +91,7 @@ These are v1 decisions, not open questions:
 - Guarantee that no non-9:16 asset appears in Shorts.
 - Preserve one-playing-video and one-attached-surface invariants.
 - Reuse the existing feed data contract, player controller, adaptive policy,
-  preloader, telemetry, and detail navigation.
+  preloader, and telemetry.
 - Keep pagination stable with no duplicate, skipped, or cursor-lost cards.
 - Handle tab switches, app backgrounding, rotation, loading, empty, end-of-feed,
   and playback-error states.
@@ -117,8 +118,8 @@ These are v1 decisions, not open questions:
 - As a viewer, I never encounter a landscape or square video in Shorts.
 - As a viewer, I can still browse non-9:16 videos in the familiar Home feed.
 - As a viewer, switching tabs or backgrounding the app immediately pauses Shorts.
-- As a viewer, I can tap to pause/resume, control sound, and open the full video
-  detail.
+- As a viewer, I can tap to pause/resume and control sound without leaving the
+  Shorts feed.
 - As an uploader, my ready video is routed automatically based on its processed
   display aspect ratio.
 - As an operator, I can disable Shorts without disabling Home.
@@ -226,7 +227,6 @@ are classified.
 - Start muted and expose a clear mute/unmute affordance.
 - Pause immediately when the user pauses, the tab loses focus, the app
   backgrounds, autoplay policy disallows playback, or the surface is lost.
-- Restore a valid paused or muted state when returning from video detail.
 - Show a retry affordance on a recoverable playback error; one broken item must
   not block swiping to the next.
 
@@ -238,7 +238,6 @@ The v1 overlay includes only data and actions Robotube can support:
 - title, clamped with an expand affordance if needed;
 - mute/unmute;
 - play/pause state;
-- open video detail;
 - progress or duration only if it remains readable and does not add scroll-path
   churn.
 
@@ -247,7 +246,7 @@ Gestures:
 - vertical swipe: page between videos;
 - single tap on the media: pause/resume;
 - press the sound button: mute/unmute;
-- press the title/channel area or detail action: open `/video/[muxAssetId]`.
+- press the title: expand or collapse it in place.
 
 Double-tap-to-like is deferred until likes are persistent. The UI must not show
 fake local-only counts.
@@ -414,7 +413,7 @@ Functional acceptance:
 - Swiping settles on one page and only that page plays.
 - Tapping pauses/resumes; sound control updates actual player state.
 - Switching Home ↔ Shorts never leaves both screens playing.
-- Backgrounding, opening detail, signing out, and unmounting pause or release
+- Backgrounding, signing out, and unmounting pause or release
   correctly.
 - Pagination, empty state, end state, offline recovery, and playback errors are
   usable.
@@ -432,7 +431,6 @@ shorts_manual_pause
 shorts_manual_resume
 shorts_muted
 shorts_unmuted
-shorts_open_detail
 shorts_retry_playback
 shorts_query_received
 shorts_empty_state_viewed
@@ -559,15 +557,14 @@ Goal: return stable, paginated card pages without client-side ratio filtering.
   times.
 - [x] Add deleted, missing-playback-ID, private, and duplicate fixture cases.
 - [ ] Measure serialized response size and query time for 16 and 48 Shorts cards.
-- [x] Add a placement-filtered Home query, but keep it behind a feature flag
-  until the backfill coverage gate passes.
+- [x] Add a placement-filtered Home query.
 - [x] Add an audit proving each eligible known asset appears in exactly one feed.
-- [ ] Switch Home to `standard` only after the audit passes.
+- [x] Switch Home permanently to `standard` after the audit passes.
 
 Phase 2 exit gate:
 
 - [x] Shorts returns only exact 9:16 cards across multiple pages.
-- [ ] Home returns no exact 9:16 cards after cutover.
+- [x] Home returns no exact 9:16 cards after cutover.
 - [x] There are no duplicates, omissions, or cursor losses.
 - [x] The hot query performs no per-video Mux component reads.
 - [x] Response size stays within the existing card-feed budget.
@@ -576,9 +573,9 @@ Phase 2 exit gate:
 visibility, duplicates, and exact placement. Representative serialized pages
 are 5,937 bytes for 16 cards and 17,809 bytes for 48 cards. Live development
 queries returned all 4 vertical assets and a full 16-card standard page. Query
-execution time is not yet measured, so the combined measurement box and the
-actual Home cutover remain unchecked; the audit passed, but the exclusive flag
-stays off until rollout gates pass.
+execution time is not yet measured, so only that performance evidence remains
+open. The audit passed and Home now reads the standard placement index
+unconditionally.
 
 ### Phase 3: Shorts Tab and Paged Screen Shell
 
@@ -620,13 +617,12 @@ Goal: make one settled Shorts page play smoothly with bounded resources.
 - [x] Use centered, full-viewport `cover` presentation.
 - [x] Loop the committed video and start muted.
 - [x] Add session-scoped mute/unmute state and a visible control.
-- [x] Pause immediately on drag, tab blur, app background, policy denial, detail
-  navigation, or surface loss as appropriate.
+- [x] Pause immediately on drag, tab blur, app background, policy denial, or
+  surface loss as appropriate.
 - [x] Confirm source replacement happens only after scroll settle.
 - [x] Reuse the bounded direction-aware preloader with current plus one likely
   next item.
 - [x] Cancel/suspend preload during a fast fling or direction change.
-- [x] Hand preview position to video detail where useful.
 - [x] Release the player on screen destruction.
 - [ ] Verify Home and Shorts cannot play simultaneously during rapid tab
   switching.
@@ -654,7 +650,7 @@ invariant violation. This smoke check did not capture retained peaks during each
 transition, so the rapid-switch and exit-gate boxes remain unchecked pending the
 physical scenario run.
 
-### Phase 5: Overlay, Gestures, Detail Handoff, and Accessibility
+### Phase 5: Overlay, Gestures, and Accessibility
 
 Goal: complete the v1 TikTok-style interaction layer without fake social state.
 
@@ -662,7 +658,6 @@ Goal: complete the v1 TikTok-style interaction layer without fake social state.
 - [x] Show avatar, channel name, title, and supported metadata.
 - [x] Add single-tap pause/resume without conflicting with vertical paging.
 - [x] Add mute/unmute and visible state feedback.
-- [x] Add open-detail navigation with preview-position handoff.
 - [x] Add a recoverable playback-error retry action.
 - [x] Provide VoiceOver/TalkBack roles, labels, hints, and state values.
 - [x] Meet touch-target and contrast requirements.
@@ -674,9 +669,8 @@ Goal: complete the v1 TikTok-style interaction layer without fake social state.
 Phase 5 exit gate:
 
 - [ ] All v1 actions work with touch and screen readers.
-- [ ] Gesture recognition does not cause accidental page changes or detail opens.
+- [ ] Gesture recognition does not cause accidental page changes.
 - [ ] Controls stay inside safe areas in supported orientations and devices.
-- [ ] Detail navigation and back navigation restore one valid feed state.
 
 ### Phase 6: Verification and Performance Hardening
 
@@ -689,7 +683,7 @@ Goal: prove the new feed is correct and does not regress Home.
 - [x] Test asset-ready, asset-update, deletion, playback-ID, visibility, and
   backfill paths.
 - [ ] Test cold launch, warm launch, slow swipe, fast fling, reverse fling,
-  pagination, tab switch, background/foreground, rotation, detail/back, offline,
+  pagination, tab switch, background/foreground, rotation, offline,
   and recovery scenarios.
 - [ ] Run the standard 50-item down/up memory scenario.
 - [ ] Measure p50/p75/p95 first-frame latency for cold and warm/preloaded media.
@@ -718,9 +712,9 @@ Phase 6 exit gate:
   feed-contract, and runtime-wiring tests pass. Recorded in
   `docs/vertical-video-feed-verification.md` section 4.
 - Scenario and checklist tooling, not results —
-  `lib/vertical-video-feed-scenarios.ts` defines all 13 Phase 6 scenarios (cold
+  `lib/vertical-video-feed-scenarios.ts` defines all 12 Phase 6 scenarios (cold
   launch, warm launch, slow swipe, fast fling, reverse fling, pagination, tab
-  switch, lifecycle, rotation, detail handoff, offline, recovery, and the 50-item
+  switch, lifecycle, rotation, offline, recovery, and the 50-item
   memory run) with steps, observations, captures, and the gates each informs,
   plus acceptance, Home-regression, and accessibility checklists.
   `node scripts/vertical-video-feed-run-sheet.mjs` probes the machine for real
@@ -757,7 +751,8 @@ Goal: release incrementally with a fast, safe rollback.
 
 - [x] Add a remote `shortsTabEnabled` flag that hides the tab and prevents its
   query/playback work when disabled.
-- [x] Add a separate `exclusiveFeedPlacementEnabled` flag for the Home cutover.
+- [x] Add a separate `exclusiveFeedPlacementEnabled` flag for the Home cutover;
+  retain its stored value only for runtime-config compatibility after cutover.
 - [x] Keep both flags default-off until migration and QA gates pass.
 - [x] Define cohort order: team → internal beta → small production cohort →
   staged increase → 100%.
@@ -765,16 +760,16 @@ Goal: release incrementally with a fast, safe rollback.
   first frame, buffering, playback errors, classification unknowns, and
   player-invariant violations.
 - [x] Document the kill-switch owner and rollback steps.
-- [x] Roll back by disabling the Shorts tab first; disable exclusive placement if
-  Home must temporarily show all assets again.
+- [x] Roll back by disabling the Shorts tab first and explicitly report that
+  Shorts-only assets are unavailable until the tab returns.
 - [ ] Monitor each cohort for at least one agreed observation window.
-- [ ] Remove migration-only legacy Home behavior after stable 100% rollout.
+- [x] Remove migration-only legacy Home behavior; Home is permanently standard-only.
 - [x] Update README architecture notes and mark completed PRD boxes with evidence.
 
 Phase 7 exit gate:
 
 - [ ] Shorts is stable at the target cohort.
-- [ ] The final Home/Shorts exclusivity rule is active.
+- [x] The final Home/Shorts exclusivity rule is active.
 - [ ] Unknown placement remains at zero or alerts are actionable.
 - [ ] Rollback has been rehearsed without data loss.
 - [x] Temporary flags and migration code have owners and removal dates.
@@ -800,9 +795,8 @@ Phase 7 exit gate:
 - Runtime consumption — `convex/feedRuntimeConfig.ts` exposes one reactive,
   default-off singleton and an atomic internal mutation.
   `FeedFeatureFlagsProvider` resolves one shared snapshot used to hide the native
-  tab, redirect direct routes before Shorts work mounts, and select Home's query.
-  Server, resolver, and client layers all reject the unsafe "exclusive without
-  Shorts" state.
+  tab and redirect direct routes before Shorts work mounts. Home selects its
+  standard-placement query unconditionally.
 - Cohort order — `SHORTS_COHORT_STAGES` in `lib/vertical-video-feed-rollout.ts`:
   team (local override, 24 h) → internal beta (remote targeting, 72 h) → 5% →
   25% → 100% (168 h), each with a mechanism, a minimum observation window, and
@@ -815,11 +809,10 @@ Phase 7 exit gate:
   false and a NaN threshold would otherwise make its metric unbreachable.
   Documented in `docs/vertical-video-feed-operations.md` section 4.
 - Rollback — `buildShortsRollbackPlan` produces the ordered plan: disable the tab
-  first, then clear the exclusive-placement value as cleanup. The dependency gate
-  means step 1 alone already reverts Home, so there is no window in which exact
-  9:16 assets are in neither feed; the plan reports
-  `leavesVerticalAssetsUnreachable: false` and a test asserts it. Owner, per-flag
-  cost, and schema-retention posture are in
+  first, then clear the legacy exclusive-placement value as compatibility
+  cleanup. Home remains standard-only, so the plan explicitly reports
+  `leavesVerticalAssetsUnreachable: true` while Shorts is disabled. Owner,
+  per-flag cost, and schema-retention posture are in
   `docs/vertical-video-feed-operations.md` section 5.
 - Dashboards — `lib/vertical-video-feed-dashboards.ts` specifies all eight named
   subjects plus exclusivity and engagement depth, and
@@ -828,7 +821,7 @@ Phase 7 exit gate:
   specifications, no analytics backend is wired into `setFeedPerformanceSink`,
   and no panel exists in any tool. Four alert thresholds are marked
   `provisional` because they are ratios against a baseline that does not exist.
-- Telemetry — `lib/feed-performance-events.ts` adds the ten section 13 Shorts
+- Telemetry — `lib/feed-performance-events.ts` adds the nine section 13 Shorts
   events, `screen: "shorts"`, and seven bounded extension fields
   (`feed_placement`, `item_count`, `is_muted`, `retry_attempt`, `empty_reason`,
   `page_height_dp`, `query_outcome`). The Home vocabulary is untouched at 20
@@ -838,8 +831,8 @@ Phase 7 exit gate:
   `feed_playback_error`, so a page that failed to load and a video that failed to
   decode stay separate incidents with separate rates and owners.
 - **Deliberately unchecked.** Cohort monitoring, production dashboards,
-  production rollback rehearsal, final exclusivity cutover, and migration-code
-  removal require a live rollout. The development kill switch was exercised,
+  production rollback rehearsal and cohort monitoring require a live rollout.
+  The development kill switch was exercised,
   but that is not production evidence.
 
 ### Phase 8: Optional Post-v1 Engagement
@@ -864,13 +857,12 @@ Phase 8 does not block the Shorts v1 release.
 2. Backfill and audit legacy assets
 3. Ship vertical query + Shorts tab to internal cohort
 4. Validate classification, playback, memory, and pagination
-5. Enable Shorts more broadly (Home may temporarily still include 9:16)
-6. Enable exclusive Home placement after coverage gate
-7. Reach 100%, monitor, then remove migration-only paths
+5. Enable Shorts more broadly with Home permanently standard-only
+6. Reach 100% and monitor
 ```
 
-This sequence intentionally allows a temporary duplicate between Home and
-Shorts, but never allows a classified video to disappear from both feeds.
+The final product has no Home/Shorts duplicates: exact 9:16 is Shorts-only and
+every other known ratio is Home-only.
 
 ## 16. Risks and Mitigations
 

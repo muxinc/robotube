@@ -9,7 +9,6 @@ import {
   SHORTS_MAX_FONT_SIZE_MULTIPLIER,
   SHORTS_MIN_TOUCH_TARGET_PX,
   buildShortsExpandTitleCopy,
-  buildShortsOpenDetailCopy,
   buildShortsRetryCopy,
   buildShortsSoundControlCopy,
 } from "@/lib/shorts/shorts-accessibility";
@@ -27,12 +26,12 @@ export type ShortsVerticalVideoOverlayProps = {
   isFeedExhausted: boolean;
   onToggleMute: () => void;
   onRetry: () => void;
-  onOpenDetail: () => void;
 };
 
 /**
- * The v1 Shorts content overlay: channel identity, title, sound, and a route
- * into video detail. Mux's custom UI owns transport and timeline controls.
+ * The v1 Shorts content overlay: channel identity, title, and sound. Mux's
+ * custom UI owns transport and timeline controls, and the full-screen page is
+ * the complete viewing experience rather than a link to long-form detail.
  *
  * Every control here maps to real Robotube behaviour. There is deliberately no
  * like, comment, follow, share, or view count: those need persistent backends,
@@ -46,7 +45,6 @@ function ShortsVerticalVideoOverlayComponent({
   isFeedExhausted,
   onToggleMute,
   onRetry,
-  onOpenDetail,
 }: ShortsVerticalVideoOverlayProps) {
   /*
     Expansion is per-video, and this component is inside a recycled cell. Without
@@ -74,7 +72,6 @@ function ShortsVerticalVideoOverlayComponent({
   );
 
   const soundCopy = buildShortsSoundControlCopy(isMuted);
-  const detailCopy = buildShortsOpenDetailCopy(item.title);
   const retryCopy = buildShortsRetryCopy();
   const expandCopy = buildShortsExpandTitleCopy(isTitleExpanded);
   const durationLabel = formatDuration(item.durationSeconds);
@@ -165,13 +162,7 @@ function ShortsVerticalVideoOverlayComponent({
           </View>
         ) : null}
 
-        <Pressable
-          onPress={onOpenDetail}
-          accessibilityRole="button"
-          accessibilityLabel={detailCopy.label}
-          accessibilityHint={detailCopy.hint}
-          style={pressedStyle(styles.channelRow)}
-        >
+        <View style={styles.channelRow}>
           <View style={styles.avatar}>
             {item.channelAvatarUrl ? (
               <Image
@@ -207,12 +198,11 @@ function ShortsVerticalVideoOverlayComponent({
               {durationLabel}
             </Text>
           ) : null}
-        </Pressable>
+        </View>
 
         {/*
-          The title is its own control so a long title can be expanded without
-          opening detail, and so screen readers get a title action separate from
-          the channel/detail action.
+          The title is a control only so long text can expand in place. Shorts
+          never hands an exact 9:16 item to the long-form detail route.
         */}
         <Pressable
           onPress={toggleTitle}

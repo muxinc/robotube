@@ -6,7 +6,6 @@ import {
   SHORTS_MAX_FONT_SIZE_MULTIPLIER,
   SHORTS_MIN_TOUCH_TARGET_PX,
   buildShortsExpandTitleCopy,
-  buildShortsOpenDetailCopy,
   buildShortsPlaybackControlCopy,
   buildShortsRetryCopy,
   buildShortsSoundControlCopy,
@@ -145,21 +144,6 @@ describe("shorts control copy", () => {
     assert.equal(buildShortsPlaybackControlCopy(false).label, "Play video");
   });
 
-  it("names the video in the open-detail label", () => {
-    const copy = buildShortsOpenDetailCopy("Sunset timelapse");
-    assert.match(copy.label, /Sunset timelapse/);
-    assert.match(copy.hint, /full video/i);
-  });
-
-  it("falls back to a generic open-detail label without a title", () => {
-    assert.equal(buildShortsOpenDetailCopy("  ").label, "Open video details");
-  });
-
-  it("clamps a long title inside the open-detail label", () => {
-    const copy = buildShortsOpenDetailCopy("q".repeat(300));
-    assert.ok(copy.label.length < 100);
-  });
-
   it("provides retry and expand copy", () => {
     assert.equal(buildShortsRetryCopy().label, "Retry playback");
     assert.equal(buildShortsExpandTitleCopy(false).label, "Show the full title");
@@ -172,7 +156,6 @@ describe("shorts control copy", () => {
       buildShortsSoundControlCopy(false),
       buildShortsPlaybackControlCopy(true),
       buildShortsPlaybackControlCopy(false),
-      buildShortsOpenDetailCopy("Title"),
       buildShortsRetryCopy(),
       buildShortsExpandTitleCopy(false),
     ];

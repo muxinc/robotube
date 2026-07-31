@@ -227,7 +227,6 @@ function ShortsFeed({
     extraData,
     getCellPlayback,
     getThumbnailUrl,
-    getPreviewPositionSeconds,
     isMuted,
     listProps,
     retryPlayback,
@@ -343,25 +342,6 @@ function ShortsFeed({
     void listRef.current?.scrollToIndex({ index, animated: false });
   }, [committedIndex, didPageHeightChange, shorts]);
 
-  const handleOpenDetail = useCallback(
-    (item: FeedVideoItem) => {
-      const startAtSeconds = getPreviewPositionSeconds(item.muxAssetId);
-      trackFeedEvent("shorts_open_detail", {
-        screen: "shorts",
-        muxAssetId: item.muxAssetId,
-        feedIndex: committedIndex ?? undefined,
-      });
-      router.push({
-        pathname: "/video/[muxAssetId]",
-        params: {
-          muxAssetId: item.muxAssetId,
-          startAt: String(startAtSeconds),
-        },
-      });
-    },
-    [committedIndex, getPreviewPositionSeconds, router],
-  );
-
   const handleOpenUpload = useCallback(() => {
     router.push("/upload" as never);
   }, [router]);
@@ -392,13 +372,11 @@ function ShortsFeed({
         playback={target === "Cell" ? getCellPlayback(item) : undefined}
         onToggleMute={toggleMute}
         onRetry={retryPlayback}
-        onOpenDetail={handleOpenDetail}
       />
     ),
     [
       getCellPlayback,
       getThumbnailUrl,
-      handleOpenDetail,
       isFeedExhausted,
       itemCount,
       overlayInsets,

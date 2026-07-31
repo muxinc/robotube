@@ -50,7 +50,7 @@ export type ShortsScenario = {
  *
  * The list is deliberately one-to-one with the PRD Phase 6 sentence "cold
  * launch, warm launch, slow swipe, fast fling, reverse fling, pagination, tab
- * switch, background/foreground, rotation, detail/back, offline, and recovery
+ * switch, background/foreground, rotation, offline, and recovery
  * scenarios", plus the standard 50-item memory run.
  */
 export const SHORTS_SCENARIOS: readonly ShortsScenario[] = [
@@ -225,24 +225,6 @@ export const SHORTS_SCENARIOS: readonly ShortsScenario[] = [
     requiresPhysicalDevice: true,
   },
   {
-    id: "shorts-detail-handoff",
-    label: "Open detail and return",
-    prdReference: "Phase 6 — detail/back; section 8.3 restore state",
-    steps: [
-      "Tap the title or channel area of a playing page to open /video/[muxAssetId].",
-      "Confirm the detail screen receives the preview position.",
-      "Navigate back.",
-    ],
-    captures: ["counters_snapshot"],
-    observations: [
-      "Shorts pauses before the detail screen starts playing.",
-      "Returning restores exactly one valid paused-or-playing state.",
-      "Mute state survives the round trip.",
-    ],
-    gates: ["Returning from detail does not produce simultaneous playback"],
-    requiresPhysicalDevice: false,
-  },
-  {
     id: "shorts-offline",
     label: "Offline mid-scroll",
     prdReference: "Phase 6 — offline; section 8.5 offline state",
@@ -410,7 +392,7 @@ export const SHORTS_ACCEPTANCE_CHECKLIST: readonly ChecklistItem[] = [
   {
     id: "accept-lifecycle-release",
     statement:
-      "Backgrounding, opening detail, signing out, and unmounting pause or release correctly.",
+      "Backgrounding, signing out, and unmounting pause or release correctly.",
     prdReference: "Section 12 functional acceptance",
     evidence: "instrumented",
   },

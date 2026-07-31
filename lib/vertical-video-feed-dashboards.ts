@@ -242,7 +242,6 @@ export const SHORTS_DASHBOARD_PANELS: readonly ShortsDashboardPanel[] = [
       "shorts_manual_resume",
       "shorts_muted",
       "shorts_unmuted",
-      "shorts_open_detail",
     ],
     fields: ["session_id", "feed_index", "is_muted", "feed_placement"],
     externalSources: [],

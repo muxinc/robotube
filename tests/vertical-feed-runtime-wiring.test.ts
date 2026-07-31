@@ -69,11 +69,13 @@ test("disabled Shorts is hidden and direct routes redirect before mounting work"
   assert.ok(guard >= 0 && enabledMount > guard && query > enabledMount);
 });
 
-test("Home selects the standard query only from the resolved exclusive flag", () => {
+test("Home permanently selects only standard placement", () => {
   assert.match(
     homeRoute,
-    /exclusiveFeedPlacementEnabled\s*\?\s*\(api as any\)\.feed\.listStandardFeedVideosPaginated\s*:\s*\(api as any\)\.feed\.listFeedVideosPaginated/s,
+    /usePaginatedQuery\(\s*\/\/[^]*\(api as any\)\.feed\.listStandardFeedVideosPaginated/s,
   );
+  assert.doesNotMatch(homeRoute, /listFeedVideosPaginated/);
+  assert.doesNotMatch(homeRoute, /exclusiveFeedPlacementEnabled/);
 });
 
 test("retained native tabs allocate a player only for the focused feed", () => {
@@ -95,4 +97,12 @@ test("Shorts exposes the Mux player UI without duplicate media controls", () => 
     shortsOverlay,
     /Mux's custom controls intentionally do not include a sound button/,
   );
+});
+
+test("Shorts is the complete 9:16 experience, not a detail-page handoff", () => {
+  for (const source of [shortsRoute, shortsCell, shortsOverlay]) {
+    assert.doesNotMatch(source, /\/video\/\[muxAssetId\]/);
+    assert.doesNotMatch(source, /shorts_open_detail/);
+    assert.doesNotMatch(source, /onOpenDetail/);
+  }
 });

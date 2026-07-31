@@ -81,8 +81,6 @@ export type ShortsScreenPlayback = {
   toggleMute: () => void;
   togglePlayback: () => void;
   retryPlayback: () => void;
-  /** Position handed to video detail so it resumes where the preview was. */
-  getPreviewPositionSeconds: (muxAssetId: string) => number;
   /** Primitive FlashList `extraData`; changes only when a cell's output can. */
   extraData: string;
 };
@@ -350,7 +348,6 @@ export function useShortsScreenPlayback({
     toggleMute,
     togglePlayback,
     retryPlayback,
-    getPreviewPositionSeconds: controller.getPreviewPositionSeconds,
     extraData: [
       controller.activeMuxAssetId ?? "",
       controller.hasFirstFrame ? 1 : 0,

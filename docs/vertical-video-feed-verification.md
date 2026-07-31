@@ -205,7 +205,7 @@ Run on 2026-07-30 on `ja/laracon`.
   nothing; unscanned reporting `unmeasured`; migration duplicates tolerated;
   omissions never tolerated; backfill balance and idempotent reruns; combined
   diagnostics.
-- **Telemetry (11)** — the ten Shorts events matching PRD section 13 exactly;
+- **Telemetry (11)** — the nine Shorts events matching PRD section 13 exactly;
   the Home contract still frozen at 20 events and 12 fields; the two runtime
   lifecycle events now reaching the sink, with a guard that parses the runtime
   layer's own union so the gap cannot reopen; `shorts` accepted as a screen; the
@@ -232,7 +232,7 @@ Run on 2026-07-30 on `ja/laracon`.
   every stage; notes being required as evidence; missing observation time
   reporting `unmeasured` while an unusable one blocks; seven partial-evidence
   inputs none of which reach `ready`.
-- **Scenarios (5)** — all 13 PRD Phase 6 scenarios defined with steps,
+- **Scenarios (5)** — all 12 PRD Phase 6 scenarios defined with steps,
   observations, gates, and references; the 50-item length; no simulator cell
   claiming a performance measurement; checklist completeness.
 - **Dashboards (5)** — every Phase 7 subject having a panel; no panel reading a
@@ -294,7 +294,7 @@ thumbnail URL carries `height` and `fit_mode` parameters.
 | Cold launch, warm launch, slow swipe, fast fling, reverse fling | **NOT RUN** |
 | Pagination during playback, background/foreground | **NOT RUN** |
 | Repeated Home/Shorts tab switching | **SMOKE ONLY, NOT A GATE** — settled gauges were in range, but retained transition peaks were not captured |
-| Rotation and safe-area change, detail handoff and return | **NOT RUN** |
+| Rotation and safe-area change | **NOT RUN** |
 | Offline and recovery | **NOT RUN** |
 | 50-item down/up memory run | **NOT RUN** |
 | Player, surface, and source-replacement counters under real scroll | **NOT OBSERVED** |
@@ -347,7 +347,7 @@ Generate a fresh copy with `node scripts/vertical-video-feed-run-sheet.mjs`.
 - [ ] Swiping settles on one page and only that page plays.
 - [ ] Tapping pauses and resumes; the sound control updates actual player state.
 - [ ] Switching Home to Shorts never leaves both screens playing.
-- [ ] Backgrounding, opening detail, signing out, and unmounting pause or release correctly.
+- [ ] Backgrounding, signing out, and unmounting pause or release correctly.
 - [ ] Pagination, empty state, end state, offline recovery, and playback errors are usable.
 - [ ] iOS and Android pass the manual matrix in portrait and landscape.
 

@@ -63,7 +63,6 @@ export const SHORTS_PERFORMANCE_EVENTS = {
   shortsManualResume: "shorts_manual_resume",
   shortsMuted: "shorts_muted",
   shortsUnmuted: "shorts_unmuted",
-  shortsOpenDetail: "shorts_open_detail",
   shortsRetryPlayback: "shorts_retry_playback",
   shortsQueryReceived: "shorts_query_received",
   shortsEmptyStateViewed: "shorts_empty_state_viewed",

@@ -13,7 +13,6 @@ import { FeedPerformanceDebugOverlay } from "@/components/feed-performance-debug
 import { LiveNowSection } from "@/components/live-now-section";
 import { TabPageLogoHeader } from "@/components/tab-page-logo-header";
 import { api } from "@/convex/_generated/api";
-import { useFeedFeatureFlags } from "@/hooks/use-feed-feature-flags";
 import { useFeedScreenPlayback } from "@/hooks/use-feed-screen-playback";
 import { trackFeedEvent } from "@/lib/feed/feed-telemetry";
 
@@ -25,7 +24,6 @@ const keyExtractor = (item: FeedVideoItem) => item.muxAssetId;
 export default function HomePage() {
   const router = useRouter();
   const isTabFocused = useIsFocused();
-  const { exclusiveFeedPlacementEnabled } = useFeedFeatureFlags();
   const feedListRef = useRef<FlashListRef<FeedVideoItem> | null>(null);
   const queryStartedAtRef = useRef(Date.now());
   const didRecordQueryRef = useRef(false);
@@ -35,9 +33,9 @@ export default function HomePage() {
     status: feedStatus,
     loadMore,
   } = usePaginatedQuery(
-    exclusiveFeedPlacementEnabled
-      ? (api as any).feed.listStandardFeedVideosPaginated
-      : (api as any).feed.listFeedVideosPaginated,
+    // Home is permanently the long-form/general-format surface. Exact 9:16
+    // assets are selected only by the Shorts placement query.
+    (api as any).feed.listStandardFeedVideosPaginated,
     {},
     { initialNumItems: INITIAL_FEED_PAGE_SIZE },
   ) as {

@@ -723,7 +723,6 @@ const PRD_SHORTS_EVENTS = [
   "shorts_manual_resume",
   "shorts_muted",
   "shorts_unmuted",
-  "shorts_open_detail",
   "shorts_retry_playback",
   "shorts_query_received",
   "shorts_empty_state_viewed",
@@ -737,12 +736,12 @@ test("the Shorts event vocabulary matches PRD section 13 exactly", () => {
 });
 
 test("Shorts events extend the Home vocabulary without changing it", () => {
-  // The Home contract is frozen at 20 events; Shorts adds 10 and the runtime
+  // The Home contract is frozen at 20 events; Shorts adds 9 and the runtime
   // lifecycle pair adds 2, all alongside it.
   assert.equal(events.FEED_PERFORMANCE_EVENT_NAMES.length, 20);
-  assert.equal(events.SHORTS_PERFORMANCE_EVENT_NAMES.length, 10);
+  assert.equal(events.SHORTS_PERFORMANCE_EVENT_NAMES.length, 9);
   assert.equal(events.FEED_RUNTIME_EVENT_NAMES.length, 2);
-  assert.equal(events.ALL_FEED_PERFORMANCE_EVENT_NAMES.length, 32);
+  assert.equal(events.ALL_FEED_PERFORMANCE_EVENT_NAMES.length, 31);
 
   for (const name of events.FEED_PERFORMANCE_EVENT_NAMES) {
     assert.ok(events.ALL_FEED_PERFORMANCE_EVENT_NAMES.includes(name));
@@ -1254,21 +1253,21 @@ test("rollback disables the tab first and leaves no unreachable window", () => {
   );
   assert.deepEqual(plan.steps.map((step) => step.order), [1, 2]);
 
-  // Step 1 used to strand exact 9:16 assets between the two steps. The
-  // dependency gate closes that window, and this asserts the closure rather
-  // than assuming it: after step 1, exclusive placement resolves off too.
-  assert.equal(plan.hasUnreachableWindow, false);
-  assert.ok(plan.steps.every((step) => !step.leavesVerticalAssetsUnreachable));
+  // Home is permanently standard-only, so the tab kill switch has an explicit
+  // availability cost even though the legacy dependency gate also resolves the
+  // exclusive-placement flag off.
+  assert.equal(plan.hasUnreachableWindow, true);
+  assert.ok(plan.steps.every((step) => step.leavesVerticalAssetsUnreachable));
 
   const afterStepOne = flags.resolveFeedFeatureFlags({
     ...IOS,
     overrides: { shortsTabEnabled: false, exclusiveFeedPlacementEnabled: true },
   });
   assert.equal(afterStepOne.exclusiveFeedPlacementEnabled.enabled, false);
-  assert.match(plan.summary, /dependency gate/);
+  assert.match(plan.summary, /temporary 9:16 unavailability/);
 });
 
-test("rolling back the tab alone leaves no unreachable window", () => {
+test("rolling back the tab alone makes Shorts-only assets unavailable", () => {
   const shortsOnly = flags.resolveFeedFeatureFlags({
     ...IOS,
     overrides: { shortsTabEnabled: true },
@@ -1276,7 +1275,8 @@ test("rolling back the tab alone leaves no unreachable window", () => {
 
   const plan = rollout.buildShortsRollbackPlan(shortsOnly);
   assert.equal(plan.steps.length, 1);
-  assert.equal(plan.hasUnreachableWindow, false);
+  assert.equal(plan.hasUnreachableWindow, true);
+  assert.equal(plan.steps[0].leavesVerticalAssetsUnreachable, true);
 });
 
 test("a fully rolled-back state has an empty plan", () => {
@@ -1641,7 +1641,6 @@ test("every PRD Phase 6 scenario is defined", () => {
     "shorts-tab-switch",
     "shorts-lifecycle",
     "shorts-rotation",
-    "shorts-detail-handoff",
     "shorts-offline",
     "shorts-recovery",
     "shorts-50-item-memory",

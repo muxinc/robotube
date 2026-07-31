@@ -51,7 +51,6 @@ export type FeedTelemetryEventName =
   | "shorts_manual_resume"
   | "shorts_muted"
   | "shorts_unmuted"
-  | "shorts_open_detail"
   | "shorts_retry_playback"
   | "shorts_query_received"
   | "shorts_empty_state_viewed";

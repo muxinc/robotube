@@ -1,6 +1,6 @@
 import { MuxVideoView } from "@mux/mux-react-native-player";
 import { Image } from "expo-image";
-import { memo, useCallback, useEffect } from "react";
+import { memo, useEffect } from "react";
 import { StyleSheet, View } from "react-native";
 
 import type { FeedVideoItem } from "@/components/feed-video-card";
@@ -24,7 +24,6 @@ export type ShortsVerticalVideoCellProps = {
   playback?: ShortsCellPlayback;
   onToggleMute: () => void;
   onRetry: () => void;
-  onOpenDetail: (item: FeedVideoItem) => void;
 };
 
 /**
@@ -46,7 +45,6 @@ function ShortsVerticalVideoCellComponent({
   playback,
   onToggleMute,
   onRetry,
-  onOpenDetail,
 }: ShortsVerticalVideoCellProps) {
   const { muxAssetId } = item;
   const isActive = playback?.isActive ?? false;
@@ -67,13 +65,6 @@ function ShortsVerticalVideoCellComponent({
     surface.onSurfaceAttached(muxAssetId);
     return () => surface.onSurfaceDetached(muxAssetId);
   }, [isActive, muxAssetId, surface]);
-
-  // Bound here rather than inline in JSX so the memoized overlay is not
-  // invalidated by a fresh closure on every scroll-driven re-render.
-  const handleOpenDetail = useCallback(
-    () => onOpenDetail(item),
-    [item, onOpenDetail],
-  );
 
   return (
     <View style={[styles.page, { height: pageHeight }]}>
@@ -141,7 +132,6 @@ function ShortsVerticalVideoCellComponent({
         isFeedExhausted={isFeedExhausted}
         onToggleMute={onToggleMute}
         onRetry={onRetry}
-        onOpenDetail={handleOpenDetail}
       />
     </View>
   );
@@ -166,8 +156,7 @@ function areShortsCellPropsEqual(
     previous.overlayInsets !== next.overlayInsets ||
     previous.isFeedExhausted !== next.isFeedExhausted ||
     previous.onToggleMute !== next.onToggleMute ||
-    previous.onRetry !== next.onRetry ||
-    previous.onOpenDetail !== next.onOpenDetail
+    previous.onRetry !== next.onRetry
   ) {
     return false;
   }

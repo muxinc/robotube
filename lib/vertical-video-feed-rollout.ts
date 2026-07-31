@@ -281,22 +281,13 @@ export type ShortsRollbackPlan = {
 /**
  * Builds the ordered rollback for the currently resolved flag state.
  *
- * PRD Phase 7: "Roll back by disabling the Shorts tab first; disable exclusive
- * placement if Home must temporarily show all assets again."
+ * Home is permanently standard-only. Disabling Shorts is still the fastest
+ * operational lever for playback, memory, or query incidents, but it now makes
+ * exact 9:16 assets temporarily unavailable rather than putting them back on
+ * Home. The plan reports that product cost explicitly.
  *
- * Taking the tab away first is right — it is the lever that stops playback,
- * memory, and query load immediately. The obvious worry is that doing so while
- * exclusive placement is still on would strand exact 9:16 assets in no feed at
- * all. It does not, because `FEED_FLAG_DEPENDENCIES` makes
- * `exclusiveFeedPlacementEnabled` resolve `false` the instant
- * `shortsTabEnabled` does: any consumer reading the resolver sees Home revert to
- * the migration query in the same resolution pass.
- *
- * Step 2 therefore exists as **cleanup, not rescue** — it clears the stored
- * config value so that later re-enabling the tab does not silently restore
- * exclusivity along with it. Each step still reports
- * `leavesVerticalAssetsUnreachable` so the guarantee is asserted rather than
- * remembered.
+ * The exclusive-placement flag is retained only as config compatibility. Its
+ * cleanup step has no routing effect in current clients.
  */
 export function buildShortsRollbackPlan(
   resolutions: FeedFeatureFlagResolutions,
@@ -311,8 +302,8 @@ export function buildShortsRollbackPlan(
       flagKey: "shortsTabEnabled",
       action: "disable",
       rationale:
-        "Fastest lever: removes the tab and stops every Shorts query, player, and preload. The dependency gate turns exclusive placement off in the same resolution, so Home immediately serves every ready asset again.",
-      leavesVerticalAssetsUnreachable: false,
+        "Fastest lever: removes the tab and stops every Shorts query, player, and preload. Home remains standard-only, so exact 9:16 assets are temporarily unavailable.",
+      leavesVerticalAssetsUnreachable: true,
     });
   }
 
@@ -322,8 +313,8 @@ export function buildShortsRollbackPlan(
       flagKey: "exclusiveFeedPlacementEnabled",
       action: "disable",
       rationale:
-        "Cleanup: clears the stored value so re-enabling the Shorts tab later does not silently restore exclusive placement with it.",
-      leavesVerticalAssetsUnreachable: false,
+        "Compatibility cleanup only: current clients no longer use this flag to select Home's query.",
+      leavesVerticalAssetsUnreachable: shortsOn,
     });
   }
 
@@ -335,8 +326,8 @@ export function buildShortsRollbackPlan(
     steps.length === 0
       ? "Both vertical-feed flags are already off; there is nothing to roll back."
       : steps.length === 1
-        ? `Disable ${steps[0].flagKey}.`
-        : "Disable shortsTabEnabled first — the dependency gate reverts Home in the same pass — then clear exclusiveFeedPlacementEnabled so a later re-enable does not restore it.";
+        ? `Disable ${steps[0].flagKey}; exact 9:16 assets will be unavailable until Shorts is restored.`
+        : "Disable shortsTabEnabled first, accepting temporary 9:16 unavailability, then clear the legacy exclusiveFeedPlacementEnabled value as compatibility cleanup.";
 
   return { steps, hasUnreachableWindow, summary };
 }
