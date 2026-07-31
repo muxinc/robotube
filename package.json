@@ -22,7 +22,7 @@
     "@livekit/react-native-webrtc": "^144.0.0",
     "@mux/ai": "^0.7.5",
     "@mux/mux-node": "^12.8.1",
-    "@mux/mux-react-native-player": "^0.1.10",
+    "@mux/mux-react-native-player": "^0.1.11",
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/elements": "^2.6.3",
     "@react-navigation/native": "^7.1.8",
