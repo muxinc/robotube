@@ -446,7 +446,8 @@ async function applyModerationJobUpdate(
         title: asString(latestMetadata.title),
         description: asString(latestMetadata.description),
         tags: Array.isArray(latestMetadata.tags) ? (latestMetadata.tags as string[]) : undefined,
-        visibility: "public",
+        visibility:
+          latestCustom.awaitingMetadataReview === true ? "private" : "public",
         custom: {
           ...latestCustom,
           moderationCheckedAtMs: Date.now(),

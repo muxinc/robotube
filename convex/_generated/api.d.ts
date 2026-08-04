@@ -47,6 +47,7 @@ import type * as videoChat from "../videoChat.js";
 import type * as videoChatNode from "../videoChatNode.js";
 import type * as videoEmbeddings from "../videoEmbeddings.js";
 import type * as videoEmbeddingsNode from "../videoEmbeddingsNode.js";
+import type * as videoMetadata from "../videoMetadata.js";
 
 import type {
   ApiFromModules,
@@ -94,6 +95,7 @@ declare const fullApi: ApiFromModules<{
   videoChatNode: typeof videoChatNode;
   videoEmbeddings: typeof videoEmbeddings;
   videoEmbeddingsNode: typeof videoEmbeddingsNode;
+  videoMetadata: typeof videoMetadata;
 }>;
 
 /**

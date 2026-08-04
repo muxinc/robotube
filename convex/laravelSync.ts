@@ -391,28 +391,40 @@ export const syncRobotRunInternal = internalMutation({
 
       // Summary -> video description (feed.ts maps summary <- metadata.description).
       if (typeof results.summary === "string") {
-        nextDescription = results.summary;
+        const suggestedDescription = results.summary.trim();
+        if (suggestedDescription.length > 0) {
+          nextCustom.aiSuggestedDescription = suggestedDescription;
+          if (existingCustom.aiUseGeneratedDescription !== false) {
+            nextDescription = suggestedDescription;
+          }
+        }
         nextCustom.aiSummaryJobStatus = "completed";
         nextCustom.aiGeneratedAtMs = asNumber(existingCustom.aiGeneratedAtMs) ?? now;
         nextCustom.aiProvider = "laravel_orchestration";
       }
 
-      // Title -> video title. The native pipeline NEVER overwrites the title
-      // from summarize outputs (upsertAiMetadataFields keeps the existing
-      // title), so mirror that protection: never clobber a user-provided title,
-      // only use Laravel's title to fill an empty one.
-      if (
-        typeof results.title === "string" &&
-        results.title.trim().length > 0 &&
-        nextTitle === undefined
-      ) {
-        nextTitle = results.title.trim();
+      // Keep the suggestion for the finishing screen, but only apply it when
+      // the uploader explicitly asked Mux Robots to write the title. Legacy
+      // uploads retain the previous fill-only-when-empty behavior.
+      if (typeof results.title === "string" && results.title.trim().length > 0) {
+        const suggestedTitle = results.title.trim();
+        nextCustom.aiSuggestedTitle = suggestedTitle;
+        if (
+          existingCustom.aiUseGeneratedTitle === true ||
+          (existingCustom.aiUseGeneratedTitle === undefined && nextTitle === undefined)
+        ) {
+          nextTitle = suggestedTitle;
+        }
       }
 
       // Tags -> video tags. Native replaces tags with the generated set on
       // summarize completion (normalizeGeneratedTags), so replace when provided.
       if (Array.isArray(results.tags)) {
-        nextTags = normalizeGeneratedTags(results.tags);
+        const suggestedTags = normalizeGeneratedTags(results.tags);
+        nextCustom.aiSuggestedTags = suggestedTags;
+        if (existingCustom.aiUseGeneratedTags !== false) {
+          nextTags = suggestedTags;
+        }
       }
 
       // Chapters -> custom.aiChapters, converted to the EXACT native camelCase

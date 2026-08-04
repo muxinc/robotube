@@ -91,7 +91,6 @@ export const getUploadModerationStatus = query({
       : asRecord(metadataValue);
     const custom = asRecord(metadataRecord?.custom) ?? {};
     const metadataUserId = asString(metadataRecord?.userId);
-
     if (metadataUserId && metadataUserId !== authUserId) {
       return {
         stage: "forbidden",
@@ -337,6 +336,21 @@ export const getUploadPipelineStatus = query({
       : asRecord(metadataValue);
     const custom = asRecord(metadataRecord?.custom) ?? {};
     const metadataUserId = asString(metadataRecord?.userId);
+    const generatedMetadata = {
+      summaryReady:
+        asNumber(custom.aiGeneratedAtMs) !== undefined ||
+        asString(custom.aiSummaryJobStatus) === "completed",
+      generatedAtMs: asNumber(custom.aiGeneratedAtMs),
+      summaryStatus: asString(custom.aiSummaryJobStatus),
+      suggestedTitle: asString(custom.aiSuggestedTitle),
+      suggestedDescription: asString(custom.aiSuggestedDescription),
+      suggestedTags:
+        asStringArrayLoose(custom.aiSuggestedTags) ??
+        asStringArrayLoose(metadataRecord?.tags) ??
+        [],
+      appliedTitle: asString(metadataRecord?.title),
+      appliedDescription: asString(metadataRecord?.description),
+    };
 
     if (metadataUserId && metadataUserId !== authUserId) {
       return {
@@ -393,6 +407,8 @@ export const getUploadPipelineStatus = query({
         statusText:
           "Moderation flagged this video. It stays private and hidden from the feed.",
         jobs,
+        muxAssetId,
+        generatedMetadata,
       };
     }
 
@@ -422,6 +438,8 @@ export const getUploadPipelineStatus = query({
         statusText:
           "Video processing is complete. Automated Robots jobs are disabled for this deployment.",
         jobs: [] as PipelineJob[],
+        muxAssetId,
+        generatedMetadata,
       };
     }
 
@@ -501,6 +519,8 @@ export const getUploadPipelineStatus = query({
       progress: computePipelineProgress(jobs),
       statusText,
       jobs,
+      muxAssetId,
+      generatedMetadata,
     };
   },
 });

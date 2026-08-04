@@ -102,6 +102,9 @@ function isMuxRobotsPollingDisabled() {
 export const createMuxDirectUpload = action({
   args: {
     title: v.optional(v.string()),
+    description: v.optional(v.string()),
+    useGeneratedTitle: v.optional(v.boolean()),
+    useGeneratedDescription: v.optional(v.boolean()),
     audioTranslationLanguageCodes: v.optional(v.array(v.string())),
     captionTranslationLanguageCodes: v.optional(v.array(v.string())),
   },
@@ -114,6 +117,7 @@ export const createMuxDirectUpload = action({
     const mux = createMuxClient();
     const userId = authUserId;
     const title = args.title?.trim() || undefined;
+    const description = args.description?.trim() || undefined;
     const audioTranslationLanguageCodes = normalizeAudioTranslationLanguageCodes(
       args.audioTranslationLanguageCodes ?? [],
     );
@@ -133,12 +137,14 @@ export const createMuxDirectUpload = action({
     const muxReferenceId = `rt-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
     const passthrough = JSON.stringify({
       userId,
-      visibility: "public",
-      custom:
-        audioTranslationLanguageCodes.length > 0 ||
-        captionTranslationLanguageCodes.length > 0
-          ? { audioTranslationLanguageCodes, captionTranslationLanguageCodes }
-          : undefined,
+      // Upload and process privately. The uploader explicitly publishes after
+      // reviewing the generated Mux Robots metadata draft.
+      visibility: "private",
+      custom: {
+        awaitingMetadataReview: true,
+        audioTranslationLanguageCodes,
+        captionTranslationLanguageCodes,
+      },
     });
 
     const upload = await mux.video.uploads.create({
@@ -165,6 +171,9 @@ export const createMuxDirectUpload = action({
           uploadId: upload.id,
           userId,
           title,
+          description,
+          useGeneratedTitle: args.useGeneratedTitle,
+          useGeneratedDescription: args.useGeneratedDescription,
           attempt: 0,
         },
       );
@@ -184,6 +193,9 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
     uploadId: v.string(),
     userId: v.string(),
     title: v.optional(v.string()),
+    description: v.optional(v.string()),
+    useGeneratedTitle: v.optional(v.boolean()),
+    useGeneratedDescription: v.optional(v.boolean()),
     attempt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -208,6 +220,9 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
               uploadId: args.uploadId,
               userId: args.userId,
               title: args.title,
+              description: args.description,
+              useGeneratedTitle: args.useGeneratedTitle,
+              useGeneratedDescription: args.useGeneratedDescription,
               attempt: nextAttempt,
             },
           );
@@ -245,8 +260,9 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
 
       const resolvedTitle = metadata.title ?? args.title;
       if (resolvedTitle !== undefined) metadataArgs.title = resolvedTitle;
-      if (metadata.description !== undefined) {
-        metadataArgs.description = metadata.description;
+      const resolvedDescription = metadata.description ?? args.description;
+      if (resolvedDescription !== undefined) {
+        metadataArgs.description = resolvedDescription;
       }
       if (metadata.tags !== undefined) metadataArgs.tags = metadata.tags;
       if (metadata.visibility !== undefined) {
@@ -258,6 +274,12 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
       const muxReferenceId = asString(asRecord((asset as any).meta)?.external_id);
       const mergedCustom = {
         ...(metadata.custom ?? {}),
+        ...(args.useGeneratedTitle !== undefined
+          ? { aiUseGeneratedTitle: args.useGeneratedTitle }
+          : {}),
+        ...(args.useGeneratedDescription !== undefined
+          ? { aiUseGeneratedDescription: args.useGeneratedDescription }
+          : {}),
         ...(muxReferenceId ? { muxReferenceId } : {}),
       };
       if (Object.keys(mergedCustom).length > 0) {
@@ -277,6 +299,9 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
               uploadId: args.uploadId,
               userId: args.userId,
               title: args.title,
+              description: args.description,
+              useGeneratedTitle: args.useGeneratedTitle,
+              useGeneratedDescription: args.useGeneratedDescription,
               attempt: nextAttempt,
             },
           );
@@ -332,6 +357,9 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
             uploadId: args.uploadId,
             userId: args.userId,
             title: args.title,
+            description: args.description,
+            useGeneratedTitle: args.useGeneratedTitle,
+            useGeneratedDescription: args.useGeneratedDescription,
             attempt: nextAttempt,
           },
         );

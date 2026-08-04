@@ -47,7 +47,9 @@ export async function upsertVideoMetadataAndSyncFeedReadModel(
     {
       muxAssetId: args.muxAssetId,
       uploaderUserId: asNonEmptyString(args.userId) ?? undefined,
-      title: asNonEmptyString(args.title) ?? undefined,
+      // An explicitly empty title means the uploader deleted it; preserve that
+      // signal so feed reads fall back to their deterministic placeholder.
+      title: args.title,
       channelName: readChannelNameOverride(args.custom),
       visibility: asFeedVisibility(args.visibility),
       applyChannelName: args.custom !== undefined,

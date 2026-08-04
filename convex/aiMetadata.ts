@@ -1,6 +1,7 @@
 "use node";
 
 import Mux from "@mux/mux-node";
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 
 import { components, internal } from "./_generated/api";
@@ -1219,15 +1220,36 @@ async function applyAiMetadataJobUpdate(
     }
 
     if (summarizeJob.status === "completed") {
+      const suggestedTitle =
+        typeof summarizeJob.outputs?.title === "string" &&
+        summarizeJob.outputs.title.trim().length > 0
+          ? summarizeJob.outputs.title.trim()
+          : undefined;
+      const suggestedDescription =
+        typeof summarizeJob.outputs?.description === "string" &&
+        summarizeJob.outputs.description.trim().length > 0
+          ? summarizeJob.outputs.description.trim()
+          : undefined;
+      const suggestedTags = normalizeGeneratedTags(summarizeJob.outputs?.tags);
+      const useGeneratedTitle = existingCustom.aiUseGeneratedTitle === true;
+      const useGeneratedDescription =
+        existingCustom.aiUseGeneratedDescription !== false;
+      const useGeneratedTags = existingCustom.aiUseGeneratedTags !== false;
+
       await upsertAiMetadataFields(ctx, args, {
-        description:
-          typeof summarizeJob.outputs?.description === "string"
-            ? summarizeJob.outputs.description.trim()
-            : undefined,
-        tags: normalizeGeneratedTags(summarizeJob.outputs?.tags),
+        title: useGeneratedTitle ? suggestedTitle : undefined,
+        description: useGeneratedDescription
+          ? suggestedDescription
+          : undefined,
+        tags: useGeneratedTags ? suggestedTags : undefined,
         custom: {
           aiSummaryJobId: summarizeJob.id,
           aiSummaryJobStatus: summarizeJob.status,
+          ...(suggestedTitle ? { aiSuggestedTitle: suggestedTitle } : {}),
+          ...(suggestedDescription
+            ? { aiSuggestedDescription: suggestedDescription }
+            : {}),
+          aiSuggestedTags: suggestedTags,
           aiGeneratedAtMs: Date.now(),
           aiProvider: "mux",
           aiAttemptCount:
@@ -1428,6 +1450,92 @@ export const ensureAiMetadataForAsset = action({
   },
   handler: async (ctx, args): Promise<EnsureAiMetadataResult> => {
     return await ensureAiMetadataForAssetImpl(ctx, args);
+  },
+});
+
+/** Create a fresh summarize job for an authenticated uploader's private draft. */
+export const regenerateOwnMetadataDraft = action({
+  args: {
+    muxAssetId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) {
+      throw new Error("You must be signed in to regenerate video metadata.");
+    }
+    if (isMuxRobotsPollingDisabled()) {
+      throw new Error("Mux Robots polling is disabled for this deployment.");
+    }
+
+    const video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
+      muxAssetId: args.muxAssetId,
+      userId: authUserId,
+    });
+    if (!video?.asset) throw new Error("Video not found.");
+
+    const metadata = getMetadataRecord(video.metadata);
+    const custom = asCustomRecord(metadata.custom);
+    const asset = video.asset as Record<string, unknown>;
+    const owner =
+      asString(metadata.userId) ?? parseMetadataPassthrough(asset.passthrough).userId;
+    if (owner !== authUserId) {
+      throw new Error("You can only regenerate metadata for your own videos.");
+    }
+    if (custom.moderationPassed !== true) {
+      throw new Error("Metadata can be regenerated after moderation passes.");
+    }
+
+    const createdJob = await createSummarizeJob({
+      assetId: args.muxAssetId,
+      tone: SUMMARIZE_TONE,
+      titleLength: SUMMARIZE_TITLE_LENGTH,
+      descriptionLength: SUMMARIZE_DESCRIPTION_LENGTH,
+      tagCount: SUMMARIZE_TAG_COUNT,
+      passthrough: JSON.stringify({
+        muxAssetId: args.muxAssetId,
+        userId: authUserId,
+        tone: SUMMARIZE_TONE,
+        regenerated: true,
+      }),
+    });
+    const jobId = requireMuxJobId("summarize", createdJob.id);
+
+    await updateAiMetadataTrackingFields(
+      ctx,
+      { muxAssetId: args.muxAssetId, userId: authUserId },
+      metadata,
+      {
+        aiSummaryJobId: jobId,
+        aiSummaryJobStatus: createdJob.status,
+        aiGeneratedAtMs: null,
+        aiUseGeneratedTitle: false,
+        aiUseGeneratedDescription: false,
+        aiUseGeneratedTags: false,
+        aiMetadataRegenerationRequestedAtMs: Date.now(),
+      },
+    );
+
+    if (isTerminalMuxRobotsJobStatus(createdJob.status)) {
+      await applyAiMetadataJobUpdate(
+        ctx,
+        {
+          muxAssetId: args.muxAssetId,
+          userId: authUserId,
+          workflow: "summarize",
+        },
+        createdJob,
+      );
+    } else {
+      await scheduleAiMetadataFallbackPoll(ctx, {
+        muxAssetId: args.muxAssetId,
+        userId: authUserId,
+        workflow: "summarize",
+        jobId,
+        attempt: 0,
+      });
+    }
+
+    return { ok: true, jobId, status: createdJob.status };
   },
 });
 
