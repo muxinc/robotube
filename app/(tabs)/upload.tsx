@@ -10,6 +10,9 @@ import { useVideoPlayer, VideoView } from "expo-video";
 import { useEffect, useState } from "react";
 import {
   Alert,
+  InputAccessoryView,
+  Keyboard,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -46,6 +49,8 @@ const UPLOAD_STEP_TITLES: Record<UploadStep, string> = {
   review: "Review upload",
   status: "Robot draft",
 };
+
+const ROBOT_DRAFT_INPUT_ACCESSORY_ID = "robot-draft-input-accessory";
 
 function UploadStepHeader({
   step,
@@ -1050,13 +1055,20 @@ export default function HomeScreen() {
                     <ThemedText style={styles.generatedResultLabel}>Title</ThemedText>
                     <TextInput
                       editable={!isRegeneratingMetadata}
+                      inputAccessoryViewID={
+                        Platform.OS === "ios"
+                          ? ROBOT_DRAFT_INPUT_ACCESSORY_ID
+                          : undefined
+                      }
                       maxLength={120}
                       onChangeText={(value) => {
                         setRobotDraftTitle(value);
                         setMetadataSaveStatus(null);
                       }}
+                      onSubmitEditing={() => Keyboard.dismiss()}
                       placeholder="Add a title"
                       placeholderTextColor="#7A8494"
+                      returnKeyType="done"
                       style={styles.generatedTitleInput}
                       value={robotDraftTitle}
                     />
@@ -1068,6 +1080,11 @@ export default function HomeScreen() {
                     </ThemedText>
                     <TextInput
                       editable={!isRegeneratingMetadata}
+                      inputAccessoryViewID={
+                        Platform.OS === "ios"
+                          ? ROBOT_DRAFT_INPUT_ACCESSORY_ID
+                          : undefined
+                      }
                       maxLength={500}
                       multiline
                       onChangeText={(value) => {
@@ -1109,6 +1126,11 @@ export default function HomeScreen() {
                       <TextInput
                         autoCapitalize="none"
                         editable={!isRegeneratingMetadata}
+                        inputAccessoryViewID={
+                          Platform.OS === "ios"
+                            ? ROBOT_DRAFT_INPUT_ACCESSORY_ID
+                            : undefined
+                        }
                         maxLength={40}
                         onChangeText={setNewRobotDraftTag}
                         onSubmitEditing={addRobotDraftTag}
@@ -1280,6 +1302,26 @@ export default function HomeScreen() {
           </>
         ) : null}
       </TabPageScrollLayout>
+
+      {Platform.OS === "ios" ? (
+        <InputAccessoryView nativeID={ROBOT_DRAFT_INPUT_ACCESSORY_ID}>
+          <View style={styles.keyboardAccessory}>
+            <Pressable
+              accessibilityLabel="Finish editing video details"
+              accessibilityRole="button"
+              hitSlop={8}
+              onPress={() => Keyboard.dismiss()}
+              style={({ pressed }) => [
+                styles.keyboardDoneButton,
+                pressed ? styles.buttonPressed : undefined,
+              ]}
+            >
+              <Ionicons name="checkmark-circle" size={21} color="#CC4C99" />
+              <ThemedText style={styles.keyboardDoneText}>Done</ThemedText>
+            </Pressable>
+          </View>
+        </InputAccessoryView>
+      ) : null}
     </ThemedView>
   );
 }
@@ -1696,6 +1738,32 @@ const styles = StyleSheet.create({
   },
   addTagButtonDisabled: {
     backgroundColor: "#C7CCD4",
+  },
+  keyboardAccessory: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    paddingHorizontal: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#E0B8D2",
+    backgroundColor: "#FFF8FC",
+  },
+  keyboardDoneButton: {
+    minHeight: 38,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: "#FFE4F4",
+  },
+  keyboardDoneText: {
+    fontSize: 14,
+    lineHeight: 19,
+    color: "#B24A88",
+    fontWeight: "700",
   },
   draftStatusRow: {
     minHeight: 38,

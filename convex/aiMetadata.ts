@@ -18,7 +18,10 @@ const SUMMARIZE_TONE = "neutral";
 const SUMMARIZE_TITLE_LENGTH = 80;
 const SUMMARIZE_DESCRIPTION_LENGTH = 320;
 const SUMMARIZE_TAG_COUNT = 10;
-const SUMMARIZE_MAX_POLL_ATTEMPTS = 30;
+// A summarize job can take longer than the old 45-second polling window. Keep
+// the explicit regeneration watcher alive long enough to surface the result as
+// soon as Mux finishes instead of falling back to another two-minute delay.
+const SUMMARIZE_MAX_POLL_ATTEMPTS = 120;
 const SUMMARIZE_POLL_INTERVAL_MS = 1500;
 const GENERATE_CHAPTERS_MAX_POLL_ATTEMPTS = 30;
 const GENERATE_CHAPTERS_POLL_INTERVAL_MS = 1500;
@@ -1526,7 +1529,12 @@ export const regenerateOwnMetadataDraft = action({
         createdJob,
       );
     } else {
-      await scheduleAiMetadataFallbackPoll(ctx, {
+      // Regeneration is initiated while the uploader is actively waiting on
+      // the review screen. Start the watcher immediately. This is especially
+      // important when Laravel owns Robots webhooks: those events describe a
+      // Laravel run, while this one-off job is created directly by Convex and
+      // therefore relies on polling to persist its replacement suggestions.
+      await ctx.scheduler.runAfter(0, (internal as any).aiMetadata.pollAiMetadataJobStatusInternal, {
         muxAssetId: args.muxAssetId,
         userId: authUserId,
         workflow: "summarize",
