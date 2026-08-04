@@ -42,6 +42,9 @@ export type FeedTelemetryEventName =
   | "feed_preload_cancelled"
   | "feed_preload_cache_hit"
   | "feed_preload_promoted_to_active"
+  // Card-feed preview sound toggle (Home/search autoplay previews).
+  | "feed_preview_muted"
+  | "feed_preview_unmuted"
   // Shorts-specific vocabulary. These describe interactions the card feed has
   // no equivalent for, so they are additive rather than reusing a feed_* name.
   // They flow through the same privacy sanitizer and performance sink.

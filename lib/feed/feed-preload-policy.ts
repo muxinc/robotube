@@ -27,7 +27,7 @@ export type FeedPreloadWindowInputs = {
   preloadBehind: number;
   /** False whenever policy, lifecycle, or focus forbids preloading. */
   isPreloadAllowed: boolean;
-  /** True while the list is dragging or in momentum. */
+  /** True while the list is dragging or in momentum. Retained work is preserved. */
   isScrolling: boolean;
   /** True when the scroll is fast enough to be treated as a fling. */
   isFling: boolean;
@@ -46,7 +46,6 @@ export function selectPreloadWindow(inputs: FeedPreloadWindowInputs): number[] {
     preloadAhead,
     preloadBehind,
     isPreloadAllowed,
-    isScrolling,
     isFling,
   } = inputs;
 
@@ -57,7 +56,6 @@ export function selectPreloadWindow(inputs: FeedPreloadWindowInputs): number[] {
   if (committedIndex < 0 || committedIndex >= itemCount) return [];
 
   const window = [committedIndex];
-  if (isScrolling) return window;
 
   const ahead = Math.max(0, Math.trunc(preloadAhead));
   const behind = Math.max(0, Math.trunc(preloadBehind));
@@ -77,6 +75,11 @@ export function selectPreloadWindow(inputs: FeedPreloadWindowInputs): number[] {
     for (let step = 1; step <= ahead; step += 1) push(committedIndex - step);
     for (let step = 1; step <= behind; step += 1) push(committedIndex + step);
   }
+
+  // `isScrolling` deliberately does not narrow this retained window. On iOS,
+  // the warm bytes live in the retained AVPlayerItem itself, so cancelling the
+  // likely destination when a gesture begins would guarantee a cold start.
+  // A true high-velocity fling is still handled by the `isFling` gate above.
 
   return window;
 }

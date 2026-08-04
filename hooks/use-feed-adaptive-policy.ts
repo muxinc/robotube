@@ -1,3 +1,4 @@
+import { useNetInfo } from "@react-native-community/netinfo";
 import { useEffect, useMemo, useState } from "react";
 import {
   AccessibilityInfo,
@@ -8,6 +9,7 @@ import {
 
 import {
   classifyDevice,
+  resolveFeedNetworkClass,
   resolveFeedMediaPolicy,
   type FeedMediaPolicy,
   type FeedNetworkClass,
@@ -17,11 +19,8 @@ export type UseFeedAdaptivePolicyOptions = {
   /**
    * Network classification provider.
    *
-   * The app has no network-reachability dependency installed, so the default is
-   * `"unknown"`, which resolves to a conservative policy: autoplay stays on,
-   * media preload stays off (it requires a confirmed `"wifi"`). Wiring a real
-   * provider (NetInfo or an equivalent) is a rollout dependency, not a
-   * behavioural change — pass one here and the policy tightens automatically.
+   * Optional override for tests or a host-provided low-data policy. Runtime
+   * callers use the live NetInfo snapshot by default.
    */
   networkClass?: FeedNetworkClass;
   /** Explicit low-data preference when the host app knows one. */
@@ -33,10 +32,11 @@ export type UseFeedAdaptivePolicyOptions = {
  * the feed's media policy.
  */
 export function useFeedAdaptivePolicy({
-  networkClass = "unknown",
+  networkClass: networkClassOverride,
   prefersLowData = false,
 }: UseFeedAdaptivePolicyOptions = {}): FeedMediaPolicy {
   const { width, height } = useWindowDimensions();
+  const networkState = useNetInfo();
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const [isMemoryPressured, setIsMemoryPressured] = useState(false);
 
@@ -77,6 +77,14 @@ export function useFeedAdaptivePolicy({
 
   const pixelRatio = PixelRatio.get();
   const shortestSideDp = Math.min(width, height);
+  const networkClass =
+    networkClassOverride ??
+    resolveFeedNetworkClass({
+      type: networkState.type,
+      isConnected: networkState.isConnected,
+      isInternetReachable: networkState.isInternetReachable,
+      isConnectionExpensive: networkState.details?.isConnectionExpensive,
+    });
 
   return useMemo(
     () =>

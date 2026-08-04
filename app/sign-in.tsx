@@ -15,21 +15,19 @@ WebBrowser.maybeCompleteAuthSession();
 
 export default function SignInScreen() {
   const { signIn } = useAuthActions();
-  const [isSubmittingProvider, setIsSubmittingProvider] = useState<
-    "google" | "apple" | null
-  >(null);
+  const [isSigningIn, setIsSigningIn] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
 
   useEffect(() => {
     setErrorText(null);
-  }, [isSubmittingProvider]);
+  }, [isSigningIn]);
 
-  const handleOAuthSignIn = async (provider: "google" | "apple") => {
-    setIsSubmittingProvider(provider);
+  const handleOAuthSignIn = async () => {
+    setIsSigningIn(true);
     setErrorText(null);
 
     try {
-      const result = await signIn(provider, { redirectTo: "/sign-in" });
+      const result = await signIn("google", { redirectTo: "/sign-in" });
       if (Platform.OS === "web" || !result.redirect) {
         return;
       }
@@ -50,7 +48,7 @@ export default function SignInScreen() {
         throw new Error("Missing OAuth code from callback.");
       }
 
-      await signIn(provider, { code });
+      await signIn("google", { code });
     } catch (error) {
       const message =
         error instanceof Error
@@ -58,7 +56,7 @@ export default function SignInScreen() {
           : "Could not complete sign in. Please try again.";
       setErrorText(message);
     } finally {
-      setIsSubmittingProvider(null);
+      setIsSigningIn(false);
     }
   };
 
@@ -73,32 +71,16 @@ export default function SignInScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.button,
-            isSubmittingProvider === "google" && styles.buttonDisabled,
+            isSigningIn && styles.buttonDisabled,
             pressed && styles.buttonPressed,
           ]}
-          onPress={() => void handleOAuthSignIn("google")}
-          disabled={isSubmittingProvider !== null}
+          onPress={() => void handleOAuthSignIn()}
+          disabled={isSigningIn}
         >
-          {isSubmittingProvider === "google" ? (
+          {isSigningIn ? (
             <ActivityIndicator color="#111111" />
           ) : (
             <Text style={styles.buttonText}>Continue with Google</Text>
-          )}
-        </Pressable>
-
-        <Pressable
-          style={({ pressed }) => [
-            styles.button,
-            isSubmittingProvider === "apple" && styles.buttonDisabled,
-            pressed && styles.buttonPressed,
-          ]}
-          onPress={() => void handleOAuthSignIn("apple")}
-          disabled={isSubmittingProvider !== null}
-        >
-          {isSubmittingProvider === "apple" ? (
-            <ActivityIndicator color="#111111" />
-          ) : (
-            <Text style={styles.buttonText}>Continue with Apple</Text>
           )}
         </Pressable>
 

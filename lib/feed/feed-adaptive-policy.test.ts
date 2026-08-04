@@ -6,11 +6,39 @@ import {
   FEED_MAX_RESOLUTION,
   MAX_THUMBNAIL_WIDTH_PX,
   MIN_THUMBNAIL_WIDTH_PX,
+  resolveFeedNetworkClass,
   resolveFeedMediaPolicy,
   resolveThumbnailWidthPx,
   withThumbnailWidth,
   type FeedPolicyInputs,
 } from "./feed-adaptive-policy";
+
+describe("network classification", () => {
+  it("recognizes reusable unmetered transports", () => {
+    assert.equal(resolveFeedNetworkClass({ type: "wifi", isConnected: true }), "wifi");
+    assert.equal(resolveFeedNetworkClass({ type: "ethernet", isConnected: true }), "wifi");
+  });
+
+  it("distinguishes cellular, constrained, offline, and unknown states", () => {
+    assert.equal(
+      resolveFeedNetworkClass({ type: "cellular", isConnected: true }),
+      "cellular",
+    );
+    assert.equal(
+      resolveFeedNetworkClass({
+        type: "wifi",
+        isConnected: true,
+        isConnectionExpensive: true,
+      }),
+      "constrained",
+    );
+    assert.equal(
+      resolveFeedNetworkClass({ type: "wifi", isInternetReachable: false }),
+      "offline",
+    );
+    assert.equal(resolveFeedNetworkClass({ type: "unknown" }), "unknown");
+  });
+});
 
 function policyInputs(overrides: Partial<FeedPolicyInputs> = {}): FeedPolicyInputs {
   return {

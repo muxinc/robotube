@@ -89,7 +89,9 @@ test("retained native tabs allocate a player only for the focused feed", () => {
 });
 
 test("Shorts exposes the Mux player UI without duplicate media controls", () => {
-  assert.match(shortsCell, /controls="custom"/);
+  // The committed page carries Mux's custom controls; the pre-rendered standby
+  // page is bare video so no chrome slides in with the swipe.
+  assert.match(shortsCell, /controls=\{isActive \? "custom" : "none"\}/);
   assert.doesNotMatch(shortsCell, /pointerEvents="none"[^]*<MuxVideoView/);
   assert.doesNotMatch(shortsOverlay, /onTogglePlayback/);
   assert.doesNotMatch(shortsOverlay, /name=\{isPlaying \? "pause" : "play"\}/);

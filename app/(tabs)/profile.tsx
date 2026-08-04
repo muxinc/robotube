@@ -47,9 +47,7 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { signIn, signOut } = useAuthActions();
   const [isSigningOut, setIsSigningOut] = useState(false);
-  const [isSubmittingProvider, setIsSubmittingProvider] = useState<
-    "google" | "apple" | null
-  >(null);
+  const [isSigningIn, setIsSigningIn] = useState(false);
   const [handleInput, setHandleInput] = useState("");
   const [isSavingHandle, setIsSavingHandle] = useState(false);
   const [handleMessage, setHandleMessage] = useState<string | null>(null);
@@ -79,19 +77,19 @@ export default function ProfileScreen() {
 
   useEffect(() => {
     setErrorText(null);
-  }, [isSigningOut, isSubmittingProvider]);
+  }, [isSigningOut, isSigningIn]);
 
   useEffect(() => {
     setHandleInput(currentUser?.username ?? "");
   }, [currentUser?.username]);
 
-  const handleOAuthSignIn = async (provider: "google" | "apple") => {
-    if (isSubmittingProvider || isSigningOut) return;
-    setIsSubmittingProvider(provider);
+  const handleOAuthSignIn = async () => {
+    if (isSigningIn || isSigningOut) return;
+    setIsSigningIn(true);
     setErrorText(null);
 
     try {
-      const result = await signIn(provider, { redirectTo: "/profile" });
+      const result = await signIn("google", { redirectTo: "/profile" });
       if (Platform.OS !== "web" && result.redirect) {
         const callbackUrl = Linking.createURL("profile");
         const authResult = await WebBrowser.openAuthSessionAsync(
@@ -105,7 +103,7 @@ export default function ProfileScreen() {
           if (!code) {
             throw new Error("Missing OAuth code from callback.");
           }
-          await signIn(provider, { code });
+          await signIn("google", { code });
         }
       }
 
@@ -117,12 +115,12 @@ export default function ProfileScreen() {
           : "Could not complete sign in. Please try again.";
       setErrorText(message);
     } finally {
-      setIsSubmittingProvider(null);
+      setIsSigningIn(false);
     }
   };
 
   const handleSignOut = async () => {
-    if (isSigningOut || isSubmittingProvider) return;
+    if (isSigningOut || isSigningIn) return;
     setIsSigningOut(true);
     try {
       await signOut();
@@ -132,7 +130,7 @@ export default function ProfileScreen() {
   };
 
   const handleOpenProfileMenu = () => {
-    if (isSigningOut || isSubmittingProvider) return;
+    if (isSigningOut || isSigningIn) return;
 
     if (Platform.OS === "ios") {
       ActionSheetIOS.showActionSheetWithOptions(
@@ -283,35 +281,15 @@ export default function ProfileScreen() {
           style={({ pressed }) => [
             styles.authButton,
             pressed && styles.signOutPressed,
-            isSubmittingProvider === "google" && styles.signOutDisabled,
+            isSigningIn && styles.signOutDisabled,
           ]}
           onPress={() => {
-            void handleOAuthSignIn("google");
+            void handleOAuthSignIn();
           }}
-          disabled={Boolean(isSubmittingProvider) || isSigningOut}
+          disabled={isSigningIn || isSigningOut}
         >
           <Text style={styles.authButtonText}>
-            {isSubmittingProvider === "google"
-              ? "Connecting Google..."
-              : "Continue with Google"}
-          </Text>
-        </Pressable>
-
-        <Pressable
-          style={({ pressed }) => [
-            styles.authButton,
-            pressed && styles.signOutPressed,
-            isSubmittingProvider === "apple" && styles.signOutDisabled,
-          ]}
-          onPress={() => {
-            void handleOAuthSignIn("apple");
-          }}
-          disabled={Boolean(isSubmittingProvider) || isSigningOut}
-        >
-          <Text style={styles.authButtonText}>
-            {isSubmittingProvider === "apple"
-              ? "Connecting Apple..."
-              : "Continue with Apple"}
+            {isSigningIn ? "Connecting Google..." : "Continue with Google"}
           </Text>
         </Pressable>
 

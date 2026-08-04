@@ -29,12 +29,15 @@ export type ShortsVerticalVideoCellProps = {
 /**
  * One full-viewport 9:16 page.
  *
- * The cell is thumbnail-first by construction: the Mux thumbnail is mounted
- * above the native surface and only becomes transparent once the committed
- * source reports a real frame, so a recycled cell, a loading source, an offline
- * viewer, and a playback error all show a poster rather than a black rectangle.
- * `recyclingKey` ties the decoded image to the asset, which is what stops a
- * reused cell from painting the previous video's frame during a fast fling.
+ * A cell renders a player surface whenever a slot is bound to it — the
+ * committed page (playing) or the standby page (paused, muted, pre-rendered).
+ * The Mux thumbnail is mounted above the surface and becomes transparent the
+ * moment that slot's source reports a real frame; because the standby page
+ * reaches its first frame off-screen, a normal swipe never shows the
+ * thumbnail at all. It remains the fail-safe for cold pages (long flings), a
+ * loading source, an offline viewer, and playback errors. `recyclingKey` ties
+ * the decoded image to the asset, which is what stops a reused cell from
+ * painting the previous video's frame during a fast fling.
  */
 function ShortsVerticalVideoCellComponent({
   item,
@@ -58,13 +61,15 @@ function ShortsVerticalVideoCellComponent({
   }, []);
 
   // Attach/detach is scoped to this cell's asset id, so a recycled cell that
-  // rebinds to different content detaches before the new content binds.
+  // rebinds to different content detaches before the new content binds. Both
+  // slot surfaces (committed and standby) report their lifecycle.
   const surface = playback?.surface;
+  const hasPlayer = (playback?.player ?? null) !== null;
   useEffect(() => {
-    if (!isActive || !surface) return;
+    if (!hasPlayer || !surface) return;
     surface.onSurfaceAttached(muxAssetId);
     return () => surface.onSurfaceDetached(muxAssetId);
-  }, [isActive, muxAssetId, surface]);
+  }, [hasPlayer, muxAssetId, surface]);
 
   return (
     <View style={[styles.page, { height: pageHeight }]}>
@@ -79,7 +84,7 @@ function ShortsVerticalVideoCellComponent({
         importantForAccessibility={isActive ? "yes" : "no-hide-descendants"}
         style={styles.mediaLayer}
       >
-        {isActive && playback?.player ? (
+        {playback?.player ? (
           <View style={styles.previewLayer}>
             <MuxVideoView
               player={playback.player}
@@ -87,15 +92,20 @@ function ShortsVerticalVideoCellComponent({
               // Immersive full-viewport presentation. The source is already an
               // exact 9:16 asset, so cover crops nothing on a portrait page.
               contentFit="cover"
-              // Use Mux's shared React Native player UI. This provides the
-              // center transport cluster, timeline, settings, AirPlay,
-              // hidden-control scrim, and their built-in accessibility.
-              controls="custom"
+              // Use Mux's shared React Native player UI on the committed page.
+              // The standby page renders bare video: its chrome would slide in
+              // with the swipe. Both values share the managed render path, so
+              // flipping on promote never remounts the native view.
+              controls={isActive ? "custom" : "none"}
               allowsFullscreen={false}
               // The <Image> below is the poster; a second one inside the native
               // view would fetch and decode the same frame again.
               poster={false}
               timeUpdateEventInterval={0.25}
+              // 0.5s keeps Android at its default start threshold while
+              // shrinking iOS's forward-buffer requirement, so playback (and
+              // the first frame) begins as soon as a warm start allows.
+              startupBufferDuration={0.5}
               onStatusChange={(event) =>
                 playback.surface.onStatusChange(muxAssetId, event.status)
               }
@@ -103,6 +113,9 @@ function ShortsVerticalVideoCellComponent({
               onTimeUpdate={(event) =>
                 playback.surface.onTimeUpdate(muxAssetId, event.currentTime)
               }
+              // The native first-frame signal is what lets the poster above
+              // fade the instant real pixels exist — no polling latency.
+              onFirstFrame={() => playback.surface.onFirstFrame(muxAssetId)}
               onSourceError={(event) =>
                 playback.surface.onSourceError(muxAssetId, event.message)
               }
@@ -119,7 +132,9 @@ function ShortsVerticalVideoCellComponent({
           pointerEvents="none"
           style={[
             styles.thumbnail,
-            isActive && hasFirstFrame && styles.thumbnailHidden,
+            // Per-slot signal: the standby page drops its poster off-screen,
+            // which is why a swipe lands on video rather than a thumbnail.
+            hasFirstFrame && styles.thumbnailHidden,
           ]}
         />
       </View>
@@ -141,9 +156,10 @@ function ShortsVerticalVideoCellComponent({
  * Recycled cells re-render on every scroll tick, so the comparison is limited
  * to the cell's own data and its own playback state.
  *
- * `player` and `surface` are stable for the life of the screen. `hasFirstFrame`
- * describes the *committed* video, so it is only compared for an active cell:
- * otherwise every inactive page would re-render when the active page starts.
+ * `player` and `surface` are stable per slot for the life of the screen, and
+ * playback flags are already slot-scoped by `getCellPlayback` — including
+ * `hasFirstFrame`, which the standby cell needs so its poster can drop
+ * off-screen. Cells without a slot always compare equal on playback.
  */
 function areShortsCellPropsEqual(
   previous: ShortsVerticalVideoCellProps,
@@ -161,31 +177,16 @@ function areShortsCellPropsEqual(
     return false;
   }
 
-  if (
-    previous.playback?.player !== next.playback?.player ||
-    previous.playback?.surface !== next.playback?.surface
-  ) {
-    return false;
-  }
-
-  const wasActive = previous.playback?.isActive ?? false;
-  const isActive = next.playback?.isActive ?? false;
-  if (wasActive !== isActive) return false;
-
-  if ((previous.playback?.isMuted ?? true) !== (next.playback?.isMuted ?? true)) {
-    return false;
-  }
-  if (
-    (previous.playback?.hasError ?? false) !== (next.playback?.hasError ?? false)
-  ) {
-    return false;
-  }
-
-  if (!isActive) return true;
-
   return (
+    previous.playback?.player === next.playback?.player &&
+    previous.playback?.surface === next.playback?.surface &&
+    (previous.playback?.isActive ?? false) === (next.playback?.isActive ?? false) &&
     (previous.playback?.hasFirstFrame ?? false) ===
-    (next.playback?.hasFirstFrame ?? false)
+      (next.playback?.hasFirstFrame ?? false) &&
+    (previous.playback?.isPlaying ?? false) === (next.playback?.isPlaying ?? false) &&
+    (previous.playback?.isPaused ?? false) === (next.playback?.isPaused ?? false) &&
+    (previous.playback?.isMuted ?? true) === (next.playback?.isMuted ?? true) &&
+    (previous.playback?.hasError ?? false) === (next.playback?.hasError ?? false)
   );
 }
 

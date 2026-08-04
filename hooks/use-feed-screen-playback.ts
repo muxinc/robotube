@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { PixelRatio, useWindowDimensions } from "react-native";
 
 import type { FeedVideoCardPlayback, FeedVideoItem } from "@/components/feed-video-card";
@@ -13,7 +13,10 @@ import {
   resolveThumbnailWidthPx,
   withThumbnailWidth,
 } from "@/lib/feed/feed-adaptive-policy";
-import type { FeedTelemetryScreen } from "@/lib/feed/feed-telemetry";
+import {
+  trackFeedEvent,
+  type FeedTelemetryScreen,
+} from "@/lib/feed/feed-telemetry";
 
 export type UseFeedScreenPlaybackOptions = {
   items: readonly FeedVideoItem[];
@@ -64,6 +67,25 @@ export function useFeedScreenPlayback({
   const { width } = useWindowDimensions();
   const policy = useFeedAdaptivePolicy();
 
+  /**
+   * YouTube-style preview sound: the autoplaying card plays with audio, and a
+   * speaker toggle on the preview silences it. Session-scoped — the choice
+   * survives scrolling and card changes, but the next app session starts with
+   * sound again. Sound only exists while the preview is actually playing, so
+   * the policy gates (reduced motion, low data) that stop autoplay also stop
+   * audio for free.
+   */
+  const [isMuted, setIsMuted] = useState(false);
+  const toggleMute = useCallback(() => {
+    setIsMuted((current) => {
+      trackFeedEvent(current ? "feed_preview_unmuted" : "feed_preview_muted", {
+        screen,
+        isMuted: !current,
+      });
+      return !current;
+    });
+  }, [screen]);
+
   const focus = useFeedFocusController<FeedVideoItem>({
     itemCount: items.length,
     isScreenFocused,
@@ -89,6 +111,7 @@ export function useFeedScreenPlayback({
     isPlayerEnabled: isScreenFocused,
     target,
     isPlaybackAllowed: focus.isPlaybackAllowed,
+    muted: isMuted,
     maxResolution: policy.maxResolution,
     screen,
   });
@@ -130,8 +153,10 @@ export function useFeedScreenPlayback({
       hasFirstFrame: controller.hasFirstFrame,
       surface: controller.surface,
       getPreviewPositionSeconds: controller.getPreviewPositionSeconds,
+      isMuted,
+      onToggleMute: toggleMute,
     }),
-    [controller],
+    [controller, isMuted, toggleMute],
   );
 
   const listProps = useMemo(
@@ -160,6 +185,6 @@ export function useFeedScreenPlayback({
     listProps,
     getCardPlayback,
     getThumbnailUrl,
-    extraData: `${controller.activeMuxAssetId ?? ""}|${controller.hasFirstFrame ? 1 : 0}|${thumbnailWidthPx}`,
+    extraData: `${controller.activeMuxAssetId ?? ""}|${controller.hasFirstFrame ? 1 : 0}|${isMuted ? 1 : 0}|${thumbnailWidthPx}`,
   };
 }

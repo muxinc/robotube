@@ -14,18 +14,40 @@ import {
   resolveThumbnailWidthPx,
   withThumbnailWidth,
 } from "@/lib/feed/feed-adaptive-policy";
+import { createMuxMediaFeedPreloader } from "@/lib/feed/mux-media-preloader";
+import { feedPreloadCacheKey } from "@/lib/feed/feed-preload-policy";
 import { trackFeedEvent } from "@/lib/feed/feed-telemetry";
-import { SHORTS_VIEWABILITY_CONFIG } from "@/lib/shorts/shorts-paging";
+import {
+  SHORTS_FOCUS_TIMINGS,
+  SHORTS_VIEWABILITY_CONFIG,
+} from "@/lib/shorts/shorts-paging";
+import {
+  EMPTY_SHORTS_SLOT_ASSIGNMENT,
+  resolveShortsSlotAssignment,
+  resolveShortsStandbyIndex,
+  type ShortsSlotAssignment,
+  type ShortsSlotId,
+} from "@/lib/shorts/shorts-player-slots";
 import {
   createShortsPlaybackIntentState,
   isShortsAssetPausedByViewer,
   resolveShortsShouldPlay,
   shortsPlaybackIntentReducer,
+  shortsRetryNonceFor,
 } from "@/lib/shorts/shorts-playback-intent";
 import type { MuxVideoPlayer } from "@mux/mux-react-native-player";
 
-/** Identifies the vertical surface separately from Home in Mux Data. */
-const SHORTS_PLAYER_NAME = "Robotube shorts";
+/**
+ * Identifies the vertical surfaces separately from Home in Mux Data. The two
+ * slots need distinct names: on iOS, `MUXSDKStats` keys player bindings by
+ * name, and the active and standby surfaces are monitored concurrently. Each
+ * name is fixed to its slot for the life of the screen — a name that followed
+ * the *role* would change the source metadata on every promote.
+ */
+const SHORTS_PLAYER_NAMES: Record<ShortsSlotId, string> = {
+  a: "Robotube shorts A",
+  b: "Robotube shorts B",
+};
 
 export type UseShortsScreenPlaybackOptions = {
   items: readonly FeedVideoItem[];
@@ -35,12 +57,18 @@ export type UseShortsScreenPlaybackOptions = {
   pageWidth?: number;
 };
 
-/** Everything one Shorts cell needs from the shared controllers. */
+/**
+ * Everything one Shorts cell needs from the shared controllers. Supplied only
+ * to cells bound to a player slot: the committed page (active, playing) and
+ * the predicted next page (standby — paused, muted, pre-rendered to its first
+ * frame so the swipe never shows a thumbnail). Every other cell gets
+ * `undefined` and renders poster-only.
+ */
 export type ShortsCellPlayback = {
   player: MuxVideoPlayer | null;
   /** True for the committed cell only. At most one cell may receive true. */
   isActive: boolean;
-  /** True once the committed source produced a frame; hides the poster. */
+  /** True once this cell's source produced a frame; hides the poster. */
   hasFirstFrame: boolean;
   /** True when this cell's video is playing right now. */
   isPlaying: boolean;
@@ -66,9 +94,10 @@ export type ShortsScreenPlayback = {
     onScroll: ReturnType<typeof useFeedFocusController<FeedVideoItem>>["onScroll"];
     scrollEventThrottle: number;
   };
-  getCellPlayback: (item: FeedVideoItem) => ShortsCellPlayback;
+  /** Slot playback for the committed and standby cells; undefined otherwise. */
+  getCellPlayback: (item: FeedVideoItem) => ShortsCellPlayback | undefined;
   getThumbnailUrl: (item: FeedVideoItem) => string;
-  /** The only index allowed to own a player surface. */
+  /** The index whose surface is allowed to play. */
   committedIndex: number | null;
   /** Cheap viewport tracker. Drives pagination and diagnostics, never playback. */
   candidateIndex: number | null;
@@ -86,10 +115,18 @@ export type ShortsScreenPlayback = {
 };
 
 /**
- * Composes the shared feed focus controller, single playback controller, bounded
- * preloader, and adaptive policy for the vertical Shorts feed.
+ * Composes the shared feed focus controller, a two-slot playback stack, the
+ * bounded preloader, and adaptive policy for the vertical Shorts feed.
  *
- * The Shorts-specific parts are all parameterization, not a second stack:
+ * Two playback controllers (each owning one player) leapfrog through the feed:
+ * the *active* slot plays the committed page, while the *standby* slot mounts
+ * a paused, muted surface inside the predicted next page and renders its first
+ * frame off-screen. Committing to that page requires no source replacement —
+ * the standby simply starts playing and the vacated slot rebinds to the new
+ * prediction. Combined with native media preloading, this is what makes a
+ * swipe land on moving video instead of a thumbnail.
+ *
+ * The rest is parameterization, not a second stack:
  *
  *  - viewability requires most of a full-viewport page rather than Home's 65%;
  *  - the autoplay gate is applied when deciding to *play*, not when deciding to
@@ -97,9 +134,9 @@ export type ShortsScreenPlayback = {
  *    play on (Home has no manual control, so it gates at commit time);
  *  - viewer intent (session mute, manual pause, retry) is layered on top of the
  *    lifecycle gate; and
- *  - the player reports a Shorts-specific name to Mux Data.
+ *  - each slot reports a fixed Shorts-specific name to Mux Data.
  *
- * Only the focused feed owns a player. Native tabs retain inactive routes, so
+ * Only the focused feed owns players. Native tabs retain inactive routes, so
  * allocation as well as playback is gated by tab focus.
  */
 export function useShortsScreenPlayback({
@@ -124,6 +161,9 @@ export function useShortsScreenPlayback({
     // decision moves to `resolveShortsShouldPlay` below.
     isAutoplayAllowed: true,
     viewabilityConfig: SHORTS_VIEWABILITY_CONFIG,
+    // Tighter settle/dwell than Home: a paged list has one unambiguous
+    // candidate, and every millisecond here delays the next video's start.
+    timings: SHORTS_FOCUS_TIMINGS,
     screen: "shorts",
   });
 
@@ -131,16 +171,37 @@ export function useShortsScreenPlayback({
     focus.committedIndex === null ? undefined : items[focus.committedIndex];
   const committedMuxAssetId = committedItem?.muxAssetId ?? null;
 
-  const target = useMemo<FeedPlaybackTarget | null>(() => {
-    if (!committedItem || focus.committedIndex === null) return null;
-    if (!committedItem.playbackId) return null;
-    return {
-      muxAssetId: committedItem.muxAssetId,
-      playbackId: committedItem.playbackId,
-      title: committedItem.title,
-      index: focus.committedIndex,
-    };
-  }, [committedItem, focus.committedIndex]);
+  const standbyIndex = resolveShortsStandbyIndex(
+    items.length,
+    focus.committedIndex,
+    focus.direction,
+  );
+  // The standby slot streams real media ahead of need, so it obeys the same
+  // policy gate as media preloading: low-data mode and memory pressure fall
+  // back to single-player, poster-first behaviour.
+  const standbyMuxAssetId =
+    standbyIndex === null || !policy.isMediaPreloadAllowed
+      ? null
+      : (items[standbyIndex]?.muxAssetId ?? null);
+
+  /**
+   * Slot assignment persists across renders in a ref and is re-resolved during
+   * render (the resolver is pure and identity-stable). An asset keeps its slot
+   * across a promote — that continuity is the entire feature: the promoted
+   * slot's target does not change, so its already-rendered player just plays.
+   */
+  const slotAssignmentRef = useRef<ShortsSlotAssignment>(
+    EMPTY_SHORTS_SLOT_ASSIGNMENT,
+  );
+  const assignment = resolveShortsSlotAssignment(
+    slotAssignmentRef.current,
+    committedMuxAssetId,
+    standbyMuxAssetId,
+  );
+  slotAssignmentRef.current = assignment;
+
+  const targetA = useSlotTarget(items, assignment.a);
+  const targetB = useSlotTarget(items, assignment.b);
 
   // Reset per-asset intent whenever focus commits somewhere else, so a pause
   // gesture never carries onto the next video.
@@ -152,7 +213,6 @@ export function useShortsScreenPlayback({
     state: intent,
     muxAssetId: committedMuxAssetId,
     isFocusPlaybackAllowed: focus.isPlaybackAllowed,
-    isScrolling: focus.isScrolling,
     isAutoplayAllowed: policy.isAutoplayAllowed,
   });
 
@@ -162,25 +222,54 @@ export function useShortsScreenPlayback({
 
   // A surface lost underneath the committed player: drop the commitment so the
   // next idle evaluation rebuilds it against whatever cell is now on screen.
+  // Scoped per slot — a recycled *standby* surface is routine (its slot simply
+  // rebinds later) and must not disturb committed focus.
   const reportSurfaceLost = focus.reportSurfaceLost;
   const committedIndexRef = useRef(focus.committedIndex);
   committedIndexRef.current = focus.committedIndex;
-  const handleActiveSurfaceLost = useCallback(() => {
-    const index = committedIndexRef.current;
-    if (index === null) return;
-    reportSurfaceLost(index);
-  }, [reportSurfaceLost]);
+  const makeSurfaceLostHandler = useCallback(
+    (slotId: ShortsSlotId) => () => {
+      if (slotAssignmentRef.current.active !== slotId) return;
+      const index = committedIndexRef.current;
+      if (index === null) return;
+      reportSurfaceLost(index);
+    },
+    [reportSurfaceLost],
+  );
+  const handleSurfaceLostA = useMemo(
+    () => makeSurfaceLostHandler("a"),
+    [makeSurfaceLostHandler],
+  );
+  const handleSurfaceLostB = useMemo(
+    () => makeSurfaceLostHandler("b"),
+    [makeSurfaceLostHandler],
+  );
 
-  const controller = useFeedPlaybackController({
+  const isSlotAActive = assignment.active === "a";
+  const controllerA = useFeedPlaybackController({
     isPlayerEnabled: isScreenFocused,
-    target,
-    isPlaybackAllowed: shouldPlay,
-    muted: intent.isMuted,
+    target: targetA,
+    // The standby slot loads, buffers, and renders its first frame, but never
+    // plays: promotion flips this gate, and that flip is the whole hand-off.
+    isPlaybackAllowed: isSlotAActive && shouldPlay,
+    muted: isSlotAActive ? intent.isMuted : true,
     maxResolution: policy.maxResolution,
-    playerName: SHORTS_PLAYER_NAME,
-    sourceAttempt: intent.retryNonce,
+    playerName: SHORTS_PLAYER_NAMES.a,
+    sourceAttempt: shortsRetryNonceFor(intent, assignment.a),
     onSourceErrorReported: handleSourceError,
-    onActiveSurfaceLost: handleActiveSurfaceLost,
+    onActiveSurfaceLost: handleSurfaceLostA,
+    screen: "shorts",
+  });
+  const controllerB = useFeedPlaybackController({
+    isPlayerEnabled: isScreenFocused,
+    target: targetB,
+    isPlaybackAllowed: !isSlotAActive && assignment.active === "b" && shouldPlay,
+    muted: assignment.active === "b" ? intent.isMuted : true,
+    maxResolution: policy.maxResolution,
+    playerName: SHORTS_PLAYER_NAMES.b,
+    sourceAttempt: shortsRetryNonceFor(intent, assignment.b),
+    onSourceErrorReported: handleSourceError,
+    onActiveSurfaceLost: handleSurfaceLostB,
     screen: "shorts",
   });
 
@@ -205,22 +294,32 @@ export function useShortsScreenPlayback({
   );
 
   /**
-   * Bounded direction-aware preload: the committed item plus one likely next
-   * item, suspended during a fling, on blur, in low-data mode, and under memory
-   * pressure.
+   * Bounded direction-aware preload: thumbnails plus native media preload
+   * (`preloadMuxVideo` from `@mux/mux-react-native-player@0.1.13`), suspended
+   * during a fling, on blur, in low-data mode, and under memory pressure.
    *
-   * What this actually warms on Shorts today is the **next page's thumbnail**,
-   * not its media. `@mux/mux-react-native-player@0.1.10` exposes no data-only
-   * preload API — every playback function is declared inside `View(MuxVideoView)`
-   * and a source only reaches native through a mounted view's `source` prop, so
-   * an unattached player downloads zero bytes (see the evidence block in
-   * `lib/feed/feed-preloader.ts`). The shipped preloader is therefore a no-op
-   * recorder, and the honest fail-safe is what the cell already does: hold the
-   * poster until the committed source produces its own first frame. Swiping to a
-   * cold page costs a cold start, and no claim of a warm first frame is made for
-   * it. Passing a real `preloader` here is the only change needed once such an
-   * API exists.
+   * With the two-slot player stack, the committed and standby assets are
+   * already streaming through real players — the standby slot *is* their
+   * preloader. Starting a native media preload for those same assets would
+   * fetch every startup byte twice and contend with the slots for bandwidth,
+   * so slot-bound assets are skipped here. The native preloader still covers
+   * anything the policy window opens beyond the slots (a wider `preloadAhead`
+   * on Wi-Fi, the behind-item when scrolling reverses), and on iOS a pool item
+   * it warmed earlier is adopted outright by the slot view that binds the same
+   * asset. Everything stays best-effort: without the native API (Expo Go, web)
+   * the cells' poster-first fallback covers cold starts exactly as before.
    */
+  const mediaPreloader = useMemo(() => {
+    const preloader = createMuxMediaFeedPreloader("shorts");
+    return {
+      ...preloader,
+      start(request) {
+        const { a, b } = slotAssignmentRef.current;
+        if (request.muxAssetId === a || request.muxAssetId === b) return;
+        preloader.start(request);
+      },
+    } satisfies ReturnType<typeof createMuxMediaFeedPreloader>;
+  }, []);
   useFeedPreloader({
     items: preloadItems,
     committedIndex: focus.committedIndex,
@@ -231,7 +330,22 @@ export function useShortsScreenPlayback({
     isActive: focus.isPlaybackAllowed,
     policy,
     screen: "shorts",
+    preloader: mediaPreloader,
   });
+
+  // Close the preload telemetry loop: a commit is the moment a preloaded
+  // source is (or is not) consumed, which is what turns the preloader's
+  // start/accept bookkeeping into cache-hit metrics.
+  const committedPlaybackId = committedItem?.playbackId ?? null;
+  useEffect(() => {
+    if (committedPlaybackId === null) return;
+    mediaPreloader.promoteToActive(
+      feedPreloadCacheKey({
+        playbackId: committedPlaybackId,
+        maxResolution: policy.maxResolution,
+      }),
+    );
+  }, [committedPlaybackId, mediaPreloader, policy.maxResolution]);
 
   const isPausedByViewer = isShortsAssetPausedByViewer(
     intent,
@@ -283,29 +397,42 @@ export function useShortsScreenPlayback({
       screen: "shorts",
       muxAssetId: committedMuxAssetId,
       feedIndex: focus.committedIndex ?? undefined,
-      retryAttempt: intent.retryNonce + 1,
+      retryAttempt: shortsRetryNonceFor(intent, committedMuxAssetId) + 1,
     });
-  }, [committedMuxAssetId, focus.committedIndex, intent.retryNonce]);
+  }, [committedMuxAssetId, focus.committedIndex, intent]);
 
   const getCellPlayback = useCallback(
-    (item: FeedVideoItem): ShortsCellPlayback => {
-      const isActive = controller.activeMuxAssetId === item.muxAssetId;
+    (item: FeedVideoItem): ShortsCellPlayback | undefined => {
+      const slotId: ShortsSlotId | null =
+        assignment.a === item.muxAssetId
+          ? "a"
+          : assignment.b === item.muxAssetId
+            ? "b"
+            : null;
+      if (slotId === null) return undefined;
+      const controller = slotId === "a" ? controllerA : controllerB;
+      const isActive = slotId === assignment.active;
+      // Guard against a slot mid-rebind: hand the player over only once the
+      // controller's bound asset agrees with the assignment.
+      const isBound = controller.activeMuxAssetId === item.muxAssetId;
       return {
-        player: controller.player,
+        player: isBound ? controller.player : null,
         isActive,
-        hasFirstFrame: controller.hasFirstFrame,
+        hasFirstFrame: isBound && controller.hasFirstFrame,
         isPlaying: isActive && isPlaying,
         isPaused: isActive && isPausedByViewer,
-        // Every playback-state flag is scoped to the active cell. The
+        // Interaction-state flags are scoped to the active cell. The
         // play/pause and retry controls act on the committed asset, so a
-        // pre-rendered neighbour must not display them.
+        // pre-rendered standby neighbour must not display them.
         hasError: isActive && intent.failedMuxAssetId === item.muxAssetId,
         isMuted: intent.isMuted,
         surface: controller.surface,
       };
     },
     [
-      controller,
+      assignment,
+      controllerA,
+      controllerB,
       intent.failedMuxAssetId,
       intent.isMuted,
       isPausedByViewer,
@@ -349,8 +476,11 @@ export function useShortsScreenPlayback({
     togglePlayback,
     retryPlayback,
     extraData: [
-      controller.activeMuxAssetId ?? "",
-      controller.hasFirstFrame ? 1 : 0,
+      assignment.a ?? "",
+      assignment.b ?? "",
+      assignment.active ?? "",
+      controllerA.hasFirstFrame ? 1 : 0,
+      controllerB.hasFirstFrame ? 1 : 0,
       isPlaying ? 1 : 0,
       isPausedByViewer ? 1 : 0,
       intent.isMuted ? 1 : 0,
@@ -358,4 +488,24 @@ export function useShortsScreenPlayback({
       thumbnailWidthPx,
     ].join("|"),
   };
+}
+
+/** Playback target for whatever asset a slot is bound to, or null when idle. */
+function useSlotTarget(
+  items: readonly FeedVideoItem[],
+  muxAssetId: string | null,
+): FeedPlaybackTarget | null {
+  return useMemo(() => {
+    if (muxAssetId === null) return null;
+    const index = items.findIndex((item) => item.muxAssetId === muxAssetId);
+    if (index < 0) return null;
+    const item = items[index];
+    if (!item.playbackId) return null;
+    return {
+      muxAssetId: item.muxAssetId,
+      playbackId: item.playbackId,
+      title: item.title,
+      index,
+    };
+  }, [items, muxAssetId]);
 }

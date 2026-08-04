@@ -89,6 +89,10 @@ export type FeedVideoCardPlayback = {
   surface: FeedPlaybackSurfaceCallbacks;
   /** Preview position handed to the detail screen on navigation. */
   getPreviewPositionSeconds: (muxAssetId: string) => number;
+  /** Session-scoped preview sound state; previews play with audio when false. */
+  isMuted?: boolean;
+  /** Shows the speaker toggle on the active preview when provided. */
+  onToggleMute?: () => void;
 };
 
 type FeedVideoCardProps = {
@@ -189,6 +193,7 @@ function FeedVideoCardComponent({
               onTimeUpdate={(event) =>
                 playback.surface.onTimeUpdate(muxAssetId, event.currentTime)
               }
+              onFirstFrame={() => playback.surface.onFirstFrame(muxAssetId)}
               onSourceError={(event) =>
                 playback.surface.onSourceError(muxAssetId, event.message)
               }
@@ -215,7 +220,28 @@ function FeedVideoCardComponent({
             <Ionicons name="play-circle" size={56} color="#FFFFFFE6" />
           </View>
         ) : null}
-        {durationLabel ? (
+        {/*
+          The duration badge yields its corner to a speaker toggle while the
+          preview is actually showing video — the YouTube pattern: sound plays
+          with the autoplaying preview, and one tap silences it for the session.
+        */}
+        {isActive && hasFirstFrame && playback?.onToggleMute ? (
+          <Pressable
+            onPress={playback.onToggleMute}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={
+              playback.isMuted ? "Unmute preview" : "Mute preview"
+            }
+            style={styles.muteButton}
+          >
+            <Ionicons
+              name={playback.isMuted ? "volume-mute" : "volume-high"}
+              size={16}
+              color="#FFFFFF"
+            />
+          </Pressable>
+        ) : durationLabel ? (
           <View style={styles.durationBadge}>
             <Text style={styles.durationText}>{durationLabel}</Text>
           </View>
@@ -277,11 +303,14 @@ export const FeedVideoCard = memo(
     previous.playback?.surface === next.playback?.surface &&
     previous.playback?.getPreviewPositionSeconds ===
       next.playback?.getPreviewPositionSeconds &&
+    previous.playback?.onToggleMute === next.playback?.onToggleMute &&
     (previous.playback?.isActive ?? false) === (next.playback?.isActive ?? false) &&
-    // hasFirstFrame only affects a card that is currently active.
+    // hasFirstFrame and the mute state only affect a card that is currently
+    // active (the speaker toggle renders nowhere else).
     ((previous.playback?.isActive ?? false) === false ||
-      (previous.playback?.hasFirstFrame ?? false) ===
-        (next.playback?.hasFirstFrame ?? false)),
+      ((previous.playback?.hasFirstFrame ?? false) ===
+        (next.playback?.hasFirstFrame ?? false) &&
+        (previous.playback?.isMuted ?? true) === (next.playback?.isMuted ?? true))),
 );
 
 FeedVideoCard.displayName = "FeedVideoCard";
@@ -323,6 +352,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 4,
+    backgroundColor: "#000000CC",
+  },
+  muteButton: {
+    position: "absolute",
+    right: 12,
+    bottom: 12,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: "#000000CC",
   },
   durationText: {

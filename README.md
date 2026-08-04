@@ -78,7 +78,7 @@ You can start developing by editing the files inside the **app** directory. This
 
 ## Authentication (Convex Auth + OAuth)
 
-Robotube uses [Convex Auth](https://labs.convex.dev/auth) with Google and Apple OAuth.
+Robotube uses [Convex Auth](https://labs.convex.dev/auth) with Google OAuth.
 
 If you are setting up a new deployment, initialize Convex Auth once:
 
@@ -92,19 +92,11 @@ Then add the required auth env vars:
 npx convex env set SITE_URL robotube://
 npx convex env set AUTH_GOOGLE_ID <google-client-id>
 npx convex env set AUTH_GOOGLE_SECRET <google-client-secret>
-npx convex env set AUTH_APPLE_ID <apple-service-id>
-npx convex env set AUTH_APPLE_SECRET <apple-client-secret-jwt>
 ```
 
 OAuth callback URLs for your provider dashboards:
 
 - Google: `https://<your-deployment>.convex.site/api/auth/callback/google`
-- Apple: `https://<your-deployment>.convex.site/api/auth/callback/apple`
-
-Notes:
-
-- Apple OAuth requires a public HTTPS deployment (no localhost-only flow).
-- Apple client secret expires and must be rotated periodically.
 
 ## Mux AI features used in this app
 

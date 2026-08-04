@@ -42,8 +42,8 @@ export type UseFeedPreloaderOptions = {
 /**
  * Runs the bounded preload-window policy and drives two sinks:
  *
- *  - the media `FeedPreloader`, which ships disabled (see `feed-preloader.ts`
- *    for the spike result); and
+ *  - an injected media `FeedPreloader` (Shorts uses the Mux native adapter; a
+ *    surface without one stays disabled); and
  *  - `expo-image` thumbnail prefetch for the next likely card, which *is*
  *    demonstrably reusable — the prefetched image lands in the same disk/memory
  *    cache the card's `<Image>` reads from.
@@ -77,8 +77,33 @@ export function useFeedPreloader({
   const isMediaPreloadAllowed =
     FEED_MEDIA_PRELOAD_ENABLED &&
     !isKilled &&
+    activePreloader.isEnabled() &&
     policy.isMediaPreloadAllowed &&
     isActive;
+
+  const committedCacheKey = useMemo(() => {
+    if (committedIndex === null) return null;
+    const item = items[committedIndex];
+    if (!item) return null;
+    return feedPreloadCacheKey({
+      playbackId: item.playbackId,
+      maxResolution: policy.maxResolution,
+    });
+  }, [committedIndex, items, policy.maxResolution]);
+
+  // Convert a predictive preload into an active-source hit before the window
+  // diff starts the following neighbour. The adapter keeps promoted keys as
+  // logical window members, but releases/consumes their native preload state.
+  const lastPromotedCacheKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (committedCacheKey === null) {
+      lastPromotedCacheKeyRef.current = null;
+      return;
+    }
+    if (lastPromotedCacheKeyRef.current === committedCacheKey) return;
+    lastPromotedCacheKeyRef.current = committedCacheKey;
+    activePreloader.promoteToActive(committedCacheKey);
+  }, [activePreloader, committedCacheKey]);
 
   const windowIndexes = useMemo(
     () =>
@@ -126,6 +151,10 @@ export function useFeedPreloader({
     for (const cacheKey of start) {
       const entry = byKey.get(cacheKey);
       if (!entry) continue;
+      // The active player already owns the committed source. Only start a
+      // headless preload for predictive neighbours; a committed key appears in
+      // `desired` solely so a formerly-predictive preload survives promotion.
+      if (entry.index === committedIndex) continue;
       activePreloader.start({
         cacheKey,
         muxAssetId: entry.item.muxAssetId,
@@ -134,7 +163,7 @@ export function useFeedPreloader({
         maxResolution: policy.maxResolution,
       });
     }
-  }, [activePreloader, items, policy.maxResolution, windowIndexes]);
+  }, [activePreloader, committedIndex, items, policy.maxResolution, windowIndexes]);
 
   // Suspend and release everything when the feed backgrounds or loses focus.
   useEffect(() => {

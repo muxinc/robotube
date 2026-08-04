@@ -82,6 +82,8 @@ export type FeedPlaybackSurfaceCallbacks = {
   onSourceLoad: (muxAssetId: string) => void;
   onStatusChange: (muxAssetId: string, status: string) => void;
   onTimeUpdate: (muxAssetId: string, currentTime: number) => void;
+  /** Native first-frame event; the poster can hide the moment this fires. */
+  onFirstFrame: (muxAssetId: string) => void;
   onSourceError: (muxAssetId: string, message: string) => void;
 };
 
@@ -389,6 +391,35 @@ export function useFeedPlaybackController({
     [screen],
   );
 
+  /**
+   * The native first-frame event (`onRenderedFirstFrame` on Android,
+   * `isReadyForDisplay` on iOS). This is what actually hides the poster: it is
+   * event-driven, so a warm/preloaded start reveals the video with none of the
+   * up-to-250ms polling latency the time-update path carries.
+   *
+   * The native view emits it only for the source it currently holds, but the
+   * loaded-asset guard stays: a stale event from a surface that is being
+   * rebound during recycling must not reveal the wrong page. Marking the
+   * source ready here is safe for the same reason — a displayable frame from
+   * the current source implies that source is past loading.
+   */
+  const onFirstFrame = useCallback(
+    (muxAssetId: string) => {
+      if (loadedMuxAssetIdRef.current !== muxAssetId) return;
+      if (firstFrameMuxAssetIdRef.current === muxAssetId) return;
+      sourceReadyMuxAssetIdRef.current = muxAssetId;
+      updateFirstFrameMuxAssetId(muxAssetId);
+      trackFeedEvent("feed_first_frame", {
+        screen,
+        muxAssetId,
+        elapsedMs: elapsedSince(sourceRequestedAtMsRef.current),
+      });
+    },
+    [screen, updateFirstFrameMuxAssetId],
+  );
+
+  // Fallback first-frame detection for binaries whose native view predates the
+  // onFirstFrame event: a positive playback position implies a rendered frame.
   const onTimeUpdate = useCallback(
     (muxAssetId: string, currentTime: number) => {
       if (!Number.isFinite(currentTime) || currentTime < 0) return;
@@ -435,9 +466,11 @@ export function useFeedPlaybackController({
       onSourceLoad,
       onStatusChange,
       onTimeUpdate,
+      onFirstFrame,
       onSourceError,
     }),
     [
+      onFirstFrame,
       onSourceError,
       onSourceLoad,
       onStatusChange,

@@ -55,8 +55,15 @@ describe("preload window selection", () => {
     assert.deepEqual(selectPreloadWindow(inputs({ isFling: true })), []);
   });
 
-  it("narrows to the committed item while scrolling", () => {
-    assert.deepEqual(selectPreloadWindow(inputs({ isScrolling: true })), [5]);
+  it("retains the likely destination while scrolling", () => {
+    assert.deepEqual(selectPreloadWindow(inputs({ isScrolling: true })), [5, 6]);
+  });
+
+  it("retains the backward destination when a reverse swipe begins", () => {
+    assert.deepEqual(
+      selectPreloadWindow(inputs({ direction: "backward", isScrolling: true })),
+      [5, 4],
+    );
   });
 
   it("returns nothing when preloading is disallowed", () => {

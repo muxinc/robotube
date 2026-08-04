@@ -149,3 +149,21 @@ export const SHORTS_VIEWABILITY_CONFIG = {
   itemVisiblePercentThreshold: 80,
   minimumViewTime: 80,
 } as const;
+
+/**
+ * Focus timings tuned for a full-viewport paged list.
+ *
+ * The defaults (120/80/120) exist for Home, where several cards share the
+ * viewport and a slow scroll can rest between rows — the dwell is what stops
+ * focus from thrashing across ambiguous candidates. A paging Shorts list has
+ * no such ambiguity: the snap animation ends on exactly one page, and the 80%
+ * visibility threshold already filters mid-swipe noise. Every one of these
+ * milliseconds sits between "the swipe settled" and "the next video's source
+ * replace begins", so they are cut to the minimum that still absorbs the
+ * scroll-end/viewability event jitter FlashList produces on both platforms.
+ */
+export const SHORTS_FOCUS_TIMINGS = {
+  settleAfterDragMs: 60,
+  settleAfterMomentumMs: 40,
+  dwellMs: 40,
+} as const;

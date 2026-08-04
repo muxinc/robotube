@@ -7,6 +7,7 @@ import {
   resolveShortsIntentFor,
   resolveShortsShouldPlay,
   shortsPlaybackIntentReducer,
+  shortsRetryNonceFor,
   type ShortsPlaybackIntentEvent,
   type ShortsPlaybackIntentState,
 } from "./shorts-playback-intent";
@@ -26,7 +27,6 @@ function playInputs(
     state,
     muxAssetId: "a",
     isFocusPlaybackAllowed: true,
-    isScrolling: false,
     isAutoplayAllowed: true,
     ...overrides,
   };
@@ -166,12 +166,12 @@ describe("shorts lifecycle and scroll gating", () => {
     );
   });
 
-  it("does not keep audio running over a page that is scrolling away", () => {
+  it("keeps the committed video playing while the viewer swipes", () => {
+    // Scrolling is deliberately not an input: the committed video plays
+    // through the drag and hands off when focus commits, like TikTok/Reels.
     assert.equal(
-      resolveShortsShouldPlay(
-        playInputs(createShortsPlaybackIntentState(), { isScrolling: true }),
-      ),
-      false,
+      resolveShortsShouldPlay(playInputs(createShortsPlaybackIntentState())),
+      true,
     );
   });
 
@@ -185,10 +185,6 @@ describe("shorts lifecycle and scroll gating", () => {
       resolveShortsShouldPlay(
         playInputs(state, { isFocusPlaybackAllowed: false }),
       ),
-      false,
-    );
-    assert.equal(
-      resolveShortsShouldPlay(playInputs(state, { isScrolling: true })),
       false,
     );
   });
@@ -271,14 +267,17 @@ describe("shorts playback failures", () => {
     assert.equal(resolveShortsShouldPlay(playInputs(state)), false);
   });
 
-  it("clears the failure and bumps the nonce on retry", () => {
+  it("clears the failure and bumps that asset's nonce on retry", () => {
     const state = reduce(
       createShortsPlaybackIntentState(),
       { type: "playbackFailed", muxAssetId: "a" },
       { type: "retryRequested", muxAssetId: "a" },
     );
     assert.equal(state.failedMuxAssetId, null);
-    assert.equal(state.retryNonce, 1);
+    assert.equal(shortsRetryNonceFor(state, "a"), 1);
+    // The nonce is per-asset: another slot's source key must not change, or a
+    // prepared standby page would reload at the moment it is promoted.
+    assert.equal(shortsRetryNonceFor(state, "b"), 0);
     assert.equal(resolveShortsShouldPlay(playInputs(state)), true);
   });
 
@@ -302,7 +301,7 @@ describe("shorts playback failures", () => {
       { type: "playbackFailed", muxAssetId: "a" },
       { type: "retryRequested", muxAssetId: "a" },
     );
-    assert.equal(state.retryNonce, 2);
+    assert.equal(shortsRetryNonceFor(state, "a"), 2);
     assert.equal(state.failedMuxAssetId, null);
   });
 

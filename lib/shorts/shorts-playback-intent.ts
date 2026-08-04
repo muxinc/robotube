@@ -27,10 +27,13 @@ export type ShortsPlaybackIntentState = {
   /** Asset whose source failed and has not been retried yet. */
   failedMuxAssetId: string | null;
   /**
-   * Bumped by each retry request. The playback controller watches this to
-   * re-load a source it already considers loaded.
+   * Per-asset retry counters. The playback controller watches its slot's
+   * counter (via `shortsRetryNonceFor`) to re-load a source it already
+   * considers loaded. Keyed by asset — a global nonce would leak a retry made
+   * on one page into every other slot's source key and force a reload at the
+   * moment a prepared standby page is promoted.
    */
-  retryNonce: number;
+  retryNonces: Readonly<Record<string, number>>;
 };
 
 export type ShortsPlaybackIntentEvent =
@@ -49,7 +52,7 @@ export function createShortsPlaybackIntentState(
     intent: "default",
     intentMuxAssetId: null,
     failedMuxAssetId: null,
-    retryNonce: 0,
+    retryNonces: {},
     ...overrides,
   };
 }
@@ -113,9 +116,21 @@ export function shortsPlaybackIntentReducer(
         // A retry is an explicit play request for that asset.
         intent: "play",
         intentMuxAssetId: event.muxAssetId,
-        retryNonce: state.retryNonce + 1,
+        retryNonces: {
+          ...state.retryNonces,
+          [event.muxAssetId]: shortsRetryNonceFor(state, event.muxAssetId) + 1,
+        },
       };
   }
+}
+
+/** Retry counter for one asset; feeds that asset's slot `sourceAttempt`. */
+export function shortsRetryNonceFor(
+  state: ShortsPlaybackIntentState,
+  muxAssetId: string | null,
+): number {
+  if (muxAssetId === null) return 0;
+  return state.retryNonces[muxAssetId] ?? 0;
 }
 
 export type ShortsShouldPlayInputs = {
@@ -124,8 +139,6 @@ export type ShortsShouldPlayInputs = {
   muxAssetId: string | null;
   /** Focus machine gate: screen focused, app active, surface intact. */
   isFocusPlaybackAllowed: boolean;
-  /** True while the list is dragging, in momentum, or settling. */
-  isScrolling: boolean;
   /** Policy gate: reduced motion, low data, offline, memory pressure. */
   isAutoplayAllowed: boolean;
 };
@@ -133,23 +146,27 @@ export type ShortsShouldPlayInputs = {
 /**
  * Whether the committed asset should be playing right now.
  *
- * Ordering matters: the hard gates (no target, lifecycle, in-flight scroll,
- * unrecovered error) come first and cannot be overridden by intent, then an
- * explicit press wins over policy, and only then does autoplay policy decide.
- * That last step is what lets reduced motion disable autoplay while still
- * allowing a manual press to play.
+ * Scrolling deliberately does NOT pause: the committed video keeps playing
+ * while the viewer drags toward the next page, and the hand-off happens when
+ * focus commits and the source swaps. That is the TikTok/Reels feel — pausing
+ * on touch made every swipe start from a frozen frame plus a pause/play cycle.
+ * A long fling is still bounded: once the committed cell leaves the retention
+ * window it is recycled, the surface detaches, and playback stops.
+ *
+ * Ordering matters: the hard gates (no target, lifecycle, unrecovered error)
+ * come first and cannot be overridden by intent, then an explicit press wins
+ * over policy, and only then does autoplay policy decide. That last step is
+ * what lets reduced motion disable autoplay while still allowing a manual
+ * press to play.
  */
 export function resolveShortsShouldPlay({
   state,
   muxAssetId,
   isFocusPlaybackAllowed,
-  isScrolling,
   isAutoplayAllowed,
 }: ShortsShouldPlayInputs): boolean {
   if (muxAssetId === null) return false;
   if (!isFocusPlaybackAllowed) return false;
-  // Never leave audio running over a page that is sliding out of the viewport.
-  if (isScrolling) return false;
   if (state.failedMuxAssetId === muxAssetId) return false;
 
   const intent = resolveShortsIntentFor(state, muxAssetId);

@@ -14,6 +14,30 @@ export type FeedNetworkClass =
   | "offline"
   | "unknown";
 
+/** Library-agnostic subset of a network reachability snapshot. */
+export type FeedNetworkSnapshot = {
+  type?: string | null;
+  isConnected?: boolean | null;
+  isInternetReachable?: boolean | null;
+  isConnectionExpensive?: boolean | null;
+};
+
+/** Convert reachability into the bounded vocabulary used by feed policy. */
+export function resolveFeedNetworkClass({
+  type,
+  isConnected,
+  isInternetReachable,
+  isConnectionExpensive,
+}: FeedNetworkSnapshot): FeedNetworkClass {
+  if (isConnected === false || isInternetReachable === false || type === "none") {
+    return "offline";
+  }
+  if (isConnectionExpensive === true) return "constrained";
+  if (type === "wifi" || type === "ethernet") return "wifi";
+  if (type === "cellular") return "cellular";
+  return "unknown";
+}
+
 /** Rendition caps the installed Mux player accepts. */
 export type FeedMaxResolution = "720p" | "1080p" | "1440p" | "2160p";
 
