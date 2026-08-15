@@ -303,11 +303,17 @@ async function updateModerationTrackingFields(
   );
 }
 
-async function scheduleApprovedAssetJobs(ctx: any, args: { muxAssetId: string; userId: string }) {
-  const latestVideo = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
-    muxAssetId: args.muxAssetId,
-    userId: args.userId,
-  });
+async function scheduleApprovedAssetJobs(
+  ctx: any,
+  args: { muxAssetId: string; userId: string },
+) {
+  const latestVideo = await ctx.runQuery(
+    components.mux.videos.getVideoByMuxAssetId,
+    {
+      muxAssetId: args.muxAssetId,
+      userId: args.userId,
+    },
+  );
 
   if (!latestVideo?.asset) {
     return;
@@ -315,45 +321,60 @@ async function scheduleApprovedAssetJobs(ctx: any, args: { muxAssetId: string; u
 
   const latestMetadata = getMetadataRecord(latestVideo.metadata);
   const latestCustom = asCustomRecord(latestMetadata.custom);
-  const languageCodes = normalizeAudioTranslationLanguageCodes(
+  const audioLanguageCodes = normalizeAudioTranslationLanguageCodes(
     Array.isArray(latestCustom.audioTranslationLanguageCodes)
       ? latestCustom.audioTranslationLanguageCodes.filter(
           (value): value is string => typeof value === "string",
         )
       : [],
   );
+  const captionLanguageCodes = normalizeAudioTranslationLanguageCodes(
+    Array.isArray(latestCustom.captionTranslationLanguageCodes)
+      ? latestCustom.captionTranslationLanguageCodes.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : audioLanguageCodes,
+  );
   const title = asString(latestMetadata.title);
 
-  if (languageCodes.length > 0) {
+  if (audioLanguageCodes.length > 0) {
     await ctx.scheduler.runAfter(
       0,
-      (internal as any).audioTranslationsNode.ensureAudioTranslationsForAssetInternal,
+      (internal as any).audioTranslationsNode
+        .ensureAudioTranslationsForAssetInternal,
       {
         muxAssetId: args.muxAssetId,
         userId: args.userId,
-        languageCodes,
-        title,
-        attempt: 0,
-      },
-    );
-
-    await ctx.scheduler.runAfter(
-      0,
-      (internal as any).captionTranslationsNode.ensureCaptionTranslationsForAssetInternal,
-      {
-        muxAssetId: args.muxAssetId,
-        userId: args.userId,
-        languageCodes,
+        languageCodes: audioLanguageCodes,
         title,
         attempt: 0,
       },
     );
   }
 
-  await ctx.scheduler.runAfter(0, (internal as any).aiMetadata.ensureAiMetadataForAssetInternal, {
-    muxAssetId: args.muxAssetId,
-    defaultUserId: args.userId,
-  });
+  if (captionLanguageCodes.length > 0) {
+    await ctx.scheduler.runAfter(
+      0,
+      (internal as any).captionTranslationsNode
+        .ensureCaptionTranslationsForAssetInternal,
+      {
+        muxAssetId: args.muxAssetId,
+        userId: args.userId,
+        languageCodes: captionLanguageCodes,
+        title,
+        attempt: 0,
+      },
+    );
+  }
+
+  await ctx.scheduler.runAfter(
+    0,
+    (internal as any).aiMetadata.ensureAiMetadataForAssetInternal,
+    {
+      muxAssetId: args.muxAssetId,
+      defaultUserId: args.userId,
+    },
+  );
 }
 
 async function scheduleModerationFallbackPoll(

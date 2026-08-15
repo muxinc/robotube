@@ -10,6 +10,8 @@ import {
   ArrowLeft,
   ArrowUp,
   Bot,
+  Camera,
+  Captions,
   Check,
   ChevronRight,
   CircleUserRound,
@@ -19,6 +21,7 @@ import {
   Home,
   ImagePlus,
   LoaderCircle,
+  Languages,
   LogOut,
   Menu,
   Play,
@@ -26,6 +29,7 @@ import {
   Search,
   Send,
   Sparkles,
+  Square,
   Upload,
   UserRound,
   Video,
@@ -82,12 +86,11 @@ type CurrentUser = {
 };
 
 const translationLanguages = [
+  ["en", "English"],
   ["es", "Spanish"],
   ["fr", "French"],
-  ["de", "German"],
-  ["pt", "Portuguese"],
   ["ja", "Japanese"],
-  ["ko", "Korean"],
+  ["zh", "Mandarin Chinese"],
 ] as const;
 
 function useDocumentTitle(title: string) {
@@ -677,45 +680,244 @@ function uploadFileWithProgress(url: string, file: File, onProgress: (progress: 
   });
 }
 
+function BrowserRecorder({
+  stream,
+  onCancel,
+  onRecorded,
+}: {
+  stream: MediaStream;
+  onCancel: () => void;
+  onRecorded: (file: File) => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const discardRef = useRef(false);
+  const [recording, setRecording] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  const startRecording = () => {
+    if (typeof MediaRecorder === "undefined") {
+      setError("This browser does not support video recording.");
+      return;
+    }
+
+    const mimeType = [
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm",
+    ].find((candidate) => MediaRecorder.isTypeSupported(candidate));
+
+    try {
+      discardRef.current = false;
+      chunksRef.current = [];
+      const recorder = new MediaRecorder(
+        stream,
+        mimeType ? { mimeType } : undefined,
+      );
+      recorderRef.current = recorder;
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data);
+      });
+      recorder.addEventListener("stop", () => {
+        setRecording(false);
+        if (discardRef.current || chunksRef.current.length === 0) return;
+        const type = recorder.mimeType || "video/webm";
+        const blob = new Blob(chunksRef.current, { type });
+        const extension = type.includes("mp4") ? "mp4" : "webm";
+        onRecorded(
+          new File([blob], `robotube-recording-${Date.now()}.${extension}`, {
+            type,
+          }),
+        );
+      });
+      recorder.start(500);
+      setRecording(true);
+      setError(null);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Could not start recording.",
+      );
+    }
+  };
+
+  const stopRecording = () => {
+    if (recorderRef.current?.state === "recording") {
+      recorderRef.current.stop();
+    }
+  };
+
+  const cancel = () => {
+    discardRef.current = true;
+    if (recorderRef.current?.state === "recording") {
+      recorderRef.current.stop();
+    }
+    onCancel();
+  };
+
+  return (
+    <section className="browser-recorder" aria-label="Record a video">
+      <video ref={videoRef} autoPlay muted playsInline />
+      <div className="browser-recorder__status">
+        {recording ? (
+          <>
+            <span /> Recording
+          </>
+        ) : (
+          "Camera preview"
+        )}
+      </div>
+      <div className="browser-recorder__actions">
+        <button
+          type="button"
+          className="button button--outline"
+          onClick={cancel}
+        >
+          Cancel
+        </button>
+        {recording ? (
+          <button
+            type="button"
+            className="button button--pink"
+            onClick={stopRecording}
+          >
+            <Square size={15} fill="currentColor" /> Stop and use video
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="button button--pink"
+            onClick={startRecording}
+          >
+            <Camera size={17} /> Start recording
+          </button>
+        )}
+      </div>
+      {error ? <p className="form-error">{error}</p> : null}
+    </section>
+  );
+}
+
 function UploadPage() {
   useDocumentTitle("Upload");
   const { isAuthenticated, isLoading } = useConvexAuth();
   const createUpload = useAction(convexApi.uploads.createMuxDirectUpload);
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [languages, setLanguages] = useState<string[]>([]);
+  const [audioLanguages, setAudioLanguages] = useState<string[]>([]);
+  const [captionLanguages, setCaptionLanguages] = useState<string[]>([]);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [openingCamera, setOpeningCamera] = useState(false);
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState("Choose a video to begin.");
   const [uploadId, setUploadId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const previewUrl = useMemo(() => file ? URL.createObjectURL(file) : null, [file]);
+  const previewUrl = useMemo(
+    () => (file ? URL.createObjectURL(file) : null),
+    [file],
+  );
   const moderation = useQuery(
     convexApi.uploadStatus.getUploadModerationStatus,
     uploadId ? { uploadId } : "skip",
-  ) as { done: boolean; progress: number; statusText: string; passed: boolean | null } | undefined;
+  ) as
+    | {
+        done: boolean;
+        progress: number;
+        statusText: string;
+        passed: boolean | null;
+      }
+    | undefined;
 
-  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
+  useEffect(
+    () => () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    },
+    [previewUrl],
+  );
+  useEffect(
+    () => () => cameraStream?.getTracks().forEach((track) => track.stop()),
+    [cameraStream],
+  );
   useEffect(() => {
-    if (moderation) { setProgress(moderation.progress); setStatusText(moderation.statusText); }
+    if (moderation) {
+      setProgress(moderation.progress);
+      setStatusText(moderation.statusText);
+    }
   }, [moderation]);
 
-  if (isLoading) return <div className="page"><div className="chat-loading"><LoaderCircle className="spin" /> Loading</div></div>;
-  if (!isAuthenticated) return <AuthGate title="Share your first video" copy="Sign in to upload directly to the same RoboTube library you use on mobile." />;
+  if (isLoading)
+    return (
+      <div className="page">
+        <div className="chat-loading">
+          <LoaderCircle className="spin" /> Loading
+        </div>
+      </div>
+    );
+  if (!isAuthenticated)
+    return (
+      <AuthGate
+        title="Share your first video"
+        copy="Sign in to upload directly to the same RoboTube library you use on mobile."
+      />
+    );
+
+  const closeCamera = () => {
+    cameraStream?.getTracks().forEach((track) => track.stop());
+    setCameraStream(null);
+  };
+
+  const openCamera = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError("Camera recording is not available in this browser.");
+      return;
+    }
+
+    setOpeningCamera(true);
+    setError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: true,
+      });
+      setCameraStream(stream);
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Camera and microphone access could not be started.",
+      );
+    } finally {
+      setOpeningCamera(false);
+    }
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim() || !file || uploading) return;
     setUploading(true);
     setError(null);
+    setUploadId(null);
     setProgress(4);
     setStatusText("Creating a secure Mux upload…");
     try {
-      const result = await createUpload({ title: title.trim(), audioTranslationLanguageCodes: languages }) as { uploadId: string; uploadUrl: string };
+      const result = (await createUpload({
+        title: title.trim(),
+        audioTranslationLanguageCodes: audioLanguages,
+        captionTranslationLanguageCodes: captionLanguages,
+      })) as { uploadId: string; uploadUrl: string };
       setProgress(10);
       setStatusText("Uploading your video…");
-      await uploadFileWithProgress(result.uploadUrl, file, (fraction) => setProgress(10 + Math.round(fraction * 83)));
+      await uploadFileWithProgress(result.uploadUrl, file, (fraction) =>
+        setProgress(10 + Math.round(fraction * 83)),
+      );
       setUploadId(result.uploadId);
       setProgress(95);
       setStatusText("Upload complete. Mux is processing and moderating it…");
@@ -725,37 +927,203 @@ function UploadPage() {
       setProgress(0);
       setError(cause instanceof Error ? cause.message : "Upload failed.");
       setStatusText("Upload failed. Your video was not published.");
-    } finally { setUploading(false); }
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
     <div className="page page--narrow">
-      <SectionHeading eyebrow="Creator studio" title="Upload a video" copy="Mux handles the stream. RoboTube generates the useful parts." />
+      <SectionHeading
+        eyebrow="Creator studio"
+        title="Upload a video"
+        copy="Mux handles the stream. RoboTube generates the useful parts."
+      />
       <form className="upload-form" onSubmit={submit}>
+        <div className="media-source-actions">
+          <button
+            type="button"
+            className="media-source-button"
+            disabled={openingCamera || uploading || Boolean(cameraStream)}
+            onClick={() => void openCamera()}
+          >
+            {openingCamera ? (
+              <LoaderCircle className="spin" size={20} />
+            ) : (
+              <Camera size={20} />
+            )}
+            <span>
+              <strong>Record video</strong>
+              <small>Use your camera and microphone</small>
+            </span>
+          </button>
+          <button
+            type="button"
+            className="media-source-button"
+            disabled={uploading}
+            onClick={() => inputRef.current?.click()}
+          >
+            <FileVideo2 size={20} />
+            <span>
+              <strong>Pick from device</strong>
+              <small>Choose an existing video</small>
+            </span>
+          </button>
+        </div>
+
+        {cameraStream ? (
+          <BrowserRecorder
+            stream={cameraStream}
+            onCancel={closeCamera}
+            onRecorded={(recordedFile) => {
+              setFile(recordedFile);
+              closeCamera();
+              setStatusText("Recorded video ready to upload.");
+            }}
+          />
+        ) : null}
+
         <div
           className={`drop-zone ${file ? "drop-zone--selected" : ""}`}
           onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => { event.preventDefault(); const next = event.dataTransfer.files[0]; if (next?.type.startsWith("video/")) setFile(next); }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const next = event.dataTransfer.files[0];
+            if (next?.type.startsWith("video/")) setFile(next);
+          }}
         >
-          <input ref={inputRef} type="file" accept="video/*" hidden onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
+          <input
+            ref={inputRef}
+            type="file"
+            accept="video/*"
+            hidden
+            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+          />
           {file && previewUrl ? (
-            <><video src={previewUrl} controls preload="metadata" /><button type="button" className="drop-zone__remove" onClick={() => setFile(null)} aria-label="Remove video"><X size={18} /></button></>
+            <>
+              <video src={previewUrl} controls preload="metadata" />
+              <button
+                type="button"
+                className="drop-zone__remove"
+                onClick={() => setFile(null)}
+                aria-label="Remove video"
+              >
+                <X size={18} />
+              </button>
+            </>
           ) : (
-            <button type="button" className="drop-zone__prompt" onClick={() => inputRef.current?.click()}>
-              <span><FileVideo2 size={29} /></span><strong>Drop a video here</strong><small>or click to browse your device</small>
+            <button
+              type="button"
+              className="drop-zone__prompt"
+              onClick={() => inputRef.current?.click()}
+            >
+              <span>
+                <FileVideo2 size={29} />
+              </span>
+              <strong>Drop a video here</strong>
+              <small>or click to browse your device</small>
             </button>
           )}
         </div>
 
-        <label className="field"><span>Video title</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Give people a reason to press play" maxLength={120} required /></label>
-        <fieldset className="translation-fieldset"><legend>Optional translated audio</legend><p>RoboTube will request dubbed audio and subtitle tracks after processing.</p><div className="chip-list">{translationLanguages.map(([code, label]) => {
-          const selected = languages.includes(code);
-          return <button type="button" className={selected ? "selected" : ""} aria-pressed={selected} onClick={() => setLanguages((current) => selected ? current.filter((item) => item !== code) : [...current, code])} key={code}>{selected ? <Check size={14} /> : null}{label}</button>;
-        })}</div></fieldset>
+        <label className="field">
+          <span>Video title</span>
+          <input
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Give people a reason to press play"
+            maxLength={120}
+            required
+          />
+        </label>
+        <div className="translation-grid">
+          <fieldset className="translation-fieldset">
+            <legend>
+              <Languages size={17} /> Translated audio
+            </legend>
+            <p>Choose languages for dubbed audio tracks.</p>
+            <div className="chip-list">
+              {translationLanguages.map(([code, label]) => {
+                const selected = audioLanguages.includes(code);
+                return (
+                  <button
+                    type="button"
+                    className={selected ? "selected" : ""}
+                    aria-pressed={selected}
+                    onClick={() =>
+                      setAudioLanguages((current) =>
+                        selected
+                          ? current.filter((item) => item !== code)
+                          : [...current, code],
+                      )
+                    }
+                    key={code}
+                  >
+                    {selected ? <Check size={14} /> : null}
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
+          <fieldset className="translation-fieldset">
+            <legend>
+              <Captions size={17} /> Translated captions
+            </legend>
+            <p>Choose subtitle languages independently from audio.</p>
+            <div className="chip-list">
+              {translationLanguages.map(([code, label]) => {
+                const selected = captionLanguages.includes(code);
+                return (
+                  <button
+                    type="button"
+                    className={selected ? "selected" : ""}
+                    aria-pressed={selected}
+                    onClick={() =>
+                      setCaptionLanguages((current) =>
+                        selected
+                          ? current.filter((item) => item !== code)
+                          : [...current, code],
+                      )
+                    }
+                    key={code}
+                  >
+                    {selected ? <Check size={14} /> : null}
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
+        </div>
 
-        {(uploading || uploadId) ? <div className="upload-progress"><div><span style={{ width: `${Math.max(progress, 2)}%` }} /></div><p><strong>{progress}%</strong>{statusText}</p></div> : null}
+        {uploading || uploadId ? (
+          <div className="upload-progress">
+            <div>
+              <span style={{ width: `${Math.max(progress, 2)}%` }} />
+            </div>
+            <p>
+              <strong>{progress}%</strong>
+              {statusText}
+            </p>
+          </div>
+        ) : null}
         {error ? <p className="form-error">{error}</p> : null}
-        <button className="button button--pink button--large" type="submit" disabled={!title.trim() || !file || uploading}>{uploading ? <><LoaderCircle className="spin" size={18} /> Uploading…</> : <><Upload size={18} /> Upload video</>}</button>
+        <button
+          className="button button--pink button--large"
+          type="submit"
+          disabled={!title.trim() || !file || uploading}
+        >
+          {uploading ? (
+            <>
+              <LoaderCircle className="spin" size={18} /> Uploading…
+            </>
+          ) : (
+            <>
+              <Upload size={18} /> Upload video
+            </>
+          )}
+        </button>
       </form>
     </div>
   );

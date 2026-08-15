@@ -53,6 +53,7 @@ function parseMetadataPassthrough(passthrough: unknown): {
   visibility?: "private" | "unlisted" | "public";
   custom?: Record<string, unknown>;
   audioTranslationLanguageCodes?: string[];
+  captionTranslationLanguageCodes?: string[];
 } {
   const raw = asString(passthrough);
   if (!raw) return {};
@@ -61,6 +62,13 @@ function parseMetadataPassthrough(passthrough: unknown): {
     const parsed = JSON.parse(raw);
     const parsedObj = asRecord(parsed);
     if (!parsedObj) return { userId: raw };
+    const custom = asRecord(parsedObj.custom);
+    const audioLanguageCodes = asStringArray(
+      custom?.audioTranslationLanguageCodes,
+    );
+    const captionLanguageCodes = asStringArray(
+      custom?.captionTranslationLanguageCodes,
+    );
 
     return {
       userId: asString(parsedObj.userId) ?? asString(parsedObj.user_id),
@@ -68,10 +76,13 @@ function parseMetadataPassthrough(passthrough: unknown): {
       description: asString(parsedObj.description),
       tags: asStringArray(parsedObj.tags),
       visibility: asVisibility(parsedObj.visibility),
-      custom: asRecord(parsedObj.custom),
-      audioTranslationLanguageCodes: normalizeAudioTranslationLanguageCodes(
-        asStringArray(asRecord(parsedObj.custom)?.audioTranslationLanguageCodes) ?? [],
-      ),
+      custom,
+      audioTranslationLanguageCodes: audioLanguageCodes
+        ? normalizeAudioTranslationLanguageCodes(audioLanguageCodes)
+        : undefined,
+      captionTranslationLanguageCodes: captionLanguageCodes
+        ? normalizeAudioTranslationLanguageCodes(captionLanguageCodes)
+        : undefined,
     };
   } catch {
     return { userId: raw };
@@ -99,6 +110,7 @@ export const createMuxDirectUpload = action({
   args: {
     title: v.optional(v.string()),
     audioTranslationLanguageCodes: v.optional(v.array(v.string())),
+    captionTranslationLanguageCodes: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const authUserId = await getAuthUserId(ctx);
@@ -109,17 +121,26 @@ export const createMuxDirectUpload = action({
     const mux = createMuxClient();
     const userId = authUserId;
     const title = args.title?.trim() || undefined;
-    const audioTranslationLanguageCodes = normalizeAudioTranslationLanguageCodes(
-      args.audioTranslationLanguageCodes ?? [],
-    );
+    const audioTranslationLanguageCodes =
+      normalizeAudioTranslationLanguageCodes(
+        args.audioTranslationLanguageCodes ?? [],
+      );
+    const captionTranslationLanguageCodes =
+      normalizeAudioTranslationLanguageCodes(
+        args.captionTranslationLanguageCodes ?? [],
+      );
+    const custom: Record<string, unknown> = {};
+    if (audioTranslationLanguageCodes.length > 0) {
+      custom.audioTranslationLanguageCodes = audioTranslationLanguageCodes;
+    }
+    if (captionTranslationLanguageCodes.length > 0) {
+      custom.captionTranslationLanguageCodes = captionTranslationLanguageCodes;
+    }
     const passthrough = JSON.stringify({
       userId,
       title,
       visibility: "public",
-      custom:
-        audioTranslationLanguageCodes.length > 0
-          ? { audioTranslationLanguageCodes }
-          : undefined,
+      custom: Object.keys(custom).length > 0 ? custom : undefined,
     });
 
     const upload = await mux.video.uploads.create({
