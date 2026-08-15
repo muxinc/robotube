@@ -187,7 +187,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
 .chat-composer button:disabled { opacity: .45; }
 
 .upload-form { padding: 26px; border: 1px solid var(--line); border-radius: 26px; background: #fff; display: flex; flex-direction: column; gap: 24px; }
-.media-source-actions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.media-source-actions { display: grid; grid-template-columns: 1fr; gap: 12px; }
 .media-source-button { min-height: 72px; padding: 13px 16px; border: 1px solid #d9e0ea; border-radius: 17px; background: #fff; color: var(--pink-deep); display: flex; align-items: center; gap: 12px; text-align: left; cursor: pointer; transition: border-color .18s,background .18s,transform .18s; }
 .media-source-button:hover { border-color: #f1a8d1; background: #fff7fb; transform: translateY(-1px); }
 .media-source-button:disabled { opacity: .48; cursor: not-allowed; transform: none; }
@@ -353,7 +353,6 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
   .search-hero .button { width: 44px; padding: 0; font-size: 0; }
   .search-hero .button::after { content: "→"; font-size: 18px; }
   .moment-list > button { grid-template-columns: 46px minmax(0,1fr) 20px; }
-  .media-source-actions { grid-template-columns: 1fr; }
   .browser-recorder__actions { flex-direction: column-reverse; }
   .browser-recorder__actions .button { width: 100%; }
   .profile-settings form { flex-direction: column; }

@@ -957,18 +957,6 @@ function UploadPage() {
               <small>Use your camera and microphone</small>
             </span>
           </button>
-          <button
-            type="button"
-            className="media-source-button"
-            disabled={uploading}
-            onClick={() => inputRef.current?.click()}
-          >
-            <FileVideo2 size={20} />
-            <span>
-              <strong>Pick from device</strong>
-              <small>Choose an existing video</small>
-            </span>
-          </button>
         </div>
 
         {cameraStream ? (
