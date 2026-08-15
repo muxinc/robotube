@@ -116,9 +116,6 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
 .empty-state h2 { margin: 17px 0 7px; font-size: 20px; }
 .empty-state p { max-width: 470px; margin: 0 0 20px; color: var(--muted); line-height: 1.55; }
 
-.search-hero { max-width: 920px; height: 66px; margin-bottom: 42px; padding: 7px 8px 7px 20px; border: 1px solid #d7dfeb; border-radius: 999px; background: #fff; display: flex; align-items: center; gap: 13px; box-shadow: 0 14px 45px rgba(27,36,52,.06); }
-.search-hero > svg { color: var(--pink-deep); }
-.search-hero input { flex: 1; min-width: 0; border: 0; outline: 0; font-size: 16px; color: var(--ink); }
 .category-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 16px; }
 .category-card { position: relative; overflow: hidden; height: 174px; padding: 20px 22px; border: 0; border-radius: 22px; color: #fff; cursor: pointer; text-align: left; display: flex; align-items: flex-end; transition: transform .2s, filter .2s; }
 .category-card:hover { transform: translateY(-3px); filter: saturate(1.08); }
@@ -316,8 +313,6 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
   .category-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 11px; }
   .category-card { height: 140px; padding: 15px; border-radius: 18px; }
   .category-card img { inset: 8px 12px auto; width: calc(100% - 24px); height: 91px; }
-  .search-hero { height: 57px; padding-left: 15px; }
-  .search-hero .button { min-height: 41px; padding-inline: 14px; }
   .watch-layout { display: block; }
   .page--watch { width: 100%; padding-top: 13px; }
   .page--watch .back-link { margin-left: 14px; }
@@ -349,9 +344,6 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
   .category-grid { grid-template-columns: 1fr 1fr; }
   .category-card { height: 118px; }
   .category-card img { height: 75px; }
-  .search-hero input { font-size: 14px; }
-  .search-hero .button { width: 44px; padding: 0; font-size: 0; }
-  .search-hero .button::after { content: "→"; font-size: 18px; }
   .moment-list > button { grid-template-columns: 46px minmax(0,1fr) 20px; }
   .browser-recorder__actions { flex-direction: column-reverse; }
   .browser-recorder__actions .button { width: 100%; }

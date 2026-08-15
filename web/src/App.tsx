@@ -362,38 +362,19 @@ function SearchPage() {
   useDocumentTitle("Explore");
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQuery = searchParams.get("q") ?? "";
-  const [draft, setDraft] = useState(initialQuery);
   const query = initialQuery.trim();
   const results = useQuery(
     convexApi.searchFast.searchVideosFast,
     query.length >= 2 ? { queryText: query, limit: 30 } : "skip",
   ) as FeedVideoItem[] | undefined;
 
-  useEffect(() => setDraft(initialQuery), [initialQuery]);
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    const value = draft.trim();
-    if (value.length >= 2) setSearchParams({ q: value });
-  };
-
   return (
     <div className="page page--search">
       <SectionHeading
         eyebrow="Explore RoboTube"
         title={query ? `Results for “${query}”` : "What do you want to watch?"}
-        copy={query ? "Matches across titles, summaries, and AI-generated tags." : "Search the whole library or pick a lane."}
+        copy={query ? "Matches across titles, summaries, and AI-generated tags." : "Use the search above or pick a lane."}
       />
-      <form className="search-hero" onSubmit={submit} role="search">
-        <Search size={23} />
-        <input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="Try “design systems”, “music”, or “robotics”"
-          aria-label="Search videos"
-        />
-        <button className="button button--pink" type="submit">Search</button>
-      </form>
 
       {!query ? (
         <section>
