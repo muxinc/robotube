@@ -29,7 +29,8 @@
     "production": {
       "ios": {
         "appleId": "jalphonse@mux.com",
-        "appleTeamId": "XX95P4Y787"
+        "appleTeamId": "XX95P4Y787",
+        "ascAppId": "6762162051"
       }
     }
   }

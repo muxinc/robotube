@@ -2,14 +2,11 @@ import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
 import { query } from "./_generated/server";
-
-type FastSearchVideo = {
-  muxAssetId: string;
-  title: string;
-  summary: string | null;
-  tags: string[];
-  createdAtMs: number;
-};
+import {
+  type FeedSearchIndexItem,
+  type FeedVideoCardItem,
+  projectToFeedVideoCardItem,
+} from "./feedContracts";
 
 const SEARCH_SCAN_MULTIPLIER = 4;
 const SEARCH_MIN_SCAN_LIMIT = 48;
@@ -34,7 +31,7 @@ function tokenizeSearchText(normalizedQuery: string) {
 }
 
 function scoreLexicalMatch(
-  item: FastSearchVideo,
+  item: FeedSearchIndexItem,
   normalizedQuery: string,
   tokens: string[],
 ) {
@@ -63,12 +60,16 @@ function scoreLexicalMatch(
   return score;
 }
 
+/**
+ * Search results render the shared feed card, so the response uses the card
+ * contract. Summary and tags are ranking inputs only and are not serialized.
+ */
 export const searchVideosFast = query({
   args: {
     queryText: v.string(),
     limit: v.optional(v.number()),
   },
-  handler: async (ctx, args): Promise<FastSearchVideo[]> => {
+  handler: async (ctx, args): Promise<FeedVideoCardItem[]> => {
     const normalizedQuery = normalizeSearchText(args.queryText);
     if (normalizedQuery.length < 2) return [];
 
@@ -76,21 +77,25 @@ export const searchVideosFast = query({
     const limit = Math.max(1, Math.min(60, Math.floor(args.limit ?? 20)));
     const scanLimit = getSearchScanLimit(limit);
 
-    const feedVideos = (await ctx.runQuery(internal.feed.listFeedVideosInternal, {
+    const feedVideos = await ctx.runQuery(internal.feed.listFeedSearchIndexInternal, {
       limit: scanLimit,
-    })) as FastSearchVideo[];
+    });
 
     return feedVideos
-      .map((video: FastSearchVideo) => ({
+      .map((video: FeedSearchIndexItem) => ({
         video,
         score: scoreLexicalMatch(video, normalizedQuery, queryTokens),
       }))
-      .filter((item: { video: FastSearchVideo; score: number }) => item.score > 0)
+      .filter((item: { video: FeedSearchIndexItem; score: number }) => item.score > 0)
       .sort(
-        (a: { video: FastSearchVideo; score: number }, b: { video: FastSearchVideo; score: number }) =>
-          b.score - a.score || b.video.createdAtMs - a.video.createdAtMs,
+        (
+          a: { video: FeedSearchIndexItem; score: number },
+          b: { video: FeedSearchIndexItem; score: number },
+        ) => b.score - a.score || b.video.createdAtMs - a.video.createdAtMs,
       )
       .slice(0, limit)
-      .map((item: { video: FastSearchVideo; score: number }) => item.video);
+      .map((item: { video: FeedSearchIndexItem; score: number }) =>
+        projectToFeedVideoCardItem(item.video),
+      );
   },
 });

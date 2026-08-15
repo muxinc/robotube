@@ -10,15 +10,25 @@
 
 import type * as aiMetadata from "../aiMetadata.js";
 import type * as aiMetadataLocks from "../aiMetadataLocks.js";
+import type * as aspectClassification from "../aspectClassification.js";
 import type * as audioTranslations from "../audioTranslations.js";
 import type * as audioTranslationsNode from "../audioTranslationsNode.js";
 import type * as auth from "../auth.js";
+import type * as backfillPaging from "../backfillPaging.js";
 import type * as captionEditingNode from "../captionEditingNode.js";
 import type * as captionTranslations from "../captionTranslations.js";
 import type * as captionTranslationsNode from "../captionTranslationsNode.js";
 import type * as captions from "../captions.js";
 import type * as feed from "../feed.js";
+import type * as feedContracts from "../feedContracts.js";
+import type * as feedPlacement from "../feedPlacement.js";
+import type * as feedReadModel from "../feedReadModel.js";
+import type * as feedReadModelSync from "../feedReadModelSync.js";
+import type * as feedRuntimeConfig from "../feedRuntimeConfig.js";
 import type * as http from "../http.js";
+import type * as laravelFlag from "../laravelFlag.js";
+import type * as laravelOrchestration from "../laravelOrchestration.js";
+import type * as laravelSync from "../laravelSync.js";
 import type * as libraryReset from "../libraryReset.js";
 import type * as liveStreamMutations from "../liveStreamMutations.js";
 import type * as liveStreamQueries from "../liveStreamQueries.js";
@@ -37,6 +47,7 @@ import type * as videoChat from "../videoChat.js";
 import type * as videoChatNode from "../videoChatNode.js";
 import type * as videoEmbeddings from "../videoEmbeddings.js";
 import type * as videoEmbeddingsNode from "../videoEmbeddingsNode.js";
+import type * as videoMetadata from "../videoMetadata.js";
 
 import type {
   ApiFromModules,
@@ -47,15 +58,25 @@ import type {
 declare const fullApi: ApiFromModules<{
   aiMetadata: typeof aiMetadata;
   aiMetadataLocks: typeof aiMetadataLocks;
+  aspectClassification: typeof aspectClassification;
   audioTranslations: typeof audioTranslations;
   audioTranslationsNode: typeof audioTranslationsNode;
   auth: typeof auth;
+  backfillPaging: typeof backfillPaging;
   captionEditingNode: typeof captionEditingNode;
   captionTranslations: typeof captionTranslations;
   captionTranslationsNode: typeof captionTranslationsNode;
   captions: typeof captions;
   feed: typeof feed;
+  feedContracts: typeof feedContracts;
+  feedPlacement: typeof feedPlacement;
+  feedReadModel: typeof feedReadModel;
+  feedReadModelSync: typeof feedReadModelSync;
+  feedRuntimeConfig: typeof feedRuntimeConfig;
   http: typeof http;
+  laravelFlag: typeof laravelFlag;
+  laravelOrchestration: typeof laravelOrchestration;
+  laravelSync: typeof laravelSync;
   libraryReset: typeof libraryReset;
   liveStreamMutations: typeof liveStreamMutations;
   liveStreamQueries: typeof liveStreamQueries;
@@ -74,6 +95,7 @@ declare const fullApi: ApiFromModules<{
   videoChatNode: typeof videoChatNode;
   videoEmbeddings: typeof videoEmbeddings;
   videoEmbeddingsNode: typeof videoEmbeddingsNode;
+  videoMetadata: typeof videoMetadata;
 }>;
 
 /**

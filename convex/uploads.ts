@@ -1,5 +1,7 @@
 "use node";
 
+import { randomUUID } from "node:crypto";
+
 import Mux from "@mux/mux-node";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
@@ -7,6 +9,8 @@ import { v } from "convex/values";
 import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-translation-languages";
 import { components, internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
+import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 function requiredEnv(name: string, value: string | undefined): string {
   if (!value) throw new Error(`Missing env var: ${name}`);
@@ -98,7 +102,11 @@ function isMuxRobotsPollingDisabled() {
 export const createMuxDirectUpload = action({
   args: {
     title: v.optional(v.string()),
+    description: v.optional(v.string()),
+    useGeneratedTitle: v.optional(v.boolean()),
+    useGeneratedDescription: v.optional(v.boolean()),
     audioTranslationLanguageCodes: v.optional(v.array(v.string())),
+    captionTranslationLanguageCodes: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const authUserId = await getAuthUserId(ctx);
@@ -109,17 +117,34 @@ export const createMuxDirectUpload = action({
     const mux = createMuxClient();
     const userId = authUserId;
     const title = args.title?.trim() || undefined;
+    const description = args.description?.trim() || undefined;
     const audioTranslationLanguageCodes = normalizeAudioTranslationLanguageCodes(
       args.audioTranslationLanguageCodes ?? [],
     );
+    const captionTranslationLanguageCodes = normalizeAudioTranslationLanguageCodes(
+      args.captionTranslationLanguageCodes ?? [],
+    );
+    // Mux caps passthrough at 255 characters, so the user's title never goes
+    // into it: each upload gets a short unique reference id that becomes the
+    // Mux-side meta.title/external_id (asset identity + dashboard search),
+    // while the full title only lives in Convex videoMetadata (carried via the
+    // syncUploadAssetAndMetadataInternal scheduler args below).
+    //
+    // Write both language keys whenever either job was requested: a
+    // present-but-empty captionTranslationLanguageCodes means "explicitly no
+    // captions", while a missing key means a legacy upload where the audio
+    // list covered both jobs.
+    const muxReferenceId = `rt-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
     const passthrough = JSON.stringify({
       userId,
-      title,
-      visibility: "public",
-      custom:
-        audioTranslationLanguageCodes.length > 0
-          ? { audioTranslationLanguageCodes }
-          : undefined,
+      // Upload and process privately. The uploader explicitly publishes after
+      // reviewing the generated Mux Robots metadata draft.
+      visibility: "private",
+      custom: {
+        awaitingMetadataReview: true,
+        audioTranslationLanguageCodes,
+        captionTranslationLanguageCodes,
+      },
     });
 
     const upload = await mux.video.uploads.create({
@@ -127,6 +152,10 @@ export const createMuxDirectUpload = action({
       new_asset_settings: {
         playback_policies: ["public"],
         passthrough,
+        meta: {
+          title: muxReferenceId,
+          external_id: muxReferenceId,
+        },
       },
     });
 
@@ -142,6 +171,9 @@ export const createMuxDirectUpload = action({
           uploadId: upload.id,
           userId,
           title,
+          description,
+          useGeneratedTitle: args.useGeneratedTitle,
+          useGeneratedDescription: args.useGeneratedDescription,
           attempt: 0,
         },
       );
@@ -151,6 +183,7 @@ export const createMuxDirectUpload = action({
       uploadId: upload.id,
       uploadUrl: upload.url,
       status: upload.status,
+      muxReferenceId,
     };
   },
 });
@@ -160,6 +193,9 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
     uploadId: v.string(),
     userId: v.string(),
     title: v.optional(v.string()),
+    description: v.optional(v.string()),
+    useGeneratedTitle: v.optional(v.boolean()),
+    useGeneratedDescription: v.optional(v.boolean()),
     attempt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -184,6 +220,9 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
               uploadId: args.uploadId,
               userId: args.userId,
               title: args.title,
+              description: args.description,
+              useGeneratedTitle: args.useGeneratedTitle,
+              useGeneratedDescription: args.useGeneratedDescription,
               attempt: nextAttempt,
             },
           );
@@ -221,16 +260,33 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
 
       const resolvedTitle = metadata.title ?? args.title;
       if (resolvedTitle !== undefined) metadataArgs.title = resolvedTitle;
-      if (metadata.description !== undefined) {
-        metadataArgs.description = metadata.description;
+      const resolvedDescription = metadata.description ?? args.description;
+      if (resolvedDescription !== undefined) {
+        metadataArgs.description = resolvedDescription;
       }
       if (metadata.tags !== undefined) metadataArgs.tags = metadata.tags;
       if (metadata.visibility !== undefined) {
         metadataArgs.visibility = metadata.visibility;
       }
-      if (metadata.custom !== undefined) metadataArgs.custom = metadata.custom;
+      // The Mux-side asset title is a generated reference id (see
+      // createMuxDirectUpload); keep it on the Convex video so the two can be
+      // cross-referenced later.
+      const muxReferenceId = asString(asRecord((asset as any).meta)?.external_id);
+      const mergedCustom = {
+        ...(metadata.custom ?? {}),
+        ...(args.useGeneratedTitle !== undefined
+          ? { aiUseGeneratedTitle: args.useGeneratedTitle }
+          : {}),
+        ...(args.useGeneratedDescription !== undefined
+          ? { aiUseGeneratedDescription: args.useGeneratedDescription }
+          : {}),
+        ...(muxReferenceId ? { muxReferenceId } : {}),
+      };
+      if (Object.keys(mergedCustom).length > 0) {
+        metadataArgs.custom = mergedCustom;
+      }
 
-      await ctx.runMutation(components.mux.videos.upsertVideoMetadata, metadataArgs);
+      await upsertVideoMetadataAndSyncFeedReadModel(ctx, metadataArgs);
 
       if (asString(asset.status) !== "ready") {
         const nextAttempt = attempt + 1;
@@ -243,6 +299,9 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
               uploadId: args.uploadId,
               userId: args.userId,
               title: args.title,
+              description: args.description,
+              useGeneratedTitle: args.useGeneratedTitle,
+              useGeneratedDescription: args.useGeneratedDescription,
               attempt: nextAttempt,
             },
           );
@@ -258,7 +317,22 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
         };
       }
 
-      if (!isMuxRobotsPollingDisabled()) {
+      if (isLaravelOrchestrationEnabled()) {
+        // Laravel is the ONLY Robots runner. Hand off to the Laravel
+        // orchestration backend instead of kicking off the Convex-native
+        // moderation -> AI-metadata pipeline (which would create duplicate
+        // Robots jobs). Convex creates zero Robots jobs on this path.
+        await ctx.scheduler.runAfter(
+          0,
+          (internal as any).laravelOrchestration.startLaravelRobotRun,
+          {
+            muxAssetId,
+            userId: metadataArgs.userId,
+            title: resolvedTitle,
+            attempt: 0,
+          },
+        );
+      } else if (!isMuxRobotsPollingDisabled()) {
         await ctx.scheduler.runAfter(
           0,
           (internal as any).moderation.moderateAssetInternal,
@@ -283,6 +357,9 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
             uploadId: args.uploadId,
             userId: args.userId,
             title: args.title,
+            description: args.description,
+            useGeneratedTitle: args.useGeneratedTitle,
+            useGeneratedDescription: args.useGeneratedDescription,
             attempt: nextAttempt,
           },
         );

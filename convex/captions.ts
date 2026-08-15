@@ -5,6 +5,8 @@ import { v } from "convex/values";
 
 import { components, internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
+import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 const MAX_ATTEMPTS = 10;
 const GENERATED_CAPTIONS_PASSTHROUGH = "robotube:auto-generated";
@@ -212,6 +214,23 @@ function isNonRetryableCaptionsError(message: string) {
   );
 }
 
+// Mux returns HTTP 422 "A text track for language <x> already exists on this
+// asset" when a generated-subtitles job is requested for a track that already
+// exists (racing kicks, or a track already in `preparing`). This is benign:
+// the caption already exists / is being prepared, so treat it as success.
+function isCaptionsAlreadyExistError(message: string) {
+  return /already exists/i.test(message) && /text track|language/i.test(message);
+}
+
+// Any text track on the asset that is not in a failed state means captions are
+// ready or in flight — the `video.asset.track.ready` webhook will finish the
+// flow, so a fresh generateSubtitles call would only race and 422.
+function hasNonErroredTextTrack(asset: any) {
+  return (asset?.tracks ?? []).some(
+    (track: any) => track?.type === "text" && track?.status !== "errored",
+  );
+}
+
 function isActiveMuxRobotsJobStatus(value: unknown) {
   return value === "pending" || value === "processing";
 }
@@ -232,7 +251,7 @@ async function upsertCaptionMetadataFields(
     ...customFields,
   };
 
-  await ctx.runMutation(components.mux.videos.upsertVideoMetadata, {
+  await upsertVideoMetadataAndSyncFeedReadModel(ctx, {
     muxAssetId: args.muxAssetId,
     userId: args.userId,
     title: asString(latestMetadata.title),
@@ -250,6 +269,17 @@ async function maybeScheduleAiMetadataForReadyCaptions(
   args: { muxAssetId: string; userId: string },
   custom: Record<string, unknown>,
 ) {
+  // Captions/STT generation stays Convex-owned, but the AI-metadata Robots
+  // kickoff it chains into is owned by Laravel when the flag is on. Skip the
+  // schedule entirely so we do not create duplicate summarize/chapters/
+  // key-moments jobs (this was the double-processing path found in Loop 18).
+  if (isLaravelOrchestrationEnabled()) {
+    console.log(
+      `[captions] AI-metadata kickoff skipped for ${args.muxAssetId}: USE_LARAVEL_ORCHESTRATION on`,
+    );
+    return false;
+  }
+
   const missingSummary =
     asNumber(custom.aiGeneratedAtMs) === undefined &&
     !isActiveMuxRobotsJobStatus(custom.aiSummaryJobStatus);
@@ -405,6 +435,22 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
         return { ok: true, skipped: false, alreadyExisted: true, scheduledAiMetadata };
       }
 
+      // Idempotency guard: findSourceCaptionsTrack above only matches `ready`
+      // text tracks, so a track still in `preparing` (or a generated track that
+      // has not finished) slips past it and a fresh generateSubtitles call would
+      // 422. If ANY non-errored text track already exists, captions are already
+      // in flight — no-op and let the track.ready webhook finish. Errored-only
+      // tracks fall through to (re)create below.
+      if (hasNonErroredTextTrack(asset)) {
+        await upsertCaptionMetadataFields(ctx, args, {
+          aiCaptionsRequestedAtMs:
+            asNumber(custom.aiCaptionsRequestedAtMs) ?? Date.now(),
+          aiCaptionsUnavailableReason: null,
+          aiCaptionsRetryScheduled: false,
+        });
+        return { ok: true, skipped: true, reason: "captions_in_flight" };
+      }
+
       const audioTrack = findPrimaryAudioTrack(asset);
       if (!audioTrack?.id) {
         await upsertCaptionMetadataFields(ctx, args, {
@@ -414,15 +460,36 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
         return { ok: false, skipped: true, reason: "no_audio_track", retryScheduled: false };
       }
 
-      await mux.video.assets.generateSubtitles(args.muxAssetId, audioTrack.id, {
-        generated_subtitles: [
-          {
-            language_code: "auto" as any,
-            name: "Original audio (generated)",
-            passthrough: GENERATED_CAPTIONS_PASSTHROUGH,
-          },
-        ],
-      });
+      try {
+        await mux.video.assets.generateSubtitles(args.muxAssetId, audioTrack.id, {
+          generated_subtitles: [
+            {
+              language_code: "auto" as any,
+              name: "Original audio (generated)",
+              passthrough: GENERATED_CAPTIONS_PASSTHROUGH,
+            },
+          ],
+        });
+      } catch (error) {
+        // Benign race: a text track was created concurrently (or already
+        // existed in a non-`ready` state the guard above could not see). Treat
+        // as success — do NOT mark captions failed; the track.ready webhook
+        // drives the rest.
+        const message = getErrorMessage(error);
+        if (isCaptionsAlreadyExistError(message)) {
+          console.log(
+            `[captions] generateSubtitles for ${args.muxAssetId} no-op: text track already exists`,
+          );
+          await upsertCaptionMetadataFields(ctx, args, {
+            aiCaptionsRequestedAtMs:
+              asNumber(custom.aiCaptionsRequestedAtMs) ?? Date.now(),
+            aiCaptionsUnavailableReason: null,
+            aiCaptionsRetryScheduled: false,
+          });
+          return { ok: true, skipped: true, reason: "captions_already_exist" };
+        }
+        throw error;
+      }
 
       const shouldRetry = nextAttempt < MAX_ATTEMPTS;
       await upsertCaptionMetadataFields(ctx, args, {

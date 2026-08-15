@@ -5,6 +5,8 @@ import { v } from "convex/values";
 import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-translation-languages";
 import { components, internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
+import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 const MAX_ATTEMPTS = 8;
 const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v0";
@@ -282,8 +284,8 @@ async function updateModerationTrackingFields(
   const latestMetadata = getMetadataRecord(latestVideo?.metadata);
   const latestCustom = asCustomRecord(latestMetadata.custom);
 
-  await ctx.runMutation(
-    components.mux.videos.upsertVideoMetadata,
+  await upsertVideoMetadataAndSyncFeedReadModel(
+    ctx,
     buildMetadataArgs({
       muxAssetId: args.muxAssetId,
       userId: args.userId,
@@ -315,35 +317,49 @@ async function scheduleApprovedAssetJobs(ctx: any, args: { muxAssetId: string; u
 
   const latestMetadata = getMetadataRecord(latestVideo.metadata);
   const latestCustom = asCustomRecord(latestMetadata.custom);
-  const languageCodes = normalizeAudioTranslationLanguageCodes(
+  const audioLanguageCodes = normalizeAudioTranslationLanguageCodes(
     Array.isArray(latestCustom.audioTranslationLanguageCodes)
       ? latestCustom.audioTranslationLanguageCodes.filter(
           (value): value is string => typeof value === "string",
         )
       : [],
   );
+  // Legacy uploads only wrote audioTranslationLanguageCodes and meant
+  // "translate both"; new uploads always write captionTranslationLanguageCodes
+  // (possibly empty) alongside it.
+  const captionLanguageCodes = Array.isArray(
+    latestCustom.captionTranslationLanguageCodes,
+  )
+    ? normalizeAudioTranslationLanguageCodes(
+        latestCustom.captionTranslationLanguageCodes.filter(
+          (value): value is string => typeof value === "string",
+        ),
+      )
+    : audioLanguageCodes;
   const title = asString(latestMetadata.title);
 
-  if (languageCodes.length > 0) {
+  if (audioLanguageCodes.length > 0) {
     await ctx.scheduler.runAfter(
       0,
       (internal as any).audioTranslationsNode.ensureAudioTranslationsForAssetInternal,
       {
         muxAssetId: args.muxAssetId,
         userId: args.userId,
-        languageCodes,
+        languageCodes: audioLanguageCodes,
         title,
         attempt: 0,
       },
     );
+  }
 
+  if (captionLanguageCodes.length > 0) {
     await ctx.scheduler.runAfter(
       0,
       (internal as any).captionTranslationsNode.ensureCaptionTranslationsForAssetInternal,
       {
         muxAssetId: args.muxAssetId,
         userId: args.userId,
-        languageCodes,
+        languageCodes: captionLanguageCodes,
         title,
         attempt: 0,
       },
@@ -390,8 +406,8 @@ async function applyModerationJobUpdate(
   }
 
   if (job.status === "pending" || job.status === "processing") {
-    await ctx.runMutation(
-      components.mux.videos.upsertVideoMetadata,
+    await upsertVideoMetadataAndSyncFeedReadModel(
+      ctx,
       buildMetadataArgs({
         muxAssetId: args.muxAssetId,
         userId: args.userId,
@@ -422,15 +438,16 @@ async function applyModerationJobUpdate(
     const exceedsThreshold = job.outputs?.exceeds_threshold === true;
     const moderationPassed = !exceedsThreshold;
 
-    await ctx.runMutation(
-      components.mux.videos.upsertVideoMetadata,
+    await upsertVideoMetadataAndSyncFeedReadModel(
+      ctx,
       buildMetadataArgs({
         muxAssetId: args.muxAssetId,
         userId: args.userId,
         title: asString(latestMetadata.title),
         description: asString(latestMetadata.description),
         tags: Array.isArray(latestMetadata.tags) ? (latestMetadata.tags as string[]) : undefined,
-        visibility: "public",
+        visibility:
+          latestCustom.awaitingMetadataReview === true ? "private" : "public",
         custom: {
           ...latestCustom,
           moderationCheckedAtMs: Date.now(),
@@ -485,8 +502,8 @@ async function applyModerationJobUpdate(
     );
   }
 
-  await ctx.runMutation(
-    components.mux.videos.upsertVideoMetadata,
+  await upsertVideoMetadataAndSyncFeedReadModel(
+    ctx,
     buildMetadataArgs({
       muxAssetId: args.muxAssetId,
       userId: args.userId,
@@ -524,6 +541,16 @@ export const moderateAssetInternal = internalAction({
     attempt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    // Laravel owns the moderate Robots job when the flag is on. No-op so Convex
+    // creates zero moderation Robots jobs regardless of caller (uploads route
+    // away already; this also covers self-retries and migration backfills).
+    if (isLaravelOrchestrationEnabled()) {
+      console.log(
+        `[moderation] moderateAssetInternal skipped for ${args.muxAssetId}: USE_LARAVEL_ORCHESTRATION on`,
+      );
+      return { ok: true, skipped: true, reason: "laravel_orchestration" as const };
+    }
+
     const lock = (await ctx.runMutation((internal as any).moderationLocks.claimModerationLockInternal, {
       muxAssetId: args.muxAssetId,
       userId: args.userId,
@@ -647,8 +674,8 @@ export const moderateAssetInternal = internalAction({
           );
         }
 
-        await ctx.runMutation(
-          components.mux.videos.upsertVideoMetadata,
+        await upsertVideoMetadataAndSyncFeedReadModel(
+          ctx,
           buildMetadataArgs({
             muxAssetId: args.muxAssetId,
             userId: args.userId,
@@ -781,8 +808,8 @@ export const pollModerationJobStatusInternal = internalAction({
         );
       }
 
-      await ctx.runMutation(
-        components.mux.videos.upsertVideoMetadata,
+      await upsertVideoMetadataAndSyncFeedReadModel(
+        ctx,
         buildMetadataArgs({
           muxAssetId: args.muxAssetId,
           userId: args.userId,

@@ -6,6 +6,7 @@ import { v } from "convex/values";
 import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-translation-languages";
 import { components, internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
+import { isLaravelOrchestrationEnabled } from "./laravelFlag";
 
 const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v0";
 const TRANSLATE_CAPTIONS_SOURCE_WAIT_INTERVAL_MS = 15 * 1000;
@@ -89,6 +90,7 @@ type EnsureCaptionTranslationsResult =
   | { ok: true; skipped: true; reason: "moderation_pending" | "moderation_rejected" }
   | { ok: true; skipped: true; reason: "source_captions_unavailable" }
   | { ok: true; skipped: true; reason: "polling_disabled" }
+  | { ok: true; skipped: true; reason: "laravel_orchestration" }
   | { ok: true; skipped: false; created: number }
   | {
       ok: false;
@@ -349,6 +351,13 @@ export const ensureCaptionTranslationsForAssetInternal = internalAction({
     attempt: v.optional(v.number()),
   },
   handler: async (ctx, args): Promise<EnsureCaptionTranslationsResult> => {
+    // Laravel owns caption/audio translation Robots jobs when the flag is on.
+    // No-op so Convex creates zero caption-translation Robots jobs (covers all
+    // callers: moderation, migrations, self-reschedule).
+    if (isLaravelOrchestrationEnabled()) {
+      return { ok: true, skipped: true, reason: "laravel_orchestration" };
+    }
+
     const attempt = Math.max(0, Math.floor(args.attempt ?? 0));
     const requestedLanguageCodes = normalizeAudioTranslationLanguageCodes(args.languageCodes);
 
