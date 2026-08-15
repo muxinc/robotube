@@ -3,6 +3,7 @@ import { convexAuth } from "@convex-dev/auth/server";
 
 const ALLOWED_WEB_REDIRECT_ORIGINS = new Set([
   "https://robotube-web.workspace-245068.chatgpt.site",
+  "https://robotube.vercel.app",
   "http://localhost:5173",
   "http://127.0.0.1:5173",
 ]);
