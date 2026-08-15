@@ -35,6 +35,24 @@ Convex is our database of choice with a bunch of added feqtures below
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
+## React web app
+
+The browser-native React 19 app lives in `web/`. It shares this repository's
+existing Convex backend and generated API instead of creating a separate
+deployment.
+
+```bash
+npm --prefix web install
+npm run web:react
+```
+
+The web client reads `EXPO_PUBLIC_CONVEX_URL` from the root environment for
+local development. Hosted environments can provide the same public deployment
+URL as `VITE_CONVEX_URL`.
+
+Convex Auth keeps the native `robotube://` callback and explicitly allows the
+production web origin plus local Vite origins.
+
 ## Get started
 
 This project uses Expo SDK 55 and React 19.2, so the `<Activity>` component is available.

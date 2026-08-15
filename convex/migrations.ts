@@ -55,6 +55,7 @@ function parseMetadataPassthrough(passthrough: unknown): {
   visibility?: "private" | "unlisted" | "public";
   custom?: Record<string, unknown>;
   audioTranslationLanguageCodes?: string[];
+  captionTranslationLanguageCodes?: string[];
 } {
   const raw = asString(passthrough);
   if (!raw) return {};
@@ -63,6 +64,13 @@ function parseMetadataPassthrough(passthrough: unknown): {
     const parsed = JSON.parse(raw);
     const parsedObj = asRecord(parsed);
     if (!parsedObj) return { userId: raw };
+    const custom = asRecord(parsedObj.custom);
+    const audioLanguageCodes = asStringArray(
+      custom?.audioTranslationLanguageCodes,
+    );
+    const captionLanguageCodes = asStringArray(
+      custom?.captionTranslationLanguageCodes,
+    );
 
     return {
       userId: asString(parsedObj.userId) ?? asString(parsedObj.user_id),
@@ -70,10 +78,13 @@ function parseMetadataPassthrough(passthrough: unknown): {
       description: asString(parsedObj.description),
       tags: asStringArray(parsedObj.tags),
       visibility: asVisibility(parsedObj.visibility),
-      custom: asRecord(parsedObj.custom),
-      audioTranslationLanguageCodes: normalizeAudioTranslationLanguageCodes(
-        asStringArray(asRecord(parsedObj.custom)?.audioTranslationLanguageCodes) ?? [],
-      ),
+      custom,
+      audioTranslationLanguageCodes: audioLanguageCodes
+        ? normalizeAudioTranslationLanguageCodes(audioLanguageCodes)
+        : undefined,
+      captionTranslationLanguageCodes: captionLanguageCodes
+        ? normalizeAudioTranslationLanguageCodes(captionLanguageCodes)
+        : undefined,
     };
   } catch {
     return { userId: raw };
@@ -789,7 +800,10 @@ export const backfillRequestedTranslationTracksForReadyAssets = action({
 
     const mux = new Mux({
       tokenId: requiredEnv("MUX_TOKEN_ID", process.env.MUX_TOKEN_ID),
-      tokenSecret: requiredEnv("MUX_TOKEN_SECRET", process.env.MUX_TOKEN_SECRET),
+      tokenSecret: requiredEnv(
+        "MUX_TOKEN_SECRET",
+        process.env.MUX_TOKEN_SECRET,
+      ),
     });
 
     const maxAssets = Math.max(1, Math.floor(args.maxAssets ?? 200));
@@ -816,19 +830,32 @@ export const backfillRequestedTranslationTracksForReadyAssets = action({
         asset: asset as unknown as Record<string, unknown>,
       });
 
-      const video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
-        muxAssetId: asset.id,
-      });
+      const video = await ctx.runQuery(
+        components.mux.videos.getVideoByMuxAssetId,
+        {
+          muxAssetId: asset.id,
+        },
+      );
       const metadata = asMetadataRecord((video as any)?.metadata);
       const existingCustom = asRecord(metadata.custom) ?? {};
       const parsedPassthrough = parseMetadataPassthrough(asset.passthrough);
-      const requestedLanguageCodes = normalizeAudioTranslationLanguageCodes(
-        asStringArray(existingCustom.audioTranslationLanguageCodes) ??
-          parsedPassthrough.audioTranslationLanguageCodes ??
-          [],
-      );
+      const requestedAudioLanguageCodes =
+        normalizeAudioTranslationLanguageCodes(
+          asStringArray(existingCustom.audioTranslationLanguageCodes) ??
+            parsedPassthrough.audioTranslationLanguageCodes ??
+            [],
+        );
+      const requestedCaptionLanguageCodes =
+        normalizeAudioTranslationLanguageCodes(
+          asStringArray(existingCustom.captionTranslationLanguageCodes) ??
+            parsedPassthrough.captionTranslationLanguageCodes ??
+            requestedAudioLanguageCodes,
+        );
 
-      if (requestedLanguageCodes.length === 0) {
+      if (
+        requestedAudioLanguageCodes.length === 0 &&
+        requestedCaptionLanguageCodes.length === 0
+      ) {
         skippedNoRequestedLanguages += 1;
         continue;
       }
@@ -841,33 +868,39 @@ export const backfillRequestedTranslationTracksForReadyAssets = action({
       const title = asString(metadata.title) ?? parsedPassthrough.title;
       const delayMs = queuedAssets * staggerMs;
 
-      await ctx.scheduler.runAfter(
-        delayMs,
-        (internal as any).audioTranslationsNode.ensureAudioTranslationsForAssetInternal,
-        {
-          muxAssetId: asset.id,
-          userId,
-          languageCodes: requestedLanguageCodes,
-          title,
-          attempt: 0,
-        },
-      );
+      if (requestedAudioLanguageCodes.length > 0) {
+        await ctx.scheduler.runAfter(
+          delayMs,
+          (internal as any).audioTranslationsNode
+            .ensureAudioTranslationsForAssetInternal,
+          {
+            muxAssetId: asset.id,
+            userId,
+            languageCodes: requestedAudioLanguageCodes,
+            title,
+            attempt: 0,
+          },
+        );
+      }
 
-      await ctx.scheduler.runAfter(
-        delayMs,
-        (internal as any).captionTranslationsNode.ensureCaptionTranslationsForAssetInternal,
-        {
-          muxAssetId: asset.id,
-          userId,
-          languageCodes: requestedLanguageCodes,
-          title,
-          attempt: 0,
-        },
-      );
+      if (requestedCaptionLanguageCodes.length > 0) {
+        await ctx.scheduler.runAfter(
+          delayMs,
+          (internal as any).captionTranslationsNode
+            .ensureCaptionTranslationsForAssetInternal,
+          {
+            muxAssetId: asset.id,
+            userId,
+            languageCodes: requestedCaptionLanguageCodes,
+            title,
+            attempt: 0,
+          },
+        );
+      }
 
       queuedAssets += 1;
-      queuedAudioRequests += requestedLanguageCodes.length;
-      queuedCaptionRequests += requestedLanguageCodes.length;
+      queuedAudioRequests += requestedAudioLanguageCodes.length;
+      queuedCaptionRequests += requestedCaptionLanguageCodes.length;
     }
 
     return {
