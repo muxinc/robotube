@@ -98,9 +98,22 @@ export default defineSchema({
     status: v.string(),
     isReady: v.boolean(),
     isDeleted: v.boolean(),
+    aspectRatio: v.optional(v.string()),
+    aspectRatioUpdatedAtMs: v.optional(v.number()),
     durationSeconds: v.optional(v.number()),
     createdAtMs: v.number(),
     deletedAtMs: v.optional(v.number()),
+    feedPlacement: v.optional(v.string()),
+    feedReadModelUpdatedAtMs: v.optional(v.number()),
+    feedTitle: v.optional(v.string()),
+    feedUploaderUserId: v.optional(v.string()),
+    feedVisibility: v.optional(
+      v.union(
+        v.literal("private"),
+        v.literal("unlisted"),
+        v.literal("public"),
+      ),
+    ),
     passthrough: v.optional(v.string()),
     playbackIds: v.array(
       v.object({
@@ -111,7 +124,20 @@ export default defineSchema({
     updatedAtMs: v.number(),
   })
     .index("by_mux_asset", ["muxAssetId"])
-    .index("by_ready_deleted_created", ["isReady", "isDeleted", "createdAtMs"]),
+    .index("by_ready_deleted_created", ["isReady", "isDeleted", "createdAtMs"])
+    .index("by_feed_placement_ready_deleted_created", [
+      "feedPlacement",
+      "isReady",
+      "isDeleted",
+      "createdAtMs",
+    ]),
+  feedRuntimeConfig: defineTable({
+    key: v.string(),
+    shortsTabEnabled: v.boolean(),
+    exclusiveFeedPlacementEnabled: v.boolean(),
+    androidPhysicalValidationCompleted: v.boolean(),
+    updatedAtMs: v.number(),
+  }).index("by_key", ["key"]),
   aiMetadataLocks: defineTable({
     muxAssetId: v.string(),
     userId: v.string(),
