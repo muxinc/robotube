@@ -2,6 +2,9 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+    // Lets tests/ import Convex modules with the explicit .ts specifier that
+    // `node --experimental-strip-types --test` requires. Safe with noEmit.
+    "allowImportingTsExtensions": true,
     "paths": {
       "@/*": [
         "./*"

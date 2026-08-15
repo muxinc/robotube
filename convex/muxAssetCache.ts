@@ -7,6 +7,13 @@ import {
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
+import {
+  type FeedPlacement,
+  buildAspectClassificationPatch,
+  classifyMuxAssetPayloadAspect,
+  resolveAspectClassificationForUpsert,
+} from "./aspectClassification";
+import type { FeedVisibility } from "./feedContracts";
 
 export type CachedPlaybackId = {
   id: string;
@@ -23,10 +30,32 @@ export type CachedMuxAsset = {
   deletedAtMs?: number;
   passthrough?: string;
   playbackIds: CachedPlaybackId[];
+  // Feed read model, maintained by ./feedReadModel.ts. Never written by the
+  // asset-sync path below, so an asset upsert cannot clobber it.
+  feedTitle?: string;
+  feedChannelName?: string;
+  feedUploaderUserId?: string;
+  feedVisibility?: FeedVisibility;
+  feedReadModelUpdatedAtMs?: number;
+  // Aspect classification, derived from the processed Mux asset by the sync path
+  // below. `feedPlacement` is denormalized so a placement-scoped feed can
+  // paginate through an index instead of filtering a mixed page.
+  aspectRatio?: string;
+  feedPlacement?: FeedPlacement;
+  aspectRatioUpdatedAtMs?: number;
   updatedAtMs: number;
 };
 
-type CachedMuxAssetComparable = Omit<CachedMuxAsset, "updatedAtMs">;
+type CachedMuxAssetComparable = Omit<
+  CachedMuxAsset,
+  | "updatedAtMs"
+  | "feedTitle"
+  | "feedChannelName"
+  | "feedUploaderUserId"
+  | "feedVisibility"
+  | "feedReadModelUpdatedAtMs"
+  | "aspectRatioUpdatedAtMs"
+>;
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -119,10 +148,21 @@ function isComparableAssetEqual(
     left.createdAtMs === right.createdAtMs &&
     left.deletedAtMs === right.deletedAtMs &&
     left.passthrough === right.passthrough &&
+    left.aspectRatio === right.aspectRatio &&
+    left.feedPlacement === right.feedPlacement &&
     arePlaybackIdsEqual(left.playbackIds, right.playbackIds)
   );
 }
 
+/**
+ * Normalizes any Mux-shaped asset payload (webhook `data`, a Mux SDK asset, or a
+ * Mux component asset row) into the cached row shape.
+ *
+ * `feedPlacement === undefined` means the payload carried no aspect-ratio data
+ * at all, so the upsert below preserves whatever classification is already
+ * stored. A payload that *does* carry ratio data always wins, even when the
+ * ratio is unusable and classifies to `unknown`.
+ */
 export function normalizeMuxAssetPayload(asset: unknown): CachedMuxAsset | null {
   const record = asRecord(asset);
   const muxAssetId = asString(record?.muxAssetId) ?? asString(record?.id);
@@ -135,6 +175,7 @@ export function normalizeMuxAssetPayload(asset: unknown): CachedMuxAsset | null 
   const deletedAtMs = asTimestampMs(record?.deletedAtMs ?? record?.deleted_at);
   const playbackIds = normalizePlaybackIds(record?.playbackIds ?? record?.playback_ids);
   const durationSeconds = asFiniteNumber(record?.durationSeconds ?? record?.duration);
+  const classification = classifyMuxAssetPayloadAspect(record);
 
   return {
     muxAssetId,
@@ -146,6 +187,10 @@ export function normalizeMuxAssetPayload(asset: unknown): CachedMuxAsset | null 
     deletedAtMs,
     passthrough: asString(record?.passthrough),
     playbackIds,
+    aspectRatio: classification.aspectRatio ?? undefined,
+    feedPlacement: classification.provided
+      ? classification.feedPlacement
+      : undefined,
     updatedAtMs: Date.now(),
   };
 }
@@ -196,6 +241,16 @@ export const listRecentReadyAssets = query({
   },
 });
 
+/**
+ * The single asset-sync writer. Every caller (webhook, upload sync, AI metadata
+ * repair, Mux backfill) goes through it, so classification is applied on
+ * `video.asset.ready` and on every later asset update without any caller change.
+ *
+ * The payload never carries `feed*` read-model fields and the patch below writes
+ * only the comparable asset columns plus the classification, so a classification
+ * write cannot clobber the denormalized title, channel name, or uploader that
+ * `./feedReadModel.ts` owns.
+ */
 export const upsertFromPayloadInternal = internalMutation({
   args: {
     asset: v.any(),
@@ -207,9 +262,20 @@ export const upsertFromPayloadInternal = internalMutation({
     }
 
     const existing = await getCachedMuxAssetById(ctx, normalized.muxAssetId);
+    const classification = resolveAspectClassificationForUpsert({
+      existing,
+      incoming: normalized,
+    });
     const payload: CachedMuxAssetComparable = {
       ...normalized,
       createdAtMs: existing?.createdAtMs ?? normalized.createdAtMs,
+      aspectRatio: classification.aspectRatio,
+      feedPlacement: classification.feedPlacement,
+    };
+    const classificationResult = {
+      aspectRatio: classification.aspectRatio ?? null,
+      feedPlacement: classification.feedPlacement,
+      classificationChanged: classification.changed,
     };
 
     if (existing) {
@@ -223,24 +289,49 @@ export const upsertFromPayloadInternal = internalMutation({
         deletedAtMs: existing.deletedAtMs,
         passthrough: existing.passthrough,
         playbackIds: existing.playbackIds,
+        aspectRatio: existing.aspectRatio,
+        feedPlacement: existing.feedPlacement,
       };
 
       if (isComparableAssetEqual(comparableExisting, payload)) {
-        return { ok: true, skipped: false, inserted: false, unchanged: true };
+        return {
+          ok: true,
+          skipped: false,
+          inserted: false,
+          unchanged: true,
+          ...classificationResult,
+        };
       }
 
       await (ctx.db as any).patch((existing as any)._id, {
         ...payload,
+        ...buildAspectClassificationPatch(classification, Date.now()),
         updatedAtMs: Date.now(),
       });
-      return { ok: true, skipped: false, inserted: false, unchanged: false };
+      return {
+        ok: true,
+        skipped: false,
+        inserted: false,
+        unchanged: false,
+        ...classificationResult,
+      };
     }
 
     await (ctx.db as any).insert("muxAssetCache", {
       ...payload,
+      ...buildAspectClassificationPatch(
+        { ...classification, changed: true },
+        Date.now(),
+      ),
       updatedAtMs: Date.now(),
     });
-    return { ok: true, skipped: false, inserted: true, unchanged: false };
+    return {
+      ok: true,
+      skipped: false,
+      inserted: true,
+      unchanged: false,
+      ...classificationResult,
+    };
   },
 });
 
@@ -260,6 +351,9 @@ export const markDeletedInternal = internalMutation({
         createdAtMs: args.deletedAtMs ?? Date.now(),
         deletedAtMs: args.deletedAtMs ?? Date.now(),
         playbackIds: [],
+        // A tombstone has no ratio to classify. It is excluded from every feed
+        // by `isReady`/`isDeleted`, and stays countable in the placement audit.
+        feedPlacement: "unknown",
         updatedAtMs: Date.now(),
       });
       return { ok: true, inserted: true };

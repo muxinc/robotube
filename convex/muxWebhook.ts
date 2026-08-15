@@ -6,6 +6,8 @@ import { components, internal } from "./_generated/api";
 import { v } from "convex/values";
 
 import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-translation-languages";
+import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 const AUDIO_TRANSLATION_READY_DELAY_MS = 5 * 1000;
 
@@ -206,6 +208,16 @@ export const ingestMuxWebhook = internalAction({
     }
 
     if (eventType.startsWith("robots.job.")) {
+      // The event has already been persisted via recordWebhookEventPublic above.
+      // When Laravel owns Robots orchestration it receives the same robots.job.*
+      // webhooks from Mux directly, so Convex must NOT run its native
+      // moderation/AI/translation sync handlers (that would double-process
+      // Robots job state). We store/log only. Non-Robots events
+      // (video.asset.*, track, live-stream, upload) stay Convex-owned below.
+      if (isLaravelOrchestrationEnabled()) {
+        return { skipped: true, reason: "laravel_orchestration_owns_robots" };
+      }
+
       const workflow = getRobotsWorkflow(eventType, data);
       const passthrough = parseRobotsPassthrough(data.passthrough);
       const parameters = asRecord(data.parameters) ?? {};
@@ -378,6 +390,9 @@ export const ingestMuxWebhook = internalAction({
         await ctx.runMutation(components.mux.sync.upsertAssetFromPayloadPublic, {
           asset: data,
         });
+        // Covers every non-deleted video.asset.* event, so `video.asset.ready`
+        // and later asset updates both refresh the aspect classification from
+        // the payload's `aspect_ratio`.
         await ctx.runMutation((internal as any).muxAssetCache.upsertFromPayloadInternal, {
           asset: data,
         });
@@ -390,8 +405,8 @@ export const ingestMuxWebhook = internalAction({
         });
         const existingMetadata = asRecord((existingVideo as any)?.metadata) ?? {};
         const existingCustom = asRecord(existingMetadata.custom) ?? {};
-        await ctx.runMutation(
-          components.mux.videos.upsertVideoMetadata,
+        await upsertVideoMetadataAndSyncFeedReadModel(
+          ctx,
           buildMetadataArgs({
             muxAssetId: objectId,
             userId,

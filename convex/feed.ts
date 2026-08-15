@@ -11,13 +11,38 @@ import {
   listRecentReadyCachedMuxAssets,
   getCachedMuxAssetById,
 } from "./muxAssetCache";
+import {
+  type FeedChannelInfo,
+  type FeedReadModelAsset,
+  type FeedSearchIndexItem,
+  type FeedVideoCardItem,
+  DEFAULT_FEED_CHANNEL,
+  asFiniteNumber,
+  asNonEmptyString,
+  asPlainRecord,
+  pickPrimaryMetadata,
+  buildFeedThumbnailUrl,
+  buildFeedCardTitle,
+  buildFeedVideoCard,
+  buildFeedVideoCardPage,
+  buildFeedVideoCardPageResult,
+  collectDistinctUploaderUserIds,
+  deriveChannelNameFromUser,
+  selectFeedPlaybackId,
+  sortFeedCardsByNewestFirst,
+  FEED_PLACEMENT_INDEX_NAME,
+  FEED_PLACEMENT_MAX_PAGE_SIZE,
+  STANDARD_FEED_PLACEMENT,
+  VERTICAL_FEED_PLACEMENT,
+  applyPlacementIndexRange,
+  clampFeedPageSize,
+} from "./feedContracts";
+import type { FeedPlacement } from "./aspectClassification";
 
-type PlaybackId = {
-  id?: string;
-  policy?: string;
-};
+export type { FeedVideoCardItem, FeedSearchIndexItem } from "./feedContracts";
 
-type FeedVideoRow = {
+/** Rich video-detail data that is never included in the card feed. */
+type FeedVideoDetailItem = {
   muxAssetId: string;
   playbackId: string;
   playbackUrl: string;
@@ -49,8 +74,8 @@ type FeedVideoRow = {
   createdAtMs: number;
 };
 
-type FeedBuildResult =
-  | { row: FeedVideoRow; hiddenReason: null }
+type FeedDetailBuildResult =
+  | { row: FeedVideoDetailItem; hiddenReason: null }
   | {
       row: null;
       hiddenReason:
@@ -60,8 +85,7 @@ type FeedBuildResult =
     };
 
 const FEED_SCAN_MULTIPLIER = 3;
-const FEED_PAGINATION_SCAN_MULTIPLIER = 1;
-const FEED_PAGINATION_MAX_PAGE_SIZE = 24;
+const FEED_PAGINATION_MAX_PAGE_SIZE = FEED_PLACEMENT_MAX_PAGE_SIZE;
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
@@ -73,53 +97,100 @@ function asStringArray(value: unknown): string[] {
 }
 
 function asNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  return asFiniteNumber(value);
 }
 
-function asPlaybackIds(value: unknown): PlaybackId[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter(
-    (item): item is PlaybackId => typeof item === "object" && item !== null,
+/* ------------------------------------------------------------------ *
+ * Uploader / channel resolution
+ * ------------------------------------------------------------------ */
+
+/**
+ * Resolves channel display data once per distinct uploader, memoizing storage
+ * URL generation so one avatar is never signed twice in the same page.
+ */
+async function resolveFeedChannels(
+  ctx: any,
+  uploaderUserIds: readonly string[],
+): Promise<Map<string, FeedChannelInfo>> {
+  const avatarUrlByStorageId = new Map<string, Promise<string | null>>();
+
+  const getAvatarUrlOnce = (storageId: string) => {
+    const pending = avatarUrlByStorageId.get(storageId);
+    if (pending) return pending;
+
+    const promise = Promise.resolve(ctx.storage.getUrl(storageId)).catch(
+      () => null,
+    ) as Promise<string | null>;
+    avatarUrlByStorageId.set(storageId, promise);
+    return promise;
+  };
+
+  const entries = await Promise.all(
+    uploaderUserIds.map(async (uploaderUserId) => {
+      const channel = await resolveChannelInfoForUser(
+        ctx,
+        uploaderUserId,
+        getAvatarUrlOnce,
+      );
+      return [uploaderUserId, channel] as const;
+    }),
   );
+
+  return new Map(entries);
 }
 
-async function resolveChannelInfo(ctx: any, metadataUserId: string | null) {
-  let channelName = "Robotube";
-  let channelAvatarUrl: string | null = null;
-
-  if (!metadataUserId) {
-    return { channelName, channelAvatarUrl };
-  }
-
+async function resolveChannelInfoForUser(
+  ctx: any,
+  uploaderUserId: string,
+  getAvatarUrlOnce: (storageId: string) => Promise<string | null>,
+): Promise<FeedChannelInfo> {
   try {
-    const uploader = await ctx.db.get(metadataUserId as Id<"users">);
-    const uploaderUsername = asString((uploader as any)?.username);
-    const uploaderName = asString((uploader as any)?.name);
-    const uploaderEmail = asString((uploader as any)?.email);
-    const uploaderImage = asString((uploader as any)?.image);
-    const uploaderAvatarStorageId = asString((uploader as any)?.avatarStorageId);
+    const uploader = await ctx.db.get(uploaderUserId as Id<"users">);
+    if (!uploader) return DEFAULT_FEED_CHANNEL;
 
-    if (uploaderUsername) {
-      channelName = `@${uploaderUsername}`;
-    } else if (uploaderName) {
-      channelName = uploaderName;
-    } else if (uploaderEmail) {
-      channelName = uploaderEmail.split("@")[0] || channelName;
-    }
+    const avatarStorageId = asNonEmptyString(uploader.avatarStorageId);
+    const storageAvatarUrl = avatarStorageId
+      ? await getAvatarUrlOnce(avatarStorageId)
+      : null;
 
-    if (uploaderAvatarStorageId) {
-      channelAvatarUrl = await ctx.storage.getUrl(uploaderAvatarStorageId);
-    }
-
-    if (!channelAvatarUrl && uploaderImage) {
-      channelAvatarUrl = uploaderImage;
-    }
+    return {
+      channelName: deriveChannelNameFromUser(uploader),
+      channelAvatarUrl:
+        asNonEmptyString(storageAvatarUrl) ?? asNonEmptyString(uploader.image),
+    };
   } catch {
-    // Keep default channel metadata fallback.
+    // Non-user ids (for example the "default" metadata owner) fall back to the
+    // shared channel identity rather than failing the page.
+    return DEFAULT_FEED_CHANNEL;
   }
-
-  return { channelName, channelAvatarUrl };
 }
+
+/**
+ * Overlays authoritative component metadata on top of a read-model card. Used
+ * by the search and profile paths, which already hold that metadata, so those
+ * screens stay correct even before the read-model backfill runs.
+ */
+function overlayComponentMetadata(
+  card: FeedVideoCardItem,
+  metadata: Record<string, unknown>,
+): FeedVideoCardItem {
+  const custom = asPlainRecord(metadata.custom);
+
+  return {
+    ...card,
+    // Falls back to the read-model title rather than to the placeholder, so an
+    // overlay can only ever improve what the card already had.
+    title: buildFeedCardTitle(
+      asNonEmptyString(metadata.title) ?? card.title,
+      card.muxAssetId,
+    ),
+    channelName: asNonEmptyString(custom.channelName) ?? card.channelName,
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Video-detail builders (rich metadata; never used by the card feed)
+ * ------------------------------------------------------------------ */
 
 function asChapterArray(value: unknown): Array<{ title: string; startTime: number }> {
   if (!Array.isArray(value)) return [];
@@ -140,7 +211,7 @@ function asChapterArray(value: unknown): Array<{ title: string; startTime: numbe
     .sort((a, b) => a.startTime - b.startTime);
 }
 
-function asKeyMomentArray(value: unknown): FeedVideoRow["keyMoments"] {
+function asKeyMomentArray(value: unknown): FeedVideoDetailItem["keyMoments"] {
   if (!Array.isArray(value)) return [];
 
   return value
@@ -200,11 +271,11 @@ function asKeyMomentArray(value: unknown): FeedVideoRow["keyMoments"] {
         notableVisualConcepts,
       };
     })
-    .filter((item): item is FeedVideoRow["keyMoments"][number] => item !== null)
+    .filter((item): item is FeedVideoDetailItem["keyMoments"][number] => item !== null)
     .sort((a, b) => a.startMs - b.startMs);
 }
 
-async function buildFeedVideoRowFromSource(
+async function buildFeedVideoDetailFromSource(
   ctx: any,
   source: {
     muxAssetId: string;
@@ -216,30 +287,34 @@ async function buildFeedVideoRowFromSource(
     deletedAtMs: unknown;
     metadata: any;
   },
-): Promise<FeedBuildResult> {
+): Promise<FeedDetailBuildResult> {
   if (source.deletedAtMs || source.status !== "ready") {
     return { row: null, hiddenReason: "not_ready_or_deleted" };
   }
 
-  const playbackIds = asPlaybackIds(source.playbackIds);
-  const playback =
-    playbackIds.find((id) => id.policy === "public") ?? playbackIds[0];
-  if (!playback?.id) {
+  const playbackId = selectFeedPlaybackId(source.playbackIds);
+  if (!playbackId) {
     return { row: null, hiddenReason: "no_public_playback" };
   }
 
   const metadata = source.metadata;
   const metadataUserId = asString(metadata?.userId);
-  const channelInfo = await resolveChannelInfo(ctx, metadataUserId);
+  const channels = await resolveFeedChannels(
+    ctx,
+    metadataUserId ? [metadataUserId] : [],
+  );
+  const channelInfo =
+    (metadataUserId ? channels.get(metadataUserId) : undefined) ??
+    DEFAULT_FEED_CHANNEL;
   const channelName = metadata?.custom?.channelName ?? channelInfo.channelName;
 
   return {
     hiddenReason: null,
     row: {
       muxAssetId: source.muxAssetId,
-      playbackId: playback.id,
-      playbackUrl: `https://stream.mux.com/${playback.id}.m3u8`,
-      thumbnailUrl: `https://image.mux.com/${playback.id}/thumbnail.jpg?width=1280`,
+      playbackId,
+      playbackUrl: `https://stream.mux.com/${playbackId}.m3u8`,
+      thumbnailUrl: buildFeedThumbnailUrl(playbackId),
       durationSeconds: source.durationSeconds,
       title:
         metadata?.title ??
@@ -250,7 +325,9 @@ async function buildFeedVideoRowFromSource(
       chapters: asChapterArray(metadata?.custom?.aiChapters),
       keyMoments: asKeyMomentArray(metadata?.custom?.aiKeyMoments),
       keyMomentsGeneratedAtMs: asNumber(metadata?.custom?.aiKeyMomentsGeneratedAtMs),
-      keyMomentsUnavailableReason: asString(metadata?.custom?.aiKeyMomentsUnavailableReason),
+      keyMomentsUnavailableReason: asString(
+        metadata?.custom?.aiKeyMomentsUnavailableReason,
+      ),
       channelName,
       channelAvatarUrl: channelInfo.channelAvatarUrl,
       createdAtMs: source.createdAtMs,
@@ -258,102 +335,59 @@ async function buildFeedVideoRowFromSource(
   };
 }
 
-async function buildFeedVideoRow(ctx: any, asset: CachedMuxAsset): Promise<FeedBuildResult> {
+async function buildFeedVideoDetail(
+  ctx: any,
+  asset: CachedMuxAsset,
+): Promise<FeedDetailBuildResult> {
   const video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
     muxAssetId: asset.muxAssetId as string,
   });
-  const metadataValue = (video as any)?.metadata;
-  const metadata = Array.isArray(metadataValue)
-    ? metadataValue[0]
-    : metadataValue ?? null;
 
-  return await buildFeedVideoRowFromSource(ctx, {
+  return await buildFeedVideoDetailFromSource(ctx, {
     muxAssetId: asset.muxAssetId as string,
     playbackIds: asset.playbackIds,
     durationSeconds: asset.durationSeconds ?? null,
     createdAtMs: asset.createdAtMs ?? Date.now(),
     status: asset.status,
     deletedAtMs: asset.deletedAtMs,
-    metadata,
+    metadata: pickPrimaryMetadata((video as any)?.metadata),
   });
 }
 
-async function buildVisibleFeedRows(
-  ctx: any,
-  assets: CachedMuxAsset[],
-  requestedLimit: number,
-) {
-  const rows = await Promise.all(assets.map((asset) => buildFeedVideoRow(ctx, asset)));
-  const visibleRows = rows
-    .flatMap((result) => (result.row ? [result.row] : []))
-    .slice(0, requestedLimit);
+/* ------------------------------------------------------------------ *
+ * Feed-card queries
+ * ------------------------------------------------------------------ */
 
-  visibleRows.sort((a, b) => b.createdAtMs - a.createdAtMs);
-  return visibleRows;
+async function buildFeedCardsFromReadModel(
+  ctx: any,
+  assets: readonly FeedReadModelAsset[],
+): Promise<FeedVideoCardItem[]> {
+  const channels = await resolveFeedChannels(
+    ctx,
+    collectDistinctUploaderUserIds(assets),
+  );
+
+  return buildFeedVideoCardPage(assets, channels);
 }
 
 export const listFeedVideos = query({
   args: { limit: v.optional(v.number()) },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<FeedVideoCardItem[]> => {
     const requestedLimit = Math.max(1, Math.floor(args.limit ?? 25));
     const assets = await listRecentReadyCachedMuxAssets(
       ctx,
       requestedLimit * FEED_SCAN_MULTIPLIER,
     );
 
-    return await buildVisibleFeedRows(ctx, assets, requestedLimit);
+    const cards = await buildFeedCardsFromReadModel(ctx, assets);
+    return cards.slice(0, requestedLimit);
   },
 });
 
-export const listCurrentUserUploadedVideos = query({
-  args: { limit: v.optional(v.number()) },
-  handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) return [];
-
-    const requestedLimit = Math.max(1, Math.floor(args.limit ?? 12));
-    const uploads = await ctx.runQuery(components.mux.videos.listVideosForUser, {
-      userId,
-      limit: requestedLimit * FEED_SCAN_MULTIPLIER,
-    });
-
-    const rows = await Promise.all(
-      (uploads as any[])
-        .filter((entry) => typeof entry?.asset?.muxAssetId === "string")
-        .map((entry) =>
-          buildFeedVideoRowFromSource(ctx, {
-            muxAssetId: entry.asset.muxAssetId,
-            playbackIds: entry.asset.playbackIds,
-            durationSeconds: asNumber(entry.asset.durationSeconds),
-            titleFallback: asString(entry.metadata?.title) ?? undefined,
-            createdAtMs: asNumber(entry.asset.createdAtMs) ?? Date.now(),
-            status: entry.asset.status,
-            deletedAtMs: entry.asset.deletedAtMs,
-            metadata: entry.metadata,
-          }),
-        ),
-    );
-
-    return rows
-      .flatMap((result) => (result.row ? [result.row] : []))
-      .sort((a, b) => b.createdAtMs - a.createdAtMs)
-      .slice(0, requestedLimit);
-  },
-});
-
-export const listFeedVideosInternal = internalQuery({
-  args: { limit: v.optional(v.number()) },
-  handler: async (ctx, args) => {
-    const requestedLimit = Math.max(1, Math.floor(args.limit ?? 25));
-    const assets = await listRecentReadyCachedMuxAssets(
-      ctx,
-      requestedLimit * FEED_SCAN_MULTIPLIER,
-    );
-
-    return await buildVisibleFeedRows(ctx, assets, requestedLimit);
-  },
-});
-
+/**
+ * The hot feed path. It reads only the feed read model on `muxAssetCache` and
+ * performs no per-video Mux component subquery.
+ */
 export const listFeedVideosPaginated = query({
   args: { paginationOpts: paginationOptsValidator },
   handler: async (ctx, args) => {
@@ -361,7 +395,14 @@ export const listFeedVideosPaginated = query({
       1,
       Math.min(FEED_PAGINATION_MAX_PAGE_SIZE, Math.floor(args.paginationOpts.numItems)),
     );
-    const paginatedAssets = await (ctx.db as any)
+
+    // The page is never truncated after the fact: hidden assets shrink a page,
+    // they never push cards past the cursor where they would be lost.
+    const paginatedAssets: {
+      page: CachedMuxAsset[];
+      isDone: boolean;
+      continueCursor: string;
+    } = await (ctx.db as any)
       .query("muxAssetCache")
       .withIndex("by_ready_deleted_created", (q: any) =>
         q.eq("isReady", true).eq("isDeleted", false),
@@ -369,17 +410,185 @@ export const listFeedVideosPaginated = query({
       .order("desc")
       .paginate({
         ...args.paginationOpts,
-        numItems: requestedPageSize * FEED_PAGINATION_SCAN_MULTIPLIER,
+        numItems: requestedPageSize,
       });
 
-    return {
-      ...paginatedAssets,
-      page: await buildVisibleFeedRows(
-        ctx,
-        paginatedAssets.page as CachedMuxAsset[],
-        requestedPageSize,
-      ),
-    };
+    const channels = await resolveFeedChannels(
+      ctx,
+      collectDistinctUploaderUserIds(paginatedAssets.page),
+    );
+
+    return buildFeedVideoCardPageResult(paginatedAssets, channels);
+  },
+});
+
+/* ------------------------------------------------------------------ *
+ * Placement-scoped card feeds
+ * ------------------------------------------------------------------ */
+
+/**
+ * One page of cards for a single feed placement.
+ *
+ * Selection happens entirely inside `by_feed_placement_ready_deleted_created`,
+ * before Convex applies the cursor, so pages are stable newest-first with no
+ * duplicated, skipped, or re-sorted cards. Like the Home hot path it reads only
+ * the denormalized read model: no per-video Mux component query, and each
+ * uploader/avatar is resolved at most once per page.
+ */
+async function paginatePlacementFeedCards(
+  ctx: any,
+  placement: FeedPlacement,
+  paginationOpts: { numItems: number; cursor: string | null },
+) {
+  const paginatedAssets: {
+    page: CachedMuxAsset[];
+    isDone: boolean;
+    continueCursor: string;
+  } = await (ctx.db as any)
+    .query("muxAssetCache")
+    .withIndex(FEED_PLACEMENT_INDEX_NAME, (q: any) =>
+      applyPlacementIndexRange(q, placement),
+    )
+    .order("desc")
+    .paginate({
+      ...paginationOpts,
+      numItems: clampFeedPageSize(paginationOpts.numItems),
+    });
+
+  const channels = await resolveFeedChannels(
+    ctx,
+    collectDistinctUploaderUserIds(paginatedAssets.page),
+  );
+
+  return buildFeedVideoCardPageResult(paginatedAssets, channels);
+}
+
+/**
+ * The vertical (Shorts) feed: exact normalized `9:16` only.
+ *
+ * Returns the same lightweight `FeedVideoCardItem` contract as Home. Aspect
+ * ratio and placement are server-side selection inputs and are deliberately not
+ * serialized to the client.
+ *
+ * Rollback: disabling the Shorts tab stops all calls to this query. The schema
+ * fields and the placement index can stay in place; nothing else reads them.
+ */
+export const listVerticalFeedVideosPaginated = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
+    return await paginatePlacementFeedCards(
+      ctx,
+      VERTICAL_FEED_PLACEMENT,
+      args.paginationOpts,
+    );
+  },
+});
+
+/**
+ * The placement-filtered Home feed, for the exclusive-routing cutover.
+ *
+ * It is deployed but not yet wired to Home: `listFeedVideosPaginated` above
+ * still serves Home, so legacy `unknown` and unclassified rows stay visible
+ * while the backfill runs. Home moves to this query only after
+ * `feedPlacement.auditFeedPlacementCoverage` reports
+ * `coverageGatePassed: true`, behind the exclusive-placement flag.
+ */
+export const listStandardFeedVideosPaginated = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
+    return await paginatePlacementFeedCards(
+      ctx,
+      STANDARD_FEED_PLACEMENT,
+      args.paginationOpts,
+    );
+  },
+});
+
+export const listCurrentUserUploadedVideos = query({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args): Promise<FeedVideoCardItem[]> => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return [];
+
+    const requestedLimit = Math.max(1, Math.floor(args.limit ?? 12));
+    // One component call for the whole page, not one per video.
+    const uploads = await ctx.runQuery(components.mux.videos.listVideosForUser, {
+      userId,
+      limit: requestedLimit * FEED_SCAN_MULTIPLIER,
+    });
+
+    const channels = await resolveFeedChannels(ctx, [userId]);
+    const cards: FeedVideoCardItem[] = [];
+
+    for (const entry of uploads as any[]) {
+      const asset = entry?.asset;
+      const muxAssetId = asString(asset?.muxAssetId);
+      if (!muxAssetId) continue;
+
+      const metadata = asPlainRecord(entry?.metadata);
+      const result = buildFeedVideoCard(
+        {
+          muxAssetId,
+          status: asString(asset?.status),
+          deletedAtMs: asNumber(asset?.deletedAtMs),
+          durationSeconds: asNumber(asset?.durationSeconds),
+          createdAtMs: asNumber(asset?.createdAtMs) ?? Date.now(),
+          playbackIds: asset?.playbackIds,
+          feedUploaderUserId: userId,
+        },
+        channels,
+      );
+
+      if (result.card) {
+        cards.push(overlayComponentMetadata(result.card, metadata));
+      }
+    }
+
+    return sortFeedCardsByNewestFirst(cards).slice(0, requestedLimit);
+  },
+});
+
+/**
+ * Ranking input for search. Summary and tags are scored server-side; the search
+ * queries project their results back down to the card contract before they are
+ * serialized to a screen.
+ */
+export const listFeedSearchIndexInternal = internalQuery({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args): Promise<FeedSearchIndexItem[]> => {
+    const requestedLimit = Math.max(1, Math.floor(args.limit ?? 25));
+    const assets = await listRecentReadyCachedMuxAssets(
+      ctx,
+      requestedLimit * FEED_SCAN_MULTIPLIER,
+    );
+
+    const channels = await resolveFeedChannels(
+      ctx,
+      collectDistinctUploaderUserIds(assets),
+    );
+
+    const rows = await Promise.all(
+      assets.map(async (asset) => {
+        const result = buildFeedVideoCard(asset, channels);
+        if (!result.card) return null;
+
+        const video = await ctx.runQuery(
+          components.mux.videos.getVideoByMuxAssetId,
+          { muxAssetId: asset.muxAssetId },
+        );
+        const metadata = pickPrimaryMetadata((video as any)?.metadata);
+
+        return {
+          ...overlayComponentMetadata(result.card, metadata),
+          summary: asString(metadata.description),
+          tags: asStringArray(metadata.tags),
+        };
+      }),
+    );
+
+    return rows
+      .filter((row): row is FeedSearchIndexItem => row !== null)
+      .slice(0, requestedLimit);
   },
 });
 
@@ -396,7 +605,7 @@ export const getFeedVisibilityDebugStats = query({
     let hiddenPrivateVisibility = 0;
 
     for (const asset of assets) {
-      const result = await buildFeedVideoRow(ctx, asset as any);
+      const result = await buildFeedVideoDetail(ctx, asset as any);
       if (result.row) {
         visible += 1;
         continue;
@@ -423,12 +632,13 @@ export const getFeedVisibilityDebugStats = query({
   },
 });
 
+/** The video-detail contract: rich metadata for `/video/[muxAssetId]`. */
 export const getFeedVideoByMuxAssetId = query({
   args: { muxAssetId: v.string() },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<FeedVideoDetailItem | null> => {
     const asset = await getCachedMuxAssetById(ctx, args.muxAssetId);
     if (!asset) return null;
-    const result = await buildFeedVideoRow(ctx, asset);
+    const result = await buildFeedVideoDetail(ctx, asset);
     return result.row;
   },
 });

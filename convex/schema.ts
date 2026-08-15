@@ -98,22 +98,9 @@ export default defineSchema({
     status: v.string(),
     isReady: v.boolean(),
     isDeleted: v.boolean(),
-    aspectRatio: v.optional(v.string()),
-    aspectRatioUpdatedAtMs: v.optional(v.number()),
     durationSeconds: v.optional(v.number()),
     createdAtMs: v.number(),
     deletedAtMs: v.optional(v.number()),
-    feedPlacement: v.optional(v.string()),
-    feedReadModelUpdatedAtMs: v.optional(v.number()),
-    feedTitle: v.optional(v.string()),
-    feedUploaderUserId: v.optional(v.string()),
-    feedVisibility: v.optional(
-      v.union(
-        v.literal("private"),
-        v.literal("unlisted"),
-        v.literal("public"),
-      ),
-    ),
     passthrough: v.optional(v.string()),
     playbackIds: v.array(
       v.object({
@@ -121,10 +108,35 @@ export default defineSchema({
         policy: v.optional(v.string()),
       }),
     ),
+    // Display-ready values denormalized from the Mux component so the paginated
+    // feed query never runs a per-video subquery. Optional for older rows that
+    // have not been backfilled.
+    feedTitle: v.optional(v.string()),
+    feedChannelName: v.optional(v.string()),
+    feedUploaderUserId: v.optional(v.string()),
+    // Metadata visibility, denormalized so the card path can withhold private
+    // videos without a per-video Mux metadata read. Absent means "never written",
+    // which is treated as permitted.
+    feedVisibility: v.optional(
+      v.union(v.literal("public"), v.literal("unlisted"), v.literal("private")),
+    ),
+    feedReadModelUpdatedAtMs: v.optional(v.number()),
+    // Normalized display aspect ratio from the processed Mux asset, plus the
+    // denormalized feed placement it selects. Optional so legacy rows stay
+    // readable before the classification backfill runs; an unclassified row is
+    // in neither indexed feed and remains visible on the legacy Home path.
+    aspectRatio: v.optional(v.string()),
+    feedPlacement: v.optional(
+      v.union(v.literal("standard"), v.literal("vertical"), v.literal("unknown")),
+    ),
+    aspectRatioUpdatedAtMs: v.optional(v.number()),
     updatedAtMs: v.number(),
   })
     .index("by_mux_asset", ["muxAssetId"])
     .index("by_ready_deleted_created", ["isReady", "isDeleted", "createdAtMs"])
+    // Placement must lead the index: Convex applies a cursor after the index
+    // range, so a placement-scoped feed has to filter through the index rather
+    // than filter a mixed page afterwards.
     .index("by_feed_placement_ready_deleted_created", [
       "feedPlacement",
       "isReady",
@@ -132,7 +144,7 @@ export default defineSchema({
       "createdAtMs",
     ]),
   feedRuntimeConfig: defineTable({
-    key: v.string(),
+    key: v.literal("vertical-feed"),
     shortsTabEnabled: v.boolean(),
     exclusiveFeedPlacementEnabled: v.boolean(),
     androidPhysicalValidationCompleted: v.boolean(),

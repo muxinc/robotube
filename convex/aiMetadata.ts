@@ -1,10 +1,13 @@
 "use node";
 
 import Mux from "@mux/mux-node";
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 
 import { components, internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
+import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 const MAX_ATTEMPTS = 10;
 const AI_METADATA_READY_DELAY_MS = 5 * 1000;
@@ -15,7 +18,10 @@ const SUMMARIZE_TONE = "neutral";
 const SUMMARIZE_TITLE_LENGTH = 80;
 const SUMMARIZE_DESCRIPTION_LENGTH = 320;
 const SUMMARIZE_TAG_COUNT = 10;
-const SUMMARIZE_MAX_POLL_ATTEMPTS = 30;
+// A summarize job can take longer than the old 45-second polling window. Keep
+// the explicit regeneration watcher alive long enough to surface the result as
+// soon as Mux finishes instead of falling back to another two-minute delay.
+const SUMMARIZE_MAX_POLL_ATTEMPTS = 120;
 const SUMMARIZE_POLL_INTERVAL_MS = 1500;
 const GENERATE_CHAPTERS_MAX_POLL_ATTEMPTS = 30;
 const GENERATE_CHAPTERS_POLL_INTERVAL_MS = 1500;
@@ -364,8 +370,8 @@ async function updateAiMetadataTrackingFields(
   const latestMetadata = getMetadataRecord(latestVideo?.metadata);
   const latestCustom = asCustomRecord(latestMetadata.custom);
 
-  await ctx.runMutation(
-    components.mux.videos.upsertVideoMetadata,
+  await upsertVideoMetadataAndSyncFeedReadModel(
+    ctx,
     buildMetadataArgs({
       muxAssetId: args.muxAssetId,
       userId: args.userId,
@@ -398,8 +404,8 @@ async function upsertAiMetadataFields(
   const latestMetadata = getMetadataRecord(latestVideo?.metadata);
   const latestCustom = asCustomRecord(latestMetadata.custom);
 
-  await ctx.runMutation(
-    components.mux.videos.upsertVideoMetadata,
+  await upsertVideoMetadataAndSyncFeedReadModel(
+    ctx,
     buildMetadataArgs({
       muxAssetId: args.muxAssetId,
       userId: args.userId,
@@ -926,6 +932,7 @@ type EnsureAiMetadataResult =
   | { ok: false; skipped: false; error: string }
   | { ok: false; skipped: true; reason: "asset_not_found" }
   | { ok: false; skipped: true; reason: "asset_not_ready"; userId: string }
+  | { ok: true; skipped: true; reason: "laravel_orchestration" }
   | {
       ok: true;
       skipped: boolean;
@@ -945,6 +952,7 @@ type GenerateSummaryAndTagsResult =
   | { ok: true; skipped: true; reason: "already_generated" }
   | { ok: true; skipped: true; reason: "moderation_pending" | "moderation_rejected" }
   | { ok: true; skipped: true; reason: "polling_disabled" }
+  | { ok: true; skipped: true; reason: "laravel_orchestration" }
   | { ok: false; skipped: true; reason: "asset_not_found" }
   | { ok: boolean; skipped: false; retryScheduled: boolean; nextAttempt: number; errors: string[] };
 
@@ -952,6 +960,16 @@ async function ensureAiMetadataForAssetImpl(
   ctx: any,
   args: EnsureAiMetadataArgs,
 ): Promise<EnsureAiMetadataResult> {
+  // Laravel owns the summarize/chapters/key-moments Robots jobs when the flag
+  // is on. No-op so Convex never creates duplicate AI-metadata jobs (covers the
+  // internal + public ensure* entry points and any lazy "ensure on view" call).
+  if (isLaravelOrchestrationEnabled()) {
+    console.log(
+      `[aiMetadata] ensureAiMetadataForAssetImpl skipped for ${args.muxAssetId}: USE_LARAVEL_ORCHESTRATION on`,
+    );
+    return { ok: true, skipped: true, reason: "laravel_orchestration" };
+  }
+
   let video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
     muxAssetId: args.muxAssetId,
   });
@@ -998,8 +1016,8 @@ async function ensureAiMetadataForAssetImpl(
     asString(args.defaultUserId) ??
     "default";
 
-  await ctx.runMutation(
-    components.mux.videos.upsertVideoMetadata,
+  await upsertVideoMetadataAndSyncFeedReadModel(
+    ctx,
     buildMetadataArgs({
       muxAssetId: args.muxAssetId,
       userId,
@@ -1069,8 +1087,8 @@ async function ensureAiMetadataForAssetImpl(
     !refreshedCustom.aiMetadataRetryScheduled;
 
   if (shouldScheduleCaptions || shouldScheduleAiMetadata) {
-    await ctx.runMutation(
-      components.mux.videos.upsertVideoMetadata,
+    await upsertVideoMetadataAndSyncFeedReadModel(
+      ctx,
       buildMetadataArgs({
         muxAssetId: args.muxAssetId,
         userId,
@@ -1205,15 +1223,36 @@ async function applyAiMetadataJobUpdate(
     }
 
     if (summarizeJob.status === "completed") {
+      const suggestedTitle =
+        typeof summarizeJob.outputs?.title === "string" &&
+        summarizeJob.outputs.title.trim().length > 0
+          ? summarizeJob.outputs.title.trim()
+          : undefined;
+      const suggestedDescription =
+        typeof summarizeJob.outputs?.description === "string" &&
+        summarizeJob.outputs.description.trim().length > 0
+          ? summarizeJob.outputs.description.trim()
+          : undefined;
+      const suggestedTags = normalizeGeneratedTags(summarizeJob.outputs?.tags);
+      const useGeneratedTitle = existingCustom.aiUseGeneratedTitle === true;
+      const useGeneratedDescription =
+        existingCustom.aiUseGeneratedDescription !== false;
+      const useGeneratedTags = existingCustom.aiUseGeneratedTags !== false;
+
       await upsertAiMetadataFields(ctx, args, {
-        description:
-          typeof summarizeJob.outputs?.description === "string"
-            ? summarizeJob.outputs.description.trim()
-            : undefined,
-        tags: normalizeGeneratedTags(summarizeJob.outputs?.tags),
+        title: useGeneratedTitle ? suggestedTitle : undefined,
+        description: useGeneratedDescription
+          ? suggestedDescription
+          : undefined,
+        tags: useGeneratedTags ? suggestedTags : undefined,
         custom: {
           aiSummaryJobId: summarizeJob.id,
           aiSummaryJobStatus: summarizeJob.status,
+          ...(suggestedTitle ? { aiSuggestedTitle: suggestedTitle } : {}),
+          ...(suggestedDescription
+            ? { aiSuggestedDescription: suggestedDescription }
+            : {}),
+          aiSuggestedTags: suggestedTags,
           aiGeneratedAtMs: Date.now(),
           aiProvider: "mux",
           aiAttemptCount:
@@ -1417,6 +1456,97 @@ export const ensureAiMetadataForAsset = action({
   },
 });
 
+/** Create a fresh summarize job for an authenticated uploader's private draft. */
+export const regenerateOwnMetadataDraft = action({
+  args: {
+    muxAssetId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) {
+      throw new Error("You must be signed in to regenerate video metadata.");
+    }
+    if (isMuxRobotsPollingDisabled()) {
+      throw new Error("Mux Robots polling is disabled for this deployment.");
+    }
+
+    const video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
+      muxAssetId: args.muxAssetId,
+      userId: authUserId,
+    });
+    if (!video?.asset) throw new Error("Video not found.");
+
+    const metadata = getMetadataRecord(video.metadata);
+    const custom = asCustomRecord(metadata.custom);
+    const asset = video.asset as Record<string, unknown>;
+    const owner =
+      asString(metadata.userId) ?? parseMetadataPassthrough(asset.passthrough).userId;
+    if (owner !== authUserId) {
+      throw new Error("You can only regenerate metadata for your own videos.");
+    }
+    if (custom.moderationPassed !== true) {
+      throw new Error("Metadata can be regenerated after moderation passes.");
+    }
+
+    const createdJob = await createSummarizeJob({
+      assetId: args.muxAssetId,
+      tone: SUMMARIZE_TONE,
+      titleLength: SUMMARIZE_TITLE_LENGTH,
+      descriptionLength: SUMMARIZE_DESCRIPTION_LENGTH,
+      tagCount: SUMMARIZE_TAG_COUNT,
+      passthrough: JSON.stringify({
+        muxAssetId: args.muxAssetId,
+        userId: authUserId,
+        tone: SUMMARIZE_TONE,
+        regenerated: true,
+      }),
+    });
+    const jobId = requireMuxJobId("summarize", createdJob.id);
+
+    await updateAiMetadataTrackingFields(
+      ctx,
+      { muxAssetId: args.muxAssetId, userId: authUserId },
+      metadata,
+      {
+        aiSummaryJobId: jobId,
+        aiSummaryJobStatus: createdJob.status,
+        aiGeneratedAtMs: null,
+        aiUseGeneratedTitle: false,
+        aiUseGeneratedDescription: false,
+        aiUseGeneratedTags: false,
+        aiMetadataRegenerationRequestedAtMs: Date.now(),
+      },
+    );
+
+    if (isTerminalMuxRobotsJobStatus(createdJob.status)) {
+      await applyAiMetadataJobUpdate(
+        ctx,
+        {
+          muxAssetId: args.muxAssetId,
+          userId: authUserId,
+          workflow: "summarize",
+        },
+        createdJob,
+      );
+    } else {
+      // Regeneration is initiated while the uploader is actively waiting on
+      // the review screen. Start the watcher immediately. This is especially
+      // important when Laravel owns Robots webhooks: those events describe a
+      // Laravel run, while this one-off job is created directly by Convex and
+      // therefore relies on polling to persist its replacement suggestions.
+      await ctx.scheduler.runAfter(0, (internal as any).aiMetadata.pollAiMetadataJobStatusInternal, {
+        muxAssetId: args.muxAssetId,
+        userId: authUserId,
+        workflow: "summarize",
+        jobId,
+        attempt: 0,
+      });
+    }
+
+    return { ok: true, jobId, status: createdJob.status };
+  },
+});
+
 export const generateSummaryAndTagsForAssetInternal = internalAction({
   args: {
     muxAssetId: v.string(),
@@ -1424,6 +1554,18 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
     attempt: v.optional(v.number()),
   },
   handler: async (ctx, args): Promise<GenerateSummaryAndTagsResult> => {
+    // Laravel owns the summarize/chapters/key-moments Robots jobs when the flag
+    // is on. This is the sink where all three /jobs/* POSTs originate, so the
+    // no-op here guarantees Convex creates zero AI-metadata Robots jobs
+    // regardless of caller (captions chain, ensure* impl, retries, job-update
+    // reschedules, migrations).
+    if (isLaravelOrchestrationEnabled()) {
+      console.log(
+        `[aiMetadata] generateSummaryAndTagsForAssetInternal skipped for ${args.muxAssetId}: USE_LARAVEL_ORCHESTRATION on`,
+      );
+      return { ok: true, skipped: true, reason: "laravel_orchestration" };
+    }
+
     const lock = (await ctx.runMutation((internal as any).aiMetadataLocks.claimAiMetadataLockInternal, {
       muxAssetId: args.muxAssetId,
       userId: args.userId,

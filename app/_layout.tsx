@@ -12,6 +12,7 @@ import "react-native-reanimated";
 
 import { ThemedText } from "@/components/themed-text";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { FeedFeatureFlagsProvider } from "@/hooks/use-feed-feature-flags";
 import { registerGlobals } from "@/lib/livekit";
 import { authTokenStorage } from "@/lib/auth-token-storage";
 import { convex, convexConfigError } from "@/lib/convex";
@@ -47,24 +48,26 @@ export default function RootLayout() {
         storage={authTokenStorage}
         shouldHandleCode={Platform.OS === "web"}
       >
-        <ThemeProvider
-          value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
-        >
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="modal" options={{ presentation: "modal" }} />
-            <Stack.Screen name="search/[query]" />
-            <Stack.Screen name="video/[muxAssetId]" />
-            <Stack.Screen
-              name="live/go-live"
-              options={{ presentation: "fullScreenModal" }}
-            />
-            <Stack.Screen name="live/watch/[muxLiveStreamId]" />
-            <Stack.Screen name="sign-in" />
-          </Stack>
+        <FeedFeatureFlagsProvider>
+          <ThemeProvider
+            value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
+          >
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen name="modal" options={{ presentation: "modal" }} />
+              <Stack.Screen name="search/[query]" />
+              <Stack.Screen name="video/[muxAssetId]" />
+              <Stack.Screen
+                name="live/go-live"
+                options={{ presentation: "fullScreenModal" }}
+              />
+              <Stack.Screen name="live/watch/[muxLiveStreamId]" />
+              <Stack.Screen name="sign-in" />
+            </Stack>
 
-          <StatusBar style="auto" />
-        </ThemeProvider>
+            <StatusBar style="auto" />
+          </ThemeProvider>
+        </FeedFeatureFlagsProvider>
       </ConvexAuthProvider>
     </ConvexProvider>
   );
