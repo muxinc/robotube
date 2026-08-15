@@ -1,6 +1,10 @@
 import { ConvexReactClient } from "convex/react";
+import { anyApi } from "convex/server";
 
-export { api } from "../../../convex/_generated/api";
+// The web app intentionally uses dynamic Convex references. Importing the
+// generated root API here makes a standalone web build type-check every backend
+// module and therefore require the native app's full dependency tree.
+export const api = anyApi;
 
 const convexUrl =
   import.meta.env.VITE_CONVEX_URL?.trim() ||
