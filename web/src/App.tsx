@@ -1100,12 +1100,12 @@ function UploadPage() {
 
 function AuthGate({ title, copy }: { title: string; copy: string }) {
   const { signIn } = useAuthActions();
-  const [provider, setProvider] = useState<"google" | "apple" | null>(null);
+  const [signingIn, setSigningIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const start = async (next: "google" | "apple") => {
-    setProvider(next); setError(null);
-    try { await signIn(next, { redirectTo: window.location.href }); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not start sign in."); setProvider(null); }
+  const start = async () => {
+    setSigningIn(true); setError(null);
+    try { await signIn("google", { redirectTo: window.location.href }); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not start sign in."); setSigningIn(false); }
   };
   return (
     <div className="page auth-page">
@@ -1113,8 +1113,7 @@ function AuthGate({ title, copy }: { title: string; copy: string }) {
         <img src="/images/app-icon.png" alt="" />
         <span className="eyebrow">Your RoboTube account</span>
         <h1>{title}</h1><p>{copy}</p>
-        <button className="provider-button" disabled={provider !== null} onClick={() => void start("google")}>{provider === "google" ? <LoaderCircle className="spin" size={18} /> : <span className="provider-mark">G</span>} Continue with Google</button>
-        <button className="provider-button provider-button--apple" disabled={provider !== null} onClick={() => void start("apple")}>{provider === "apple" ? <LoaderCircle className="spin" size={18} /> : <span className="provider-mark">●</span>} Continue with Apple</button>
+        <button className="provider-button" disabled={signingIn} onClick={() => void start()}>{signingIn ? <LoaderCircle className="spin" size={18} /> : <span className="provider-mark">G</span>} Continue with Google</button>
         {error ? <p className="form-error">{error}</p> : null}
       </div>
     </div>

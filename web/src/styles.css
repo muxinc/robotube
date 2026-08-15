@@ -231,8 +231,6 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
 .auth-card > p { margin: 11px 0 24px; color: var(--muted); line-height: 1.55; }
 .provider-button { width: 100%; min-height: 50px; margin-top: 10px; border: 1px solid #d7dfea; border-radius: 999px; background: #fff; display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 750; cursor: pointer; }
 .provider-button:hover { background: #f8f9fb; }
-.provider-button--apple { background: #111; color: #fff; border-color: #111; }
-.provider-button--apple:hover { background: #252525; }
 .provider-mark { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 900; background: #fff; color: #222; box-shadow: 0 0 0 1px #ddd; }
 
 .profile-hero { min-height: 190px; margin-bottom: 24px; padding: 30px; border-radius: 28px; background: radial-gradient(circle at 82% 16%,rgba(255,112,200,.3),transparent 27%),#15171e; color: #fff; display: grid; grid-template-columns: 110px 1fr auto; align-items: center; gap: 25px; }
