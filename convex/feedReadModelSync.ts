@@ -10,6 +10,7 @@ import {
   asFeedVisibility,
   asNonEmptyString,
   readChannelNameOverride,
+  readSelectedThumbnailTimestampMs,
 } from "./feedContracts";
 
 export type VideoMetadataUpsertArgs = {
@@ -52,6 +53,7 @@ export async function upsertVideoMetadataAndSyncFeedReadModel(
       title: args.title,
       channelName: readChannelNameOverride(args.custom),
       visibility: asFeedVisibility(args.visibility),
+      thumbnailTimestampMs: readSelectedThumbnailTimestampMs(args.custom),
       applyChannelName: args.custom !== undefined,
     },
   );

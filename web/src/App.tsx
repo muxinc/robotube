@@ -789,6 +789,9 @@ function UploadPage() {
   useDocumentTitle("Upload");
   const { isAuthenticated, isLoading } = useConvexAuth();
   const createUpload = useAction(convexApi.uploads.createMuxDirectUpload);
+  const selectThumbnail = useMutation(
+    convexApi.videoMetadata.selectOwnVideoThumbnail,
+  );
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [audioLanguages, setAudioLanguages] = useState<string[]>([]);
@@ -800,20 +803,38 @@ function UploadPage() {
   const [uploadId, setUploadId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectingThumbnail, setSelectingThumbnail] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const previewUrl = useMemo(
     () => (file ? URL.createObjectURL(file) : null),
     [file],
   );
-  const moderation = useQuery(
-    convexApi.uploadStatus.getUploadModerationStatus,
-    uploadId ? { uploadId } : "skip",
+  const pipeline = useQuery(
+    convexApi.uploadStatus.getUploadPipelineStatus,
+    uploadId
+      ? {
+          uploadId,
+          audioTranslationLanguageCodes: audioLanguages,
+          captionTranslationLanguageCodes: captionLanguages,
+        }
+      : "skip",
   ) as
     | {
         done: boolean;
         progress: number;
         statusText: string;
         passed: boolean | null;
+        muxAssetId?: string;
+        playbackId?: string;
+        thumbnailSelection?: {
+          status?: string;
+          selectedTimestampMs?: number;
+          candidates: Array<{
+            timestampMs: number;
+            overall: number | null;
+            description: string | null;
+          }>;
+        };
       }
     | undefined;
 
@@ -828,11 +849,11 @@ function UploadPage() {
     [cameraStream],
   );
   useEffect(() => {
-    if (moderation) {
-      setProgress(moderation.progress);
-      setStatusText(moderation.statusText);
+    if (pipeline) {
+      setProgress(pipeline.progress);
+      setStatusText(pipeline.statusText);
     }
-  }, [moderation]);
+  }, [pipeline]);
 
   if (isLoading)
     return (
@@ -910,6 +931,24 @@ function UploadPage() {
       setStatusText("Upload failed. Your video was not published.");
     } finally {
       setUploading(false);
+    }
+  };
+
+  const chooseThumbnail = async (timestampMs: number) => {
+    if (!pipeline?.muxAssetId || selectingThumbnail !== null) return;
+    setSelectingThumbnail(timestampMs);
+    setError(null);
+    try {
+      await selectThumbnail({
+        muxAssetId: pipeline.muxAssetId,
+        timestampMs,
+      });
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Could not select thumbnail.",
+      );
+    } finally {
+      setSelectingThumbnail(null);
     }
   };
 
@@ -1075,6 +1114,61 @@ function UploadPage() {
               <strong>{progress}%</strong>
               {statusText}
             </p>
+          </div>
+        ) : null}
+        {pipeline?.playbackId &&
+        pipeline.thumbnailSelection?.candidates.length ? (
+          <section className="thumbnail-picker" aria-labelledby="thumbnail-picker-title">
+            <div className="thumbnail-picker__heading">
+              <span><ImagePlus size={20} /></span>
+              <div>
+                <h2 id="thumbnail-picker-title">Choose your thumbnail</h2>
+                <p>Mux Robots ranked these three frames. The best match is selected first.</p>
+              </div>
+            </div>
+            <div className="thumbnail-picker__grid" role="radiogroup" aria-label="Thumbnail choices">
+              {pipeline.thumbnailSelection.candidates.map((candidate, index) => {
+                const selected =
+                  candidate.timestampMs ===
+                  pipeline.thumbnailSelection?.selectedTimestampMs;
+                return (
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    className={`thumbnail-choice ${selected ? "thumbnail-choice--selected" : ""}`}
+                    disabled={selectingThumbnail !== null}
+                    key={candidate.timestampMs}
+                    onClick={() => void chooseThumbnail(candidate.timestampMs)}
+                  >
+                    <span className="thumbnail-choice__image">
+                      <img
+                        src={`https://image.mux.com/${pipeline.playbackId}/thumbnail.jpg?time=${candidate.timestampMs / 1000}&width=640`}
+                        alt={candidate.description ?? `Thumbnail option ${index + 1}`}
+                      />
+                      {index === 0 ? <em>Best match</em> : null}
+                    </span>
+                    <span className="thumbnail-choice__label">
+                      {selectingThumbnail === candidate.timestampMs ? (
+                        <LoaderCircle className="spin" size={17} />
+                      ) : selected ? (
+                        <Check size={17} />
+                      ) : (
+                        <span className="thumbnail-choice__radio" />
+                      )}
+                      Option {index + 1}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ) : uploadId &&
+          pipeline?.thumbnailSelection?.status !== "errored" &&
+          pipeline?.thumbnailSelection?.status !== "skipped" ? (
+          <div className="thumbnail-picker thumbnail-picker--loading">
+            <LoaderCircle className="spin" size={20} />
+            Mux Robots is finding three thumbnail options…
           </div>
         ) : null}
         {error ? <p className="form-error">{error}</p> : null}

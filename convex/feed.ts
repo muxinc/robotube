@@ -27,6 +27,7 @@ import {
   buildFeedVideoCardPage,
   buildFeedVideoCardPageResult,
   collectDistinctUploaderUserIds,
+  readSelectedThumbnailTimestampMs,
   deriveChannelNameFromUser,
   selectFeedPlaybackId,
   sortFeedCardsByNewestFirst,
@@ -314,7 +315,11 @@ async function buildFeedVideoDetailFromSource(
       muxAssetId: source.muxAssetId,
       playbackId,
       playbackUrl: `https://stream.mux.com/${playbackId}.m3u8`,
-      thumbnailUrl: buildFeedThumbnailUrl(playbackId),
+      thumbnailUrl: buildFeedThumbnailUrl(
+        playbackId,
+        undefined,
+        readSelectedThumbnailTimestampMs(metadata?.custom),
+      ),
       durationSeconds: source.durationSeconds,
       title:
         metadata?.title ??

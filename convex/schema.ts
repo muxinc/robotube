@@ -120,6 +120,7 @@ export default defineSchema({
     feedVisibility: v.optional(
       v.union(v.literal("public"), v.literal("unlisted"), v.literal("private")),
     ),
+    feedThumbnailTimestampMs: v.optional(v.number()),
     feedReadModelUpdatedAtMs: v.optional(v.number()),
     // Normalized display aspect ratio from the processed Mux asset, plus the
     // denormalized feed placement it selects. Optional so legacy rows stay

@@ -16,6 +16,10 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function asNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function asVisibility(
   value: unknown,
 ): "private" | "unlisted" | "public" | undefined {
@@ -117,5 +121,56 @@ export const updateOwnVideoMetadata = mutation({
       tags,
       published: args.publish === true,
     };
+  },
+});
+
+/** Select one of the three Mux Robots thumbnail candidates for RoboTube. */
+export const selectOwnVideoThumbnail = mutation({
+  args: {
+    muxAssetId: v.string(),
+    timestampMs: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId) {
+      throw new Error("You must be signed in to select a thumbnail.");
+    }
+
+    const video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
+      muxAssetId: args.muxAssetId,
+      userId: authUserId,
+    });
+    if (!video?.asset) throw new Error("Video not found.");
+
+    const asset = asRecord(video.asset) ?? {};
+    const metadata = getMetadataRecord(video.metadata);
+    const owner = asString(metadata.userId) ?? parsePassthroughUserId(asset.passthrough);
+    if (owner !== authUserId) {
+      throw new Error("You can only edit your own videos.");
+    }
+
+    const custom = asRecord(metadata.custom) ?? {};
+    const candidates = Array.isArray(custom.aiThumbnailCandidates)
+      ? custom.aiThumbnailCandidates
+      : [];
+    const selected = candidates.find((candidate) => {
+      const record = asRecord(candidate);
+      return asNumber(record?.timestampMs) === args.timestampMs;
+    });
+    if (!selected || args.timestampMs < 0) {
+      throw new Error("Choose one of the thumbnails generated for this video.");
+    }
+
+    await upsertVideoMetadataAndSyncFeedReadModel(ctx, {
+      muxAssetId: args.muxAssetId,
+      userId: authUserId,
+      custom: {
+        ...custom,
+        selectedThumbnailTimestampMs: args.timestampMs,
+        thumbnailSelectedAtMs: Date.now(),
+      },
+    });
+
+    return { ok: true, timestampMs: args.timestampMs };
   },
 });

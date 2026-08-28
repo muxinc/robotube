@@ -24,6 +24,7 @@ import {
   asNonEmptyString,
   pickPrimaryMetadata,
   readChannelNameOverride,
+  readSelectedThumbnailTimestampMs,
 } from "./feedContracts";
 
 const VISIBILITY_VALIDATOR = v.union(
@@ -41,6 +42,7 @@ type FeedReadModelPatch = {
   feedChannelName?: string;
   feedUploaderUserId?: string;
   feedVisibility?: FeedVisibility;
+  feedThumbnailTimestampMs?: number;
   feedReadModelUpdatedAtMs: number;
 };
 
@@ -59,6 +61,7 @@ async function patchFeedReadModel(
     uploaderUserId?: string;
     channelName?: string;
     visibility?: FeedVisibility;
+    thumbnailTimestampMs?: number;
     applyChannelName: boolean;
   },
 ): Promise<"patched" | "unchanged" | "missing_asset"> {
@@ -104,6 +107,14 @@ async function patchFeedReadModel(
     changed = true;
   }
 
+  if (
+    args.thumbnailTimestampMs !== undefined &&
+    existing.feedThumbnailTimestampMs !== args.thumbnailTimestampMs
+  ) {
+    patch.feedThumbnailTimestampMs = args.thumbnailTimestampMs;
+    changed = true;
+  }
+
   if (!changed && existing.feedReadModelUpdatedAtMs !== undefined) {
     return "unchanged";
   }
@@ -124,6 +135,7 @@ export const applyVideoMetadataInternal = internalMutation({
     title: v.optional(v.string()),
     channelName: v.optional(v.string()),
     visibility: v.optional(VISIBILITY_VALIDATOR),
+    thumbnailTimestampMs: v.optional(v.number()),
     applyChannelName: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
@@ -133,6 +145,7 @@ export const applyVideoMetadataInternal = internalMutation({
       uploaderUserId: args.uploaderUserId,
       channelName: args.channelName,
       visibility: args.visibility,
+      thumbnailTimestampMs: args.thumbnailTimestampMs,
       applyChannelName: args.applyChannelName === true,
     });
 
@@ -183,6 +196,7 @@ export const applyBackfillEntriesInternal = internalMutation({
         uploaderUserId: v.optional(v.string()),
         channelName: v.optional(v.string()),
         visibility: v.optional(VISIBILITY_VALIDATOR),
+        thumbnailTimestampMs: v.optional(v.number()),
       }),
     ),
   },
@@ -275,6 +289,7 @@ export const backfillFeedReadModel = internalAction({
         uploaderUserId?: string;
         channelName?: string;
         visibility?: FeedVisibility;
+        thumbnailTimestampMs?: number;
       }[] = [];
 
       for (const candidate of page.candidates) {
@@ -291,6 +306,7 @@ export const backfillFeedReadModel = internalAction({
           uploaderUserId: asNonEmptyString(metadata.userId) ?? undefined,
           channelName: readChannelNameOverride(metadata.custom),
           visibility: asFeedVisibility(metadata.visibility),
+          thumbnailTimestampMs: readSelectedThumbnailTimestampMs(metadata.custom),
         });
       }
 

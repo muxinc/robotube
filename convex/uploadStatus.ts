@@ -9,6 +9,7 @@ import { components } from "./_generated/api";
 import { query } from "./_generated/server";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
 import { getCachedMuxAssetById } from "./muxAssetCache";
+import { selectFeedPlaybackId } from "./feedContracts";
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -189,6 +190,29 @@ function asStringArrayLoose(value: unknown): string[] | undefined {
   return value.filter((item): item is string => typeof item === "string");
 }
 
+type ThumbnailCandidate = {
+  timestampMs: number;
+  overall: number | null;
+  description: string | null;
+};
+
+function thumbnailCandidates(value: unknown): ThumbnailCandidate[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item): ThumbnailCandidate | null => {
+      const record = asRecord(item);
+      const timestampMs = asNumber(record?.timestampMs);
+      if (timestampMs === undefined || timestampMs < 0) return null;
+      return {
+        timestampMs,
+        overall: asNumber(record?.overall) ?? null,
+        description: asString(record?.description) ?? null,
+      };
+    })
+    .filter((item): item is ThumbnailCandidate => item !== null)
+    .slice(0, 3);
+}
+
 /** Map a Mux Robots / translation job status onto the checklist vocabulary. */
 function toPipelineJobStatus(
   status: string | undefined,
@@ -254,7 +278,10 @@ export const getUploadPipelineStatus = query({
 
     const buildJobs = (input: {
       moderation: PipelineJobStatus;
-      aiStatuses?: Record<"summary" | "chapters" | "keyMoments", PipelineJobStatus>;
+      aiStatuses?: Record<
+        "summary" | "chapters" | "keyMoments" | "thumbnails",
+        PipelineJobStatus
+      >;
       audioCodes: string[];
       captionCodes: string[];
       audioStatusByCode?: Map<string, PipelineJobStatus>;
@@ -264,12 +291,14 @@ export const getUploadPipelineStatus = query({
         summary: "waiting" as const,
         chapters: "waiting" as const,
         keyMoments: "waiting" as const,
+        thumbnails: "waiting" as const,
       };
       return [
         { key: "moderation", label: "Moderation", status: input.moderation },
         { key: "summary", label: "AI summary", status: ai.summary },
         { key: "chapters", label: "AI chapters", status: ai.chapters },
         { key: "keyMoments", label: "AI key moments", status: ai.keyMoments },
+        { key: "thumbnails", label: "AI thumbnails", status: ai.thumbnails },
         ...input.audioCodes.map((code) => ({
           key: `audio:${code}`,
           label: `${getAudioTranslationLanguageLabel(code)} audio dub`,
@@ -335,6 +364,19 @@ export const getUploadPipelineStatus = query({
       ? asRecord(metadataValue[0])
       : asRecord(metadataValue);
     const custom = asRecord(metadataRecord?.custom) ?? {};
+    const playbackId = selectFeedPlaybackId(assetRecord.playbackIds);
+    const candidates = thumbnailCandidates(custom.aiThumbnailCandidates);
+    const selectedThumbnailTimestampMs = asNumber(
+      custom.selectedThumbnailTimestampMs,
+    );
+    const thumbnailSelection = {
+      status: asString(custom.aiThumbnailJobStatus),
+      candidates,
+      selectedTimestampMs:
+        selectedThumbnailTimestampMs !== undefined
+          ? selectedThumbnailTimestampMs
+          : candidates[0]?.timestampMs,
+    };
     const metadataUserId = asString(metadataRecord?.userId);
     const generatedMetadata = {
       summaryReady:
@@ -393,7 +435,12 @@ export const getUploadPipelineStatus = query({
     if (moderationDone && moderationPassed === false) {
       const jobs = buildJobs({
         moderation: "completed",
-        aiStatuses: { summary: "skipped", chapters: "skipped", keyMoments: "skipped" },
+        aiStatuses: {
+          summary: "skipped",
+          chapters: "skipped",
+          keyMoments: "skipped",
+          thumbnails: "skipped",
+        },
         audioCodes,
         captionCodes,
         audioStatusByCode: new Map(audioCodes.map((code) => [code, "skipped"])),
@@ -409,6 +456,8 @@ export const getUploadPipelineStatus = query({
         jobs,
         muxAssetId,
         generatedMetadata,
+        playbackId,
+        thumbnailSelection,
       };
     }
 
@@ -456,6 +505,9 @@ export const getUploadPipelineStatus = query({
       keyMoments:
         unavailableStatus(custom.aiKeyMomentsUnavailableReason) ??
         toPipelineJobStatus(asString(custom.aiKeyMomentsJobStatus), aiFallback),
+      thumbnails: isLaravelOrchestrationEnabled()
+        ? toPipelineJobStatus(asString(custom.aiThumbnailJobStatus), aiFallback)
+        : "skipped" as const,
     };
 
     const [audioRows, captionRows] = await Promise.all([
@@ -521,6 +573,8 @@ export const getUploadPipelineStatus = query({
       jobs,
       muxAssetId,
       generatedMetadata,
+      playbackId,
+      thumbnailSelection,
     };
   },
 });

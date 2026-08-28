@@ -70,6 +70,14 @@ export const DEFAULT_FEED_CHANNEL: FeedChannelInfo = {
 /** Metadata visibility, denormalized onto the cache as `feedVisibility`. */
 export type FeedVisibility = "public" | "unlisted" | "private";
 
+/** Selected Mux Robots frame, denormalized for card rendering. */
+export function readSelectedThumbnailTimestampMs(custom: unknown): number | undefined {
+  const value = asPlainRecord(custom).selectedThumbnailTimestampMs;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
 /** Visibilities a browse feed must not serve. */
 export const FEED_HIDDEN_VISIBILITIES = ["private"] as const;
 
@@ -91,6 +99,7 @@ export type FeedReadModelAsset = {
   feedChannelName?: string | null;
   feedUploaderUserId?: string | null;
   feedVisibility?: string | null;
+  feedThumbnailTimestampMs?: number | null;
 };
 
 export type FeedCardHiddenReason =
@@ -151,8 +160,17 @@ export function selectFeedPlaybackId(playbackIds: unknown): string | null {
 export function buildFeedThumbnailUrl(
   playbackId: string,
   width: number = FEED_THUMBNAIL_WIDTH,
+  timestampMs?: number | null,
 ) {
-  return `https://image.mux.com/${playbackId}/thumbnail.jpg?width=${width}`;
+  const params = new URLSearchParams({ width: String(width) });
+  if (
+    typeof timestampMs === "number" &&
+    Number.isFinite(timestampMs) &&
+    timestampMs >= 0
+  ) {
+    params.set("time", String(timestampMs / 1000));
+  }
+  return `https://image.mux.com/${playbackId}/thumbnail.jpg?${params.toString()}`;
 }
 
 /** Deterministic placeholder used when no display title is available yet. */
@@ -284,7 +302,11 @@ export function buildFeedVideoCard(
     card: {
       muxAssetId: asset.muxAssetId,
       playbackId,
-      thumbnailUrl: buildFeedThumbnailUrl(playbackId),
+      thumbnailUrl: buildFeedThumbnailUrl(
+        playbackId,
+        FEED_THUMBNAIL_WIDTH,
+        asset.feedThumbnailTimestampMs,
+      ),
       title: buildFeedCardTitle(asset.feedTitle, asset.muxAssetId),
       channelName:
         asNonEmptyString(asset.feedChannelName) ??

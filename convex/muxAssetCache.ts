@@ -36,6 +36,7 @@ export type CachedMuxAsset = {
   feedChannelName?: string;
   feedUploaderUserId?: string;
   feedVisibility?: FeedVisibility;
+  feedThumbnailTimestampMs?: number;
   feedReadModelUpdatedAtMs?: number;
   // Aspect classification, derived from the processed Mux asset by the sync path
   // below. `feedPlacement` is denormalized so a placement-scoped feed can
@@ -53,6 +54,7 @@ type CachedMuxAssetComparable = Omit<
   | "feedChannelName"
   | "feedUploaderUserId"
   | "feedVisibility"
+  | "feedThumbnailTimestampMs"
   | "feedReadModelUpdatedAtMs"
   | "aspectRatioUpdatedAtMs"
 >;

@@ -10,6 +10,7 @@ import { useVideoPlayer, VideoView } from "expo-video";
 import { useEffect, useState } from "react";
 import {
   Alert,
+  ActivityIndicator,
   InputAccessoryView,
   Keyboard,
   Platform,
@@ -285,12 +286,101 @@ type PipelineJob = {
   status: "waiting" | "processing" | "completed" | "errored" | "skipped";
 };
 
+type ThumbnailCandidate = {
+  timestampMs: number;
+  overall: number | null;
+  description: string | null;
+};
+
+function thumbnailUrl(playbackId: string, timestampMs: number) {
+  return `https://image.mux.com/${playbackId}/thumbnail.jpg?time=${timestampMs / 1000}&width=640`;
+}
+
+function ThumbnailPicker({
+  playbackId,
+  candidates,
+  selectedTimestampMs,
+  selectingTimestampMs,
+  onSelect,
+}: {
+  playbackId: string;
+  candidates: ThumbnailCandidate[];
+  selectedTimestampMs?: number;
+  selectingTimestampMs: number | null;
+  onSelect: (timestampMs: number) => void;
+}) {
+  return (
+    <View style={styles.thumbnailPickerCard}>
+      <View style={styles.thumbnailPickerHeading}>
+        <View style={styles.robotJobIcon}>
+          <Ionicons name="images" size={21} color="#CC4C99" />
+        </View>
+        <View style={styles.robotJobHeadingCopy}>
+          <ThemedText type="defaultSemiBold">Choose a thumbnail</ThemedText>
+          <ThemedText style={styles.supportingText}>
+            Mux Robots ranked these three frames for your video.
+          </ThemedText>
+        </View>
+      </View>
+      <ScrollView
+        horizontal
+        contentContainerStyle={styles.thumbnailOptions}
+        showsHorizontalScrollIndicator={false}
+      >
+        {candidates.map((candidate, index) => {
+          const selected = candidate.timestampMs === selectedTimestampMs;
+          const saving = candidate.timestampMs === selectingTimestampMs;
+          return (
+            <Pressable
+              accessibilityLabel={`Choose thumbnail ${index + 1}${index === 0 ? ", best match" : ""}`}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: selected, disabled: selectingTimestampMs !== null }}
+              disabled={selectingTimestampMs !== null}
+              key={candidate.timestampMs}
+              onPress={() => onSelect(candidate.timestampMs)}
+              style={({ pressed }) => [
+                styles.thumbnailOption,
+                selected ? styles.thumbnailOptionSelected : undefined,
+                pressed ? styles.buttonPressed : undefined,
+              ]}
+            >
+              <Image
+                source={{ uri: thumbnailUrl(playbackId, candidate.timestampMs) }}
+                contentFit="cover"
+                style={styles.thumbnailOptionImage}
+              />
+              {index === 0 ? (
+                <View style={styles.thumbnailBestBadge}>
+                  <ThemedText style={styles.thumbnailBestBadgeText}>Best match</ThemedText>
+                </View>
+              ) : null}
+              <View style={styles.thumbnailOptionFooter}>
+                <Ionicons
+                  name={saving ? "sync" : selected ? "checkmark-circle" : "ellipse-outline"}
+                  size={18}
+                  color={selected ? "#CC4C99" : "#7A8494"}
+                />
+                <ThemedText numberOfLines={1} style={styles.thumbnailOptionLabel}>
+                  Option {index + 1}
+                </ThemedText>
+              </View>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
 export default function HomeScreen() {
   const createMuxDirectUpload = useAction(
     (api as any).uploads.createMuxDirectUpload,
   );
   const updateOwnVideoMetadata = useMutation(
     (api as any).videoMetadata.updateOwnVideoMetadata,
+  );
+  const selectOwnVideoThumbnail = useMutation(
+    (api as any).videoMetadata.selectOwnVideoThumbnail,
   );
   const regenerateOwnMetadataDraft = useAction(
     (api as any).aiMetadata.regenerateOwnMetadataDraft,
@@ -315,6 +405,8 @@ export default function HomeScreen() {
   const [metadataSaveStatus, setMetadataSaveStatus] = useState<string | null>(
     null,
   );
+  const [selectingThumbnailTimestampMs, setSelectingThumbnailTimestampMs] =
+    useState<number | null>(null);
   const [selectedVideo, setSelectedVideo] = useState<{
     uri: string;
     mimeType: string | null;
@@ -366,6 +458,12 @@ export default function HomeScreen() {
           appliedTitle?: string;
           appliedDescription?: string;
         };
+        playbackId?: string;
+        thumbnailSelection?: {
+          status?: string;
+          candidates: ThumbnailCandidate[];
+          selectedTimestampMs?: number;
+        };
       }
     | undefined;
 
@@ -390,6 +488,7 @@ export default function HomeScreen() {
           .map(getAudioTranslationLanguageLabel)
           .join(", ")
       : "Not requested";
+  const thumbnailSelection = pipelineStatus?.thumbnailSelection;
 
   useEffect(() => {
     if (!lastUploadId || isUploading) return;
@@ -779,6 +878,24 @@ export default function HomeScreen() {
     }
   };
 
+  const handleSelectThumbnail = async (timestampMs: number) => {
+    const muxAssetId = pipelineStatus?.muxAssetId;
+    if (!muxAssetId || selectingThumbnailTimestampMs !== null) return;
+
+    try {
+      setSelectingThumbnailTimestampMs(timestampMs);
+      setMetadataSaveStatus(null);
+      await selectOwnVideoThumbnail({ muxAssetId, timestampMs });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not select thumbnail";
+      setMetadataSaveStatus(message);
+      Alert.alert("Could Not Select Thumbnail", message);
+    } finally {
+      setSelectingThumbnailTimestampMs(null);
+    }
+  };
+
   const handleBack = () => {
     if (isUploading || pipelinePending) return;
 
@@ -805,6 +922,7 @@ export default function HomeScreen() {
     setIsPublished(false);
     setDraftGeneratedAtMs(null);
     setMetadataSaveStatus(null);
+    setSelectingThumbnailTimestampMs(null);
     setSelectedAudioTranslationLanguageCodes([]);
     setSelectedCaptionTranslationLanguageCodes([]);
     setLastRequestedAudioTranslationLanguageCodes([]);
@@ -947,6 +1065,19 @@ export default function HomeScreen() {
               <Ionicons name="checkmark-circle" size={22} color="#2E9E5B" />
             </View>
 
+            <View style={styles.metadataJobCard}>
+              <View style={styles.robotJobIcon}>
+                <Ionicons name="images" size={21} color="#CC4C99" />
+              </View>
+              <View style={styles.robotMetadataCopy}>
+                <ThemedText type="defaultSemiBold">AI thumbnails</ThemedText>
+                <ThemedText style={styles.supportingText}>
+                  Three ranked frames · Best match selected first
+                </ThemedText>
+              </View>
+              <Ionicons name="checkmark-circle" size={22} color="#2E9E5B" />
+            </View>
+
             <View style={styles.robotJobCard}>
               <View style={styles.robotJobHeading}>
                 <View style={styles.robotJobIcon}>
@@ -1003,6 +1134,13 @@ export default function HomeScreen() {
                   />
                   <View style={styles.reviewDivider} />
                   <ReviewRow
+                    icon="images"
+                    label="Thumbnail"
+                    onPress={() => setCurrentStep("robots")}
+                    value="Choose from 3 AI-ranked frames"
+                  />
+                  <View style={styles.reviewDivider} />
+                  <ReviewRow
                     icon="mic"
                     label="Translated audio"
                     onPress={() => setCurrentStep("robots")}
@@ -1033,6 +1171,32 @@ export default function HomeScreen() {
               </>
             ) : (
               <>
+                {pipelineStatus?.playbackId &&
+                thumbnailSelection?.candidates.length ? (
+                  <ThumbnailPicker
+                    playbackId={pipelineStatus.playbackId}
+                    candidates={thumbnailSelection.candidates}
+                    selectedTimestampMs={thumbnailSelection.selectedTimestampMs}
+                    selectingTimestampMs={selectingThumbnailTimestampMs}
+                    onSelect={handleSelectThumbnail}
+                  />
+                ) : thumbnailSelection?.status === "errored" ||
+                  thumbnailSelection?.status === "skipped" ? (
+                  <View style={styles.metadataUnavailableCard}>
+                    <Ionicons name="image-outline" size={22} color="#7A8494" />
+                    <ThemedText style={styles.metadataUnavailableText}>
+                      AI thumbnail choices are unavailable. RoboTube will use the video&apos;s default frame.
+                    </ThemedText>
+                  </View>
+                ) : (
+                  <View style={styles.thumbnailLoadingCard}>
+                    <ActivityIndicator color="#CC4C99" size="small" />
+                    <ThemedText style={styles.metadataUnavailableText}>
+                      Mux Robots is finding three thumbnail options…
+                    </ThemedText>
+                  </View>
+                )}
+
                 <View style={styles.generatedResultsCard}>
                   <View style={styles.generatedResultsHeading}>
                     <Image
@@ -1533,6 +1697,76 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#CDEBD8",
     backgroundColor: "#F4FBF7",
+  },
+  thumbnailPickerCard: {
+    gap: 12,
+    padding: 13,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#DDE3EB",
+    backgroundColor: "#FFFFFF",
+  },
+  thumbnailPickerHeading: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  thumbnailOptions: {
+    gap: 10,
+    paddingRight: 3,
+  },
+  thumbnailOption: {
+    width: 190,
+    overflow: "hidden",
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: "#E3E7EE",
+    backgroundColor: "#F7F8FA",
+  },
+  thumbnailOptionSelected: {
+    borderColor: "#FA50B5",
+    backgroundColor: "#FFF5FB",
+  },
+  thumbnailOptionImage: {
+    width: "100%",
+    aspectRatio: 16 / 9,
+    backgroundColor: "#E8ECF2",
+  },
+  thumbnailBestBadge: {
+    position: "absolute",
+    top: 8,
+    left: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: "#111111D9",
+  },
+  thumbnailBestBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: "700",
+  },
+  thumbnailOptionFooter: {
+    minHeight: 38,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 9,
+  },
+  thumbnailOptionLabel: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "600",
+  },
+  thumbnailLoadingCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: "#F7F8FA",
   },
   metadataJobIcon: {
     width: 38,

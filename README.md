@@ -17,6 +17,7 @@ Mux:
   - Moderate a videos
   - Generate a video's chapters
   - Generate a video's key moments
+  - Find and rank three thumbnail candidates for uploader selection
   - Translate captions
   - Ask questions about a video
 
@@ -126,9 +127,10 @@ Robotube uses [`@mux/ai`](https://www.npmjs.com/package/@mux/ai) with Convex to 
 
 1. User uploads a video to Mux via direct upload.
 2. When the asset is ready, Convex schedules AI metadata generation.
-3. Summary + tags are written to video metadata in Convex.
-4. Embeddings are generated and stored in the `videoEmbeddings` table with a vector index.
-5. Explore search combines vector similarity and lexical matching (title, summary, tags).
+3. Summary, tags, and three ranked thumbnail candidates are written to video metadata in Convex.
+4. The top-ranked thumbnail is selected initially; the uploader can choose another frame on mobile or web before publishing.
+5. Embeddings are generated and stored in the `videoEmbeddings` table with a vector index.
+6. Explore search combines vector similarity and lexical matching (title, summary, tags).
 
 ### Backfill existing videos
 

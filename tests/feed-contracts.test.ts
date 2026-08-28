@@ -16,6 +16,7 @@ import {
   DEFAULT_CHANNEL_NAME,
   FEED_VIDEO_CARD_FIELDS,
   buildFeedCardTitle,
+  buildFeedThumbnailUrl,
   buildFeedVideoCard,
   buildFeedVideoCardPage,
   buildFeedVideoCardPageResult,
@@ -275,6 +276,19 @@ test("a public playback id wins over a signed one", () => {
     "signed-id",
   );
   assert.equal(selectFeedPlaybackId("not-an-array"), null);
+});
+
+test("a selected Robots thumbnail timestamp is carried into the image URL", () => {
+  assert.equal(
+    buildFeedThumbnailUrl("playback-1", 1280, 42_500),
+    "https://image.mux.com/playback-1/thumbnail.jpg?width=1280&time=42.5",
+  );
+
+  const card = buildFeedVideoCard(
+    makeAsset({ muxAssetId: "thumb", feedThumbnailTimestampMs: 118_500 }),
+    CHANNELS,
+  ).card!;
+  assert.match(card.thumbnailUrl, /[?&]time=118\.5(?:&|$)/);
 });
 
 test("a missing title falls back to a deterministic placeholder", () => {

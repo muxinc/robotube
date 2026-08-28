@@ -24,6 +24,8 @@
  *       summary: string|null,
  *       chapters: array|null,
  *       key_moments: array|null,
+ *       thumbnails: array|null,
+ *       thumbnail_status: "waiting"|"processing"|"completed"|"errored"|"skipped",
  *     } | null,
  *   }
  *   Responses:
@@ -141,6 +143,43 @@ type NativeKeyMoment = {
   visualNarrative: string | null;
   notableVisualConcepts: { concept: string; score: number; rationale: string }[];
 };
+
+export type NativeThumbnailCandidate = {
+  timestampMs: number;
+  overall: number | null;
+  description: string | null;
+  subscores: Record<string, number>;
+};
+
+/** Normalize Mux's snake_case thumbnail output for app-facing metadata. */
+function toNativeThumbnailCandidates(raw: unknown): NativeThumbnailCandidate[] {
+  if (!Array.isArray(raw)) return [];
+
+  return raw
+    .map((item): NativeThumbnailCandidate | null => {
+      const rec = asRecord(item);
+      if (!rec) return null;
+      const timestampMs = firstNum(rec, "timestamp_ms", "timestampMs");
+      if (timestampMs === undefined || timestampMs < 0) return null;
+
+      const rawSubscores = asRecord(rec.subscores) ?? {};
+      const subscores = Object.fromEntries(
+        Object.entries(rawSubscores).filter(
+          (entry): entry is [string, number] =>
+            typeof entry[1] === "number" && Number.isFinite(entry[1]),
+        ),
+      );
+
+      return {
+        timestampMs,
+        overall: firstNum(rec, "overall") ?? null,
+        description: firstStr(rec, "description")?.trim() ?? null,
+        subscores,
+      };
+    })
+    .filter((candidate): candidate is NativeThumbnailCandidate => candidate !== null)
+    .slice(0, 3);
+}
 
 /** Mirror of aiMetadata.ts normalizeKeyMoments (snake_case input -> camelCase). */
 function toNativeKeyMoments(raw: unknown): NativeKeyMoment[] {
@@ -279,6 +318,16 @@ export const syncRobotRunInternal = internalMutation({
           tags: v.optional(v.union(v.array(v.string()), v.null())),
           chapters: v.optional(v.union(v.array(v.any()), v.null())),
           key_moments: v.optional(v.union(v.array(v.any()), v.null())),
+          thumbnails: v.optional(v.union(v.array(v.any()), v.null())),
+          thumbnail_status: v.optional(
+            v.union(
+              v.literal("waiting"),
+              v.literal("processing"),
+              v.literal("completed"),
+              v.literal("errored"),
+              v.literal("skipped"),
+            ),
+          ),
           translations: v.optional(
             v.union(
               v.array(
@@ -449,6 +498,27 @@ export const syncRobotRunInternal = internalMutation({
         nextCustom.aiKeyMomentsGeneratedAtMs =
           asNumber(existingCustom.aiKeyMomentsGeneratedAtMs) ?? now;
         nextCustom.aiKeyMomentsUnavailableReason = null;
+      }
+
+      if (typeof results.thumbnail_status === "string") {
+        nextCustom.aiThumbnailJobStatus = results.thumbnail_status;
+      }
+
+      if (Array.isArray(results.thumbnails)) {
+        const candidates = toNativeThumbnailCandidates(results.thumbnails);
+        nextCustom.aiThumbnailCandidates = candidates;
+        nextCustom.aiThumbnailProvider = "laravel_orchestration";
+        nextCustom.aiThumbnailGeneratedAtMs =
+          asNumber(existingCustom.aiThumbnailGeneratedAtMs) ?? now;
+
+        // Start with Mux's highest-ranked candidate. A user's later choice is
+        // preserved because every sync begins with the existing custom map.
+        if (
+          candidates.length > 0 &&
+          asNumber(existingCustom.selectedThumbnailTimestampMs) === undefined
+        ) {
+          nextCustom.selectedThumbnailTimestampMs = candidates[0].timestampMs;
+        }
       }
     }
 
@@ -623,6 +693,17 @@ export const laravelSyncHttp = httpAction(async (ctx, request) => {
         key_moments: Array.isArray(resultsRecord.key_moments)
           ? resultsRecord.key_moments
           : null,
+        thumbnails: Array.isArray(resultsRecord.thumbnails)
+          ? resultsRecord.thumbnails
+          : null,
+        thumbnail_status:
+          resultsRecord.thumbnail_status === "waiting" ||
+          resultsRecord.thumbnail_status === "processing" ||
+          resultsRecord.thumbnail_status === "completed" ||
+          resultsRecord.thumbnail_status === "errored" ||
+          resultsRecord.thumbnail_status === "skipped"
+            ? resultsRecord.thumbnail_status
+            : "waiting",
         translations: translations.length > 0 ? translations : null,
       }
     : null;
