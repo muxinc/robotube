@@ -956,7 +956,6 @@ function UploadPage() {
       <SectionHeading
         eyebrow="Creator studio"
         title="Upload a video"
-        copy="Mux handles the stream. RoboTube generates the useful parts."
       />
       <form className="upload-form" onSubmit={submit}>
         <div className="media-source-actions">
