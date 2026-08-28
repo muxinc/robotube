@@ -63,7 +63,7 @@ import { api } from "./lib/convex";
 import type { FeedVideoItem } from "./types";
 
 const convexApi = api as any;
-const MuxPlayer = lazy(() => import("@mux/mux-player-react"));
+const RoboTubePlayer = lazy(() => import("./components/RoboTubePlayer"));
 
 type LiveStream = {
   _id: string;
@@ -461,14 +461,13 @@ function WatchPage() {
         <div className="watch-main">
           <div className="player-frame">
             <Suspense fallback={<div className="player-loading"><LoaderCircle className="spin" /></div>}>
-              <MuxPlayer
+              <RoboTubePlayer
                 ref={playerRef}
                 playbackId={video.playbackId}
+                title={video.title}
+                posterUrl={video.thumbnailUrl}
                 metadata={{ video_id: video.muxAssetId, video_title: video.title, player_name: "RoboTube Web" }}
-                accentColor="#FA50B5"
                 streamType="on-demand"
-                primaryColor="#ffffff"
-                secondaryColor="#111111"
               />
             </Suspense>
           </div>
@@ -1287,7 +1286,7 @@ function LiveWatchPage() {
     <div className="live-watch">
       <Link to="/" className="live-watch__back"><ArrowLeft size={18} /> Back</Link>
       <div className="live-watch__player">
-        {stream.playbackId ? <Suspense fallback={<div className="player-loading"><LoaderCircle className="spin" /></div>}><MuxPlayer playbackId={stream.playbackId} streamType="live" autoPlay accentColor="#FA50B5" /></Suspense> : <div className="live-offline"><Radio size={34} /><h1>Waiting for the stream</h1></div>}
+        {stream.playbackId ? <Suspense fallback={<div className="player-loading"><LoaderCircle className="spin" /></div>}><RoboTubePlayer playbackId={stream.playbackId} title={stream.title} posterUrl={stream.thumbnailUrl} metadata={{ video_title: stream.title, player_name: "RoboTube Web" }} streamType="live" autoPlay /></Suspense> : <div className="live-offline"><Radio size={34} /><h1>Waiting for the stream</h1></div>}
       </div>
       <div className="live-watch__info"><span className="live-badge"><span /> {stream.status === "active" ? "Live" : "Ended"}</span><div><h1>{stream.title}</h1><p>{stream.channelName}</p></div></div>
     </div>
