@@ -1007,7 +1007,13 @@ function UploadPage() {
           />
           {file && previewUrl ? (
             <>
-              <video src={previewUrl} controls preload="metadata" />
+              <Suspense fallback={<div className="player-loading"><LoaderCircle className="spin" /></div>}>
+                <RoboTubePlayer
+                  key={previewUrl}
+                  src={previewUrl}
+                  title={file.name}
+                />
+              </Suspense>
               <button
                 type="button"
                 className="drop-zone__remove"

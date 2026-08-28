@@ -4,11 +4,12 @@ import "@videojs/react/live-video/skin.css";
 import { MuxData, type MuxDataProps } from "@videojs/react/media/mux-data";
 import { MuxVideo } from "@videojs/react/media/mux-video";
 import { LiveVideoPlayer, LiveVideoSkin } from "@videojs/react/live-video";
-import { VideoPlayer, VideoSkin } from "@videojs/react/video";
+import { Video, VideoPlayer, VideoSkin } from "@videojs/react/video";
 import { forwardRef, useMemo } from "react";
 
 type RoboTubePlayerProps = {
-  playbackId: string;
+  playbackId?: string;
+  src?: string;
   title: string;
   posterUrl?: string | null;
   metadata?: MuxDataProps["metadata"];
@@ -20,6 +21,7 @@ const RoboTubePlayer = forwardRef<HTMLVideoElement, RoboTubePlayerProps>(
   function RoboTubePlayer(
     {
       playbackId,
+      src,
       title,
       posterUrl,
       metadata,
@@ -28,8 +30,11 @@ const RoboTubePlayer = forwardRef<HTMLVideoElement, RoboTubePlayerProps>(
     },
     ref,
   ) {
-    const source = useMemo(() => ({ playbackId }), [playbackId]);
-    const media = (
+    const source = useMemo(
+      () => (playbackId ? { playbackId } : null),
+      [playbackId],
+    );
+    const muxMedia = source ? (
       <>
         <MuxVideo
           ref={ref}
@@ -45,6 +50,15 @@ const RoboTubePlayer = forwardRef<HTMLVideoElement, RoboTubePlayerProps>(
           metadata={metadata}
         />
       </>
+    ) : null;
+
+    const media = muxMedia ?? (
+      <Video
+        ref={ref}
+        src={src}
+        playsInline
+        preload="metadata"
+      />
     );
 
     if (streamType === "live") {
