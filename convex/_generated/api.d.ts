@@ -45,6 +45,7 @@ import type * as uploads from "../uploads.js";
 import type * as users from "../users.js";
 import type * as videoChat from "../videoChat.js";
 import type * as videoChatNode from "../videoChatNode.js";
+import type * as videoDeletion from "../videoDeletion.js";
 import type * as videoEmbeddings from "../videoEmbeddings.js";
 import type * as videoEmbeddingsNode from "../videoEmbeddingsNode.js";
 import type * as videoMetadata from "../videoMetadata.js";
@@ -93,6 +94,7 @@ declare const fullApi: ApiFromModules<{
   users: typeof users;
   videoChat: typeof videoChat;
   videoChatNode: typeof videoChatNode;
+  videoDeletion: typeof videoDeletion;
   videoEmbeddings: typeof videoEmbeddings;
   videoEmbeddingsNode: typeof videoEmbeddingsNode;
   videoMetadata: typeof videoMetadata;
@@ -3066,6 +3068,12 @@ export declare const components: {
       >;
     };
     videos: {
+      deleteVideoByMuxAssetIdPublic: FunctionReference<
+        "mutation",
+        "internal",
+        { muxAssetId: string },
+        any
+      >;
       getVideoByMuxAssetId: FunctionReference<
         "query",
         "internal",

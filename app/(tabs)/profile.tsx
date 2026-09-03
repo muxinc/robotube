@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { FlashList } from "@shopify/flash-list";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
@@ -53,7 +53,9 @@ export default function ProfileScreen() {
   const [handleMessage, setHandleMessage] = useState<string | null>(null);
   const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [deletingMuxAssetId, setDeletingMuxAssetId] = useState<string | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const deleteOwnVideo = useAction((api as any).videoDeletion.deleteOwnVideo);
   const updateUsername = useMutation((api as any).users.updateUsername);
   const generateAvatarUploadUrl = useMutation(
     (api as any).users.generateAvatarUploadUrl,
@@ -261,6 +263,36 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleDeleteVideo = (video: FeedVideoItem) => {
+    if (deletingMuxAssetId) return;
+
+    Alert.alert(
+      "Delete video?",
+      `“${video.title}” will be permanently removed from RoboTube and Mux. This cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            setDeletingMuxAssetId(video.muxAssetId);
+            setErrorText(null);
+            void deleteOwnVideo({ muxAssetId: video.muxAssetId })
+              .catch((error: unknown) => {
+                const message =
+                  error instanceof Error
+                    ? error.message
+                    : "Could not delete the video right now.";
+                setErrorText(message);
+                Alert.alert("Could Not Delete Video", message);
+              })
+              .finally(() => setDeletingMuxAssetId(null));
+          },
+        },
+      ],
+    );
+  };
+
   if (currentUser === undefined) {
     return (
       <View style={styles.loadingContainer}>
@@ -429,7 +461,27 @@ export default function ProfileScreen() {
         data={uploadedVideos ?? []}
         keyExtractor={(item) => item.muxAssetId}
         renderItem={({ item }) => (
-          <FeedVideoCard item={item} showPlayIcon={false} />
+          <View style={styles.uploadedVideoItem}>
+            <FeedVideoCard item={item} showPlayIcon={false} />
+            <Pressable
+              accessibilityLabel={`Delete ${item.title}`}
+              accessibilityRole="button"
+              disabled={deletingMuxAssetId !== null}
+              hitSlop={8}
+              onPress={() => handleDeleteVideo(item)}
+              style={({ pressed }) => [
+                styles.deleteVideoButton,
+                pressed && styles.deleteVideoButtonPressed,
+                deletingMuxAssetId !== null && styles.signOutDisabled,
+              ]}
+            >
+              {deletingMuxAssetId === item.muxAssetId ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Ionicons name="trash-outline" size={19} color="#FFFFFF" />
+              )}
+            </Pressable>
+          </View>
         )}
         showsVerticalScrollIndicator={false}
         contentInsetAdjustmentBehavior="never"
@@ -666,6 +718,27 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     textAlign: "center",
     color: "#667085",
+  },
+  uploadedVideoItem: {
+    position: "relative",
+  },
+  deleteVideoButton: {
+    position: "absolute",
+    zIndex: 3,
+    top: 10,
+    right: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1A1A1ACC",
+    borderWidth: 1,
+    borderColor: "#FFFFFF55",
+  },
+  deleteVideoButtonPressed: {
+    backgroundColor: "#B4233E",
+    transform: [{ scale: 0.96 }],
   },
   signOutPressed: {
     opacity: 0.85,

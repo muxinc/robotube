@@ -40,6 +40,7 @@ export default defineSchema({
     createdAtMs: v.number(),
   })
     .index("by_user_video", ["userId", "muxAssetId"])
+    .index("by_asset", ["muxAssetId"])
     .index("by_thread", ["threadId"]),
   audioTranslationJobs: defineTable({
     muxAssetId: v.string(),

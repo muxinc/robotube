@@ -1,0 +1,52 @@
+diff --git a/node_modules/convex-mux-component/videos.ts b/node_modules/convex-mux-component/videos.ts
+index 0058c13..9e4ae4e 100644
+--- a/node_modules/convex-mux-component/videos.ts
++++ b/node_modules/convex-mux-component/videos.ts
+@@ -159,3 +159,47 @@ export const listVideosForUser = query({
+     return joinedRows;
+   },
+ });
++
++/**
++ * Permanently removes the component-owned asset, upload, and metadata rows for
++ * an asset that the parent app has already authorized and deleted from Mux.
++ */
++export const deleteVideoByMuxAssetIdPublic = mutation({
++  args: { muxAssetId: v.string() },
++  handler: async (ctx, args) => {
++    const asset = await ctx.db
++      .query("assets")
++      .withIndex("by_mux_asset_id", (q) => q.eq("muxAssetId", args.muxAssetId))
++      .unique();
++    const metadataRows = await ctx.db
++      .query("videoMetadata")
++      .withIndex("by_mux_asset_id", (q) => q.eq("muxAssetId", args.muxAssetId))
++      .collect();
++
++    for (const metadata of metadataRows) {
++      await ctx.db.delete(metadata._id);
++    }
++
++    let deletedUpload = false;
++    if (asset?.uploadId) {
++      const upload = await ctx.db
++        .query("uploads")
++        .withIndex("by_mux_upload_id", (q) => q.eq("muxUploadId", asset.uploadId!))
++        .unique();
++      if (upload) {
++        await ctx.db.delete(upload._id);
++        deletedUpload = true;
++      }
++    }
++
++    if (asset) {
++      await ctx.db.delete(asset._id);
++    }
++
++    return {
++      deletedAsset: Boolean(asset),
++      deletedUpload,
++      deletedMetadataRows: metadataRows.length,
++    };
++  },
++});

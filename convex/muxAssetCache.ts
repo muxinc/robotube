@@ -264,6 +264,15 @@ export const upsertFromPayloadInternal = internalMutation({
     }
 
     const existing = await getCachedMuxAssetById(ctx, normalized.muxAssetId);
+    if (existing?.isDeleted && !normalized.isDeleted) {
+      return {
+        ok: true,
+        skipped: true,
+        reason: "deleted_tombstone",
+        inserted: false,
+        unchanged: true,
+      };
+    }
     const classification = resolveAspectClassificationForUpsert({
       existing,
       incoming: normalized,

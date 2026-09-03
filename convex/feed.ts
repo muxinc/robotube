@@ -490,13 +490,12 @@ export const listVerticalFeedVideosPaginated = query({
 });
 
 /**
- * The placement-filtered Home feed, for the exclusive-routing cutover.
- *
- * It is deployed but not yet wired to Home: `listFeedVideosPaginated` above
- * still serves Home, so legacy `unknown` and unclassified rows stay visible
- * while the backfill runs. Home moves to this query only after
- * `feedPlacement.auditFeedPlacementCoverage` reports
- * `coverageGatePassed: true`, behind the exclusive-placement flag.
+ * The placement-filtered Home feed (16:9 grid). Web Home serves its main grid
+ * from this query, with `listVerticalFeedVideosPaginated` feeding the Shorts
+ * shelf. The cutover happened after `feedPlacement.auditFeedPlacementCoverage`
+ * reported `coverageGatePassed: true`; rows classified `unknown` are not served
+ * from either feed, so rerun the backfill with `{"includeUnknown": true}` once
+ * Mux finishes processing an asset that had no ratio yet.
  */
 export const listStandardFeedVideosPaginated = query({
   args: { paginationOpts: paginationOptsValidator },

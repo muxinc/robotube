@@ -15,6 +15,12 @@ type RoboTubePlayerProps = {
   metadata?: MuxDataProps["metadata"];
   streamType?: "live" | "on-demand";
   autoPlay?: boolean;
+  /**
+   * Defaults to `autoPlay` so unattended autoplay satisfies browser policies.
+   * Pass `false` when playback starts from an explicit user gesture (e.g. the
+   * Shorts page) and audio should be on.
+   */
+  muted?: boolean;
 };
 
 const RoboTubePlayer = forwardRef<HTMLVideoElement, RoboTubePlayerProps>(
@@ -27,6 +33,7 @@ const RoboTubePlayer = forwardRef<HTMLVideoElement, RoboTubePlayerProps>(
       metadata,
       streamType = "on-demand",
       autoPlay = false,
+      muted = autoPlay,
     },
     ref,
   ) {
@@ -40,7 +47,7 @@ const RoboTubePlayer = forwardRef<HTMLVideoElement, RoboTubePlayerProps>(
           ref={ref}
           source={source}
           autoPlay={autoPlay}
-          muted={autoPlay}
+          muted={muted}
           playsInline
           crossOrigin="anonymous"
           preload="metadata"

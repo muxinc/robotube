@@ -1,7 +1,9 @@
 import { memo, useMemo } from "react";
+import { MuxVideo } from "@videojs/react/media/mux-video";
 import { Play } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
+import { useHoverPreview } from "../lib/useHoverPreview";
 import type { FeedVideoItem } from "../types";
 
 export type VideoCardProps = {
@@ -41,6 +43,41 @@ function formatPublished(createdAtMs: number) {
 }
 
 export const VideoCard = memo(function VideoCard({ video }: VideoCardProps) {
+  const {
+    previewing,
+    previewPlaying,
+    previewRef,
+    startPreview,
+    stopPreview,
+    onPreviewPlaying,
+    getPreviewTime,
+  } = useHoverPreview();
+  const navigate = useNavigate();
+  const previewSource = useMemo(
+    () => ({ playbackId: video.playbackId }),
+    [video.playbackId],
+  );
+  const watchPath = `/watch/${encodeURIComponent(video.muxAssetId)}`;
+
+  // Playback handoff: a plain left click while the preview is rolling carries
+  // its position to the watch page as a ?t= start-time deep link. Modified
+  // clicks (new tab, etc.) keep the Link's default behavior.
+  const handleLinkClick = (event: React.MouseEvent) => {
+    const seconds = getPreviewTime();
+    if (seconds <= 0) return;
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    )
+      return;
+    event.preventDefault();
+    navigate(`${watchPath}?t=${seconds.toFixed(1)}`);
+  };
+
   const duration = useMemo(
     () => formatDuration(video.durationSeconds),
     [video.durationSeconds],
@@ -54,16 +91,33 @@ export const VideoCard = memo(function VideoCard({ video }: VideoCardProps) {
     <article className="video-card">
       <Link
         className="video-card__link"
-        to={`/watch/${encodeURIComponent(video.muxAssetId)}`}
+        to={watchPath}
+        onClick={handleLinkClick}
         aria-label={`Watch ${video.title} by ${video.channelName}`}
       >
-        <div className="video-card__media">
+        <div
+          className="video-card__media"
+          onMouseEnter={startPreview}
+          onMouseLeave={stopPreview}
+        >
           <img
             className="video-card__thumbnail"
             src={video.thumbnailUrl}
             alt=""
             loading="lazy"
           />
+          {previewing ? (
+            <MuxVideo
+              ref={previewRef}
+              className={`video-card__preview${previewPlaying ? " video-card__preview--playing" : ""}`}
+              source={previewSource}
+              autoPlay
+              muted
+              loop
+              playsInline
+              onPlaying={onPreviewPlaying}
+            />
+          ) : null}
           <span className="video-card__play" aria-hidden="true">
             <Play size={22} fill="currentColor" />
           </span>

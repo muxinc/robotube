@@ -13,7 +13,9 @@ import {
   Camera,
   Captions,
   Check,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   CircleUserRound,
   Clock3,
   Compass,
@@ -30,6 +32,7 @@ import {
   Send,
   Sparkles,
   Square,
+  Trash2,
   Upload,
   UserRound,
   Video,
@@ -40,6 +43,7 @@ import {
   type ReactNode,
   lazy,
   Suspense,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -57,6 +61,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 
+import { ShortsCard } from "./components/ShortsCard";
 import { VideoCard } from "./components/VideoCard";
 import { categories } from "./data/categories";
 import { api } from "./lib/convex";
@@ -276,41 +281,109 @@ function LiveRail() {
   );
 }
 
+const FEED_PAGE_SIZE = 24;
+
+/**
+ * Auto-loads the next feed page when scrolled near the viewport. The rootMargin
+ * pre-fetches before the user reaches the bottom, and because the observer
+ * re-arms after every load, a short page (hidden assets shrink pages
+ * server-side) keeps loading until the viewport fills or the feed is exhausted.
+ */
+function InfiniteScrollSentinel({
+  active,
+  loading,
+  onLoadMore,
+}: {
+  active: boolean;
+  loading: boolean;
+  onLoadMore: () => void;
+}) {
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const onLoadMoreRef = useRef(onLoadMore);
+  onLoadMoreRef.current = onLoadMore;
+
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!active || !node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) onLoadMoreRef.current();
+      },
+      { rootMargin: "600px 0px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [active]);
+
+  return (
+    <div ref={sentinelRef} className="feed-sentinel">
+      {loading ? <><LoaderCircle className="spin" size={17} /> Loading more videos</> : null}
+    </div>
+  );
+}
+
+/**
+ * A pair of shorts, drawn lucide-style — the Shorts shelf's namesake. A shallow
+ * rounded crotch, waistband seam, and pocket slashes keep it reading as
+ * clothing rather than a letterform.
+ */
+function ShortsIcon({ size = 19 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4 4h16l1.5 15h-6.7l-1.8-6.5a1.05 1.05 0 0 0-2 0L9.2 19H2.5L4 4Z" />
+      <path d="M3.7 7.5h16.6" />
+      <path d="M6.4 10.2l1.7 2.3" />
+      <path d="M17.6 10.2l-1.7 2.3" />
+    </svg>
+  );
+}
+
+/** Cards shown above the Shorts shelf: two rows of the 3-column desktop grid. */
+const FEED_TOP_ROW_COUNT = 6;
+const SHORTS_SHELF_SIZE = 12;
+
 function HomePage() {
   useDocumentTitle("Home");
   const { results, status, loadMore } = usePaginatedQuery(
-    convexApi.feed.listFeedVideosPaginated,
+    convexApi.feed.listStandardFeedVideosPaginated,
     {},
-    { initialNumItems: 12 },
+    { initialNumItems: FEED_PAGE_SIZE },
   ) as {
     results: FeedVideoItem[];
     status: "LoadingFirstPage" | "CanLoadMore" | "LoadingMore" | "Exhausted";
     loadMore: (count: number) => void;
   };
+  const { results: shorts } = usePaginatedQuery(
+    convexApi.feed.listVerticalFeedVideosPaginated,
+    {},
+    { initialNumItems: SHORTS_SHELF_SIZE },
+  ) as { results: FeedVideoItem[] };
+
+  // With no shorts to shelve, the feed stays one uninterrupted grid.
+  const topRows = shorts.length > 0 ? results.slice(0, FEED_TOP_ROW_COUNT) : results;
+  const remaining = shorts.length > 0 ? results.slice(FEED_TOP_ROW_COUNT) : [];
 
   return (
     <div className="page page--home">
-      <section className="home-intro">
-        <div>
-          <span className="eyebrow"><Sparkles size={14} /> Powered by Mux Robots</span>
-          <h1>Video, understood.</h1>
-          <p>Watch what’s new, jump to the moments that matter, and ask any video a question.</p>
-        </div>
-        <Link to="/search" className="button button--dark">
-          Explore videos <ChevronRight size={18} />
-        </Link>
-      </section>
-
       <LiveRail />
 
       <section aria-labelledby="latest-heading">
         <div className="row-heading">
           <div><h2 id="latest-heading">Latest videos</h2></div>
-          <span>Fresh from the community</span>
         </div>
 
         {status === "LoadingFirstPage" ? <LoadingGrid /> : null}
-        {status !== "LoadingFirstPage" && results.length === 0 ? (
+        {status !== "LoadingFirstPage" && results.length === 0 && shorts.length === 0 ? (
           <EmptyState
             icon={<Video size={29} />}
             title="The feed is warming up"
@@ -318,21 +391,166 @@ function HomePage() {
             action={<Link className="button button--pink" to="/upload">Upload a video</Link>}
           />
         ) : null}
-        {results.length > 0 ? (
+        {topRows.length > 0 ? (
           <div className="video-grid">
-            {results.map((video) => <VideoCard video={video} key={video.muxAssetId} />)}
+            {topRows.map((video) => <VideoCard video={video} key={video.muxAssetId} />)}
           </div>
         ) : null}
-        {status === "CanLoadMore" || status === "LoadingMore" ? (
-          <button
-            className="button button--outline load-more"
-            disabled={status === "LoadingMore"}
-            onClick={() => loadMore(12)}
-          >
-            {status === "LoadingMore" ? <><LoaderCircle className="spin" size={17} /> Loading</> : "Load more"}
-          </button>
-        ) : null}
       </section>
+
+      {shorts.length > 0 ? (
+        <section className="shorts-shelf" aria-labelledby="shorts-heading">
+          <div className="row-heading">
+            <div><h2 id="shorts-heading" className="shorts-shelf__heading"><ShortsIcon size={19} /> Shorts</h2></div>
+          </div>
+          <div className="shorts-row">
+            {shorts.map((video) => <ShortsCard video={video} key={video.muxAssetId} />)}
+          </div>
+        </section>
+      ) : null}
+
+      {remaining.length > 0 ? (
+        <section aria-label="More videos">
+          <div className="video-grid">
+            {remaining.map((video) => <VideoCard video={video} key={video.muxAssetId} />)}
+          </div>
+        </section>
+      ) : null}
+
+      {status === "CanLoadMore" || status === "LoadingMore" ? (
+        <InfiniteScrollSentinel
+          active={status === "CanLoadMore"}
+          loading={status === "LoadingMore"}
+          onLoadMore={() => loadMore(FEED_PAGE_SIZE)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Starts playback with audio as soon as a video element mounts; the click that
+ * navigated to the page is the user gesture browsers require for unmuted
+ * autoplay. When the browser still refuses (e.g. a /watch URL opened directly
+ * in a fresh tab), "stay-paused" leaves the video paused with audio armed so
+ * the user's click on the player starts it with sound, while "play-muted"
+ * keeps playback rolling silently instead (for live streams, which should
+ * never sit paused).
+ */
+/**
+ * Seeks to a ?t= start-time deep link (playback handoff from a hover preview,
+ * or a shared link). Seeking before metadata loads gets dropped by the media
+ * element, so the seek waits for `loadedmetadata` when needed.
+ */
+function applyStartTime(element: HTMLVideoElement | null, seconds: number) {
+  if (!element || !Number.isFinite(seconds) || seconds <= 0) return;
+  const seek = () => {
+    element.currentTime = seconds;
+  };
+  if (element.readyState >= HTMLMediaElement.HAVE_METADATA) seek();
+  else element.addEventListener("loadedmetadata", seek, { once: true });
+}
+
+function useStartTimeParam() {
+  const [searchParams] = useSearchParams();
+  const parsed = Number(searchParams.get("t"));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function startPlaybackWithAudio(
+  element: HTMLVideoElement | null,
+  onBlocked: "stay-paused" | "play-muted" = "stay-paused",
+) {
+  if (!element) return;
+  element.muted = false;
+  element.play?.()?.catch(() => {
+    if (onBlocked === "play-muted") {
+      element.muted = true;
+      void element.play?.();
+    }
+  });
+}
+
+/**
+ * Full-page vertical viewer, YouTube Shorts style: a 9:16 Video.js player sized
+ * to the viewport with up/down navigation through the vertical feed.
+ */
+function ShortsPage() {
+  const { muxAssetId = "" } = useParams();
+  const decodedId = decodeURIComponent(muxAssetId);
+  const navigate = useNavigate();
+  const video = useQuery(convexApi.feed.getFeedVideoByMuxAssetId, {
+    muxAssetId: decodedId,
+  }) as FeedVideoItem | null | undefined;
+  const { results: shorts } = usePaginatedQuery(
+    convexApi.feed.listVerticalFeedVideosPaginated,
+    {},
+    { initialNumItems: 24 },
+  ) as { results: FeedVideoItem[] };
+
+  useDocumentTitle(video?.title ?? "Shorts");
+
+  const index = shorts.findIndex((item) => item.muxAssetId === decodedId);
+  const previous = index > 0 ? shorts[index - 1] : null;
+  const next = index >= 0 && index < shorts.length - 1 ? shorts[index + 1] : null;
+  const goTo = (item: FeedVideoItem | null) => {
+    if (item) navigate(`/shorts/${encodeURIComponent(item.muxAssetId)}`);
+  };
+
+  // Stable callback ref: an inline arrow would re-attach on every render and
+  // restart playback after the user pauses. The `key` on the player still
+  // remounts it (and re-fires this) for each new short. The ?t= start time is
+  // fixed per navigation, so it doesn't destabilize the callback in practice.
+  const startTime = useStartTimeParam();
+  const startWithAudio = useCallback(
+    (element: HTMLVideoElement | null) => {
+      applyStartTime(element, startTime);
+      startPlaybackWithAudio(element);
+    },
+    [startTime],
+  );
+
+  if (video === undefined) {
+    return (
+      <div className="shorts-page">
+        <div className="shorts-stage skeleton-pulse" />
+      </div>
+    );
+  }
+  if (video === null) {
+    return (
+      <div className="page">
+        <EmptyState icon={<Video size={28} />} title="Short not found" copy="It may still be processing or is no longer public." action={<Link to="/" className="button button--outline">Back home</Link>} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="shorts-page">
+      <Link className="shorts-close" to="/" aria-label="Back to home"><X size={20} /></Link>
+      <div className="shorts-stage">
+        <Suspense fallback={<div className="player-loading"><LoaderCircle className="spin" /></div>}>
+          <RoboTubePlayer
+            key={video.muxAssetId}
+            ref={startWithAudio}
+            playbackId={video.playbackId}
+            title={video.title}
+            posterUrl={video.thumbnailUrl}
+            metadata={{ video_id: video.muxAssetId, video_title: video.title, player_name: "RoboTube Web" }}
+            streamType="on-demand"
+            autoPlay
+            muted={false}
+          />
+        </Suspense>
+        <div className="shorts-overlay">
+          <h1>{video.title}</h1>
+          <p>{video.channelName}</p>
+        </div>
+      </div>
+      <div className="shorts-nav">
+        <button onClick={() => goTo(previous)} disabled={!previous} aria-label="Previous Short"><ChevronUp size={22} /></button>
+        <button onClick={() => goTo(next)} disabled={!next} aria-label="Next Short"><ChevronDown size={22} /></button>
+      </div>
     </div>
   );
 }
@@ -430,6 +648,15 @@ function WatchPage() {
     | undefined;
   const [tab, setTab] = useState<"overview" | "moments" | "chapters" | "ask">("overview");
   const playerRef = useRef<any>(null);
+  const startTime = useStartTimeParam();
+  const attachPlayer = useCallback(
+    (element: HTMLVideoElement | null) => {
+      playerRef.current = element;
+      applyStartTime(element, startTime);
+      startPlaybackWithAudio(element);
+    },
+    [startTime],
+  );
 
   useDocumentTitle(video?.title ?? "Watch");
 
@@ -462,12 +689,15 @@ function WatchPage() {
           <div className="player-frame">
             <Suspense fallback={<div className="player-loading"><LoaderCircle className="spin" /></div>}>
               <RoboTubePlayer
-                ref={playerRef}
+                key={video.muxAssetId}
+                ref={attachPlayer}
                 playbackId={video.playbackId}
                 title={video.title}
                 posterUrl={video.thumbnailUrl}
                 metadata={{ video_id: video.muxAssetId, video_title: video.title, player_name: "RoboTube Web" }}
                 streamType="on-demand"
+                autoPlay
+                muted={false}
               />
             </Suspense>
           </div>
@@ -660,6 +890,61 @@ function uploadFileWithProgress(url: string, file: File, onProgress: (progress: 
   });
 }
 
+type UploadPipelineJob = {
+  key: string;
+  label: string;
+  status: "waiting" | "processing" | "completed" | "errored" | "skipped";
+};
+
+const pipelineJobStatusLabels: Record<UploadPipelineJob["status"], string> = {
+  waiting: "Waiting",
+  processing: "Running",
+  completed: "Complete",
+  errored: "Failed",
+  skipped: "Skipped",
+};
+
+function PipelineJobStatusIcon({ status }: { status: UploadPipelineJob["status"] }) {
+  switch (status) {
+    case "processing":
+      return <LoaderCircle aria-hidden="true" className="spin" size={16} />;
+    case "completed":
+      return <Check aria-hidden="true" size={16} strokeWidth={3} />;
+    case "errored":
+    case "skipped":
+      return <X aria-hidden="true" size={15} strokeWidth={2.5} />;
+    default:
+      return <Clock3 aria-hidden="true" size={15} />;
+  }
+}
+
+function UploadPipelineJobs({ jobs }: { jobs: UploadPipelineJob[] }) {
+  return (
+    <section className="upload-pipeline" aria-labelledby="upload-pipeline-title">
+      <div className="upload-pipeline__heading">
+        <span><Bot aria-hidden="true" size={18} /></span>
+        <div>
+          <h2 id="upload-pipeline-title">Mux Robots jobs</h2>
+          <p>Moderation runs first, then the remaining jobs begin.</p>
+        </div>
+      </div>
+      <ul className="upload-pipeline__jobs">
+        {jobs.map((job) => (
+          <li className={`upload-pipeline__job upload-pipeline__job--${job.status}`} key={job.key}>
+            <span className="upload-pipeline__status-icon">
+              <PipelineJobStatusIcon status={job.status} />
+            </span>
+            <span className="upload-pipeline__job-label">{job.label}</span>
+            <span className="upload-pipeline__job-status">
+              {pipelineJobStatusLabels[job.status]}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function BrowserRecorder({
   stream,
   onCancel,
@@ -788,6 +1073,9 @@ function UploadPage() {
   useDocumentTitle("Upload");
   const { isAuthenticated, isLoading } = useConvexAuth();
   const createUpload = useAction(convexApi.uploads.createMuxDirectUpload);
+  const updateOwnVideoMetadata = useMutation(
+    convexApi.videoMetadata.updateOwnVideoMetadata,
+  );
   const selectThumbnail = useMutation(
     convexApi.videoMetadata.selectOwnVideoThumbnail,
   );
@@ -802,7 +1090,10 @@ function UploadPage() {
   const [uploadId, setUploadId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectingThumbnail, setSelectingThumbnail] = useState<number | null>(null);
+  const [pendingThumbnailTimestampMs, setPendingThumbnailTimestampMs] =
+    useState<number | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [published, setPublished] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const previewUrl = useMemo(
     () => (file ? URL.createObjectURL(file) : null),
@@ -834,8 +1125,30 @@ function UploadPage() {
             description: string | null;
           }>;
         };
+        jobs: UploadPipelineJob[];
       }
     | undefined;
+  const thumbnailJobStatus = pipeline?.jobs?.find(
+    (job) => job.key === "thumbnails",
+  )?.status;
+  const thumbnailLoadingText =
+    thumbnailJobStatus === "processing"
+      ? "Mux Robots is finding three thumbnail options…"
+      : thumbnailJobStatus === "completed"
+        ? "Preparing your thumbnail options…"
+        : "AI thumbnail options will begin after moderation passes.";
+  const thumbnailCandidates = pipeline?.thumbnailSelection?.candidates ?? [];
+  const currentThumbnailTimestampMs =
+    pendingThumbnailTimestampMs ??
+    pipeline?.thumbnailSelection?.selectedTimestampMs ??
+    thumbnailCandidates[0]?.timestampMs;
+  const canPublish = Boolean(
+    uploadId &&
+      pipeline?.muxAssetId &&
+      pipeline.passed === true &&
+      !publishing &&
+      !published,
+  );
 
   useEffect(
     () => () => {
@@ -902,7 +1215,7 @@ function UploadPage() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!title.trim() || !file || uploading) return;
+    if (!title.trim() || !file || uploading || uploadId) return;
     setUploading(true);
     setError(null);
     setUploadId(null);
@@ -922,8 +1235,6 @@ function UploadPage() {
       setUploadId(result.uploadId);
       setProgress(95);
       setStatusText("Upload complete. Mux is processing and moderating it…");
-      setTitle("");
-      setFile(null);
     } catch (cause) {
       setProgress(0);
       setError(cause instanceof Error ? cause.message : "Upload failed.");
@@ -933,21 +1244,57 @@ function UploadPage() {
     }
   };
 
-  const chooseThumbnail = async (timestampMs: number) => {
-    if (!pipeline?.muxAssetId || selectingThumbnail !== null) return;
-    setSelectingThumbnail(timestampMs);
+  const startAnotherUpload = () => {
+    setUploadId(null);
+    setTitle("");
+    setFile(null);
+    setAudioLanguages([]);
+    setCaptionLanguages([]);
+    setProgress(0);
+    setStatusText("Choose a video to begin.");
+    setError(null);
+    setPendingThumbnailTimestampMs(null);
+    setPublishing(false);
+    setPublished(false);
+    if (inputRef.current) inputRef.current.value = "";
+  };
+
+  const chooseThumbnail = (timestampMs: number) => {
+    if (publishing || published) return;
+    setPendingThumbnailTimestampMs(timestampMs);
+    setError(null);
+  };
+
+  const publishVideo = async () => {
+    if (!pipeline?.muxAssetId || !canPublish) return;
+
+    setPublishing(true);
     setError(null);
     try {
-      await selectThumbnail({
+      if (
+        thumbnailCandidates.length > 0 &&
+        currentThumbnailTimestampMs !== undefined
+      ) {
+        await selectThumbnail({
+          muxAssetId: pipeline.muxAssetId,
+          timestampMs: currentThumbnailTimestampMs,
+        });
+      }
+      await updateOwnVideoMetadata({
         muxAssetId: pipeline.muxAssetId,
-        timestampMs,
+        title: title.trim(),
+        description: "",
+        tags: [],
+        publish: true,
       });
+      setPublished(true);
+      setStatusText("Your video is now live in the RoboTube feed.");
     } catch (cause) {
       setError(
-        cause instanceof Error ? cause.message : "Could not select thumbnail.",
+        cause instanceof Error ? cause.message : "Could not publish video.",
       );
     } finally {
-      setSelectingThumbnail(null);
+      setPublishing(false);
     }
   };
 
@@ -962,7 +1309,7 @@ function UploadPage() {
           <button
             type="button"
             className="media-source-button"
-            disabled={openingCamera || uploading || Boolean(cameraStream)}
+            disabled={openingCamera || uploading || Boolean(cameraStream) || Boolean(uploadId)}
             onClick={() => void openCamera()}
           >
             {openingCamera ? (
@@ -994,6 +1341,7 @@ function UploadPage() {
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => {
             event.preventDefault();
+            if (uploading || uploadId) return;
             const next = event.dataTransfer.files[0];
             if (next?.type.startsWith("video/")) setFile(next);
           }}
@@ -1003,6 +1351,7 @@ function UploadPage() {
             type="file"
             accept="video/*"
             hidden
+            disabled={uploading || Boolean(uploadId)}
             onChange={(event) => setFile(event.target.files?.[0] ?? null)}
           />
           {file && previewUrl ? (
@@ -1014,14 +1363,16 @@ function UploadPage() {
                   title={file.name}
                 />
               </Suspense>
-              <button
-                type="button"
-                className="drop-zone__remove"
-                onClick={() => setFile(null)}
-                aria-label="Remove video"
-              >
-                <X size={18} />
-              </button>
+              {!uploading && !uploadId ? (
+                <button
+                  type="button"
+                  className="drop-zone__remove"
+                  onClick={() => setFile(null)}
+                  aria-label="Remove video"
+                >
+                  <X size={18} />
+                </button>
+              ) : null}
             </>
           ) : (
             <button
@@ -1045,6 +1396,7 @@ function UploadPage() {
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Give people a reason to press play"
             maxLength={120}
+            disabled={uploading || Boolean(uploadId)}
             required
           />
         </label>
@@ -1062,6 +1414,7 @@ function UploadPage() {
                     type="button"
                     className={selected ? "selected" : ""}
                     aria-pressed={selected}
+                    disabled={uploading || Boolean(uploadId)}
                     onClick={() =>
                       setAudioLanguages((current) =>
                         selected
@@ -1091,6 +1444,7 @@ function UploadPage() {
                     type="button"
                     className={selected ? "selected" : ""}
                     aria-pressed={selected}
+                    disabled={uploading || Boolean(uploadId)}
                     onClick={() =>
                       setCaptionLanguages((current) =>
                         selected
@@ -1111,7 +1465,13 @@ function UploadPage() {
 
         {uploading || uploadId ? (
           <div className="upload-progress">
-            <div>
+            <div
+              aria-label="Upload and processing progress"
+              aria-valuemax={100}
+              aria-valuemin={0}
+              aria-valuenow={progress}
+              role="progressbar"
+            >
               <span style={{ width: `${Math.max(progress, 2)}%` }} />
             </div>
             <p>
@@ -1120,6 +1480,7 @@ function UploadPage() {
             </p>
           </div>
         ) : null}
+        {pipeline?.jobs?.length ? <UploadPipelineJobs jobs={pipeline.jobs} /> : null}
         {pipeline?.playbackId &&
         pipeline.thumbnailSelection?.candidates.length ? (
           <section className="thumbnail-picker" aria-labelledby="thumbnail-picker-title">
@@ -1127,21 +1488,19 @@ function UploadPage() {
               <span><ImagePlus size={20} /></span>
               <div>
                 <h2 id="thumbnail-picker-title">Choose your thumbnail</h2>
-                <p>Mux Robots ranked these three frames. The best match is selected first.</p>
+                <p>Select a frame. Your choice will be used when you publish.</p>
               </div>
             </div>
             <div className="thumbnail-picker__grid" role="radiogroup" aria-label="Thumbnail choices">
               {pipeline.thumbnailSelection.candidates.map((candidate, index) => {
-                const selected =
-                  candidate.timestampMs ===
-                  pipeline.thumbnailSelection?.selectedTimestampMs;
+                const selected = candidate.timestampMs === currentThumbnailTimestampMs;
                 return (
                   <button
                     type="button"
                     role="radio"
                     aria-checked={selected}
                     className={`thumbnail-choice ${selected ? "thumbnail-choice--selected" : ""}`}
-                    disabled={selectingThumbnail !== null}
+                    disabled={publishing || published}
                     key={candidate.timestampMs}
                     onClick={() => void chooseThumbnail(candidate.timestampMs)}
                   >
@@ -1153,9 +1512,7 @@ function UploadPage() {
                       {index === 0 ? <em>Best match</em> : null}
                     </span>
                     <span className="thumbnail-choice__label">
-                      {selectingThumbnail === candidate.timestampMs ? (
-                        <LoaderCircle className="spin" size={17} />
-                      ) : selected ? (
+                      {selected ? (
                         <Check size={17} />
                       ) : (
                         <span className="thumbnail-choice__radio" />
@@ -1169,28 +1526,81 @@ function UploadPage() {
           </section>
         ) : uploadId &&
           pipeline?.thumbnailSelection?.status !== "errored" &&
-          pipeline?.thumbnailSelection?.status !== "skipped" ? (
+          pipeline?.thumbnailSelection?.status !== "skipped" &&
+          thumbnailJobStatus !== "errored" &&
+          thumbnailJobStatus !== "skipped" ? (
           <div className="thumbnail-picker thumbnail-picker--loading">
             <LoaderCircle className="spin" size={20} />
-            Mux Robots is finding three thumbnail options…
+            {thumbnailLoadingText}
           </div>
         ) : null}
         {error ? <p className="form-error">{error}</p> : null}
-        <button
-          className="button button--pink button--large"
-          type="submit"
-          disabled={!title.trim() || !file || uploading}
-        >
-          {uploading ? (
-            <>
-              <LoaderCircle className="spin" size={18} /> Uploading…
-            </>
-          ) : (
-            <>
-              <Upload size={18} /> Upload video
-            </>
-          )}
-        </button>
+        {uploadId ? (
+          <div className="upload-complete-actions">
+            <div className="upload-complete-actions__message">
+              <span className={published ? "upload-complete-actions__icon--published" : undefined}>
+                {published ? <Check aria-hidden="true" size={16} strokeWidth={3} /> : <Clock3 aria-hidden="true" size={16} />}
+              </span>
+              <p>
+                <strong>{published ? "Video published" : "Private upload"}</strong>
+                <small>
+                  {published
+                    ? "Your video is now visible in the RoboTube feed."
+                    : pipeline?.passed === false
+                      ? "Moderation flagged this video, so it will stay private."
+                      : "Choose a thumbnail, then publish when moderation passes."}
+                </small>
+              </p>
+            </div>
+            <div className="upload-complete-actions__buttons">
+              {published ? (
+                <Link className="button button--pink" to="/">
+                  <Home size={17} /> View in feed
+                </Link>
+              ) : (
+                <button
+                  className="button button--pink"
+                  type="button"
+                  disabled={!canPublish}
+                  onClick={() => void publishVideo()}
+                >
+                  {publishing ? (
+                    <>
+                      <LoaderCircle className="spin" size={17} /> Publishing…
+                    </>
+                  ) : (
+                    <>
+                      <Send size={17} /> Publish video
+                    </>
+                  )}
+                </button>
+              )}
+              <button
+                className="button button--outline"
+                type="button"
+                onClick={startAnotherUpload}
+              >
+                <Upload size={17} /> Upload another video
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            className="button button--pink button--large"
+            type="submit"
+            disabled={!title.trim() || !file || uploading}
+          >
+            {uploading ? (
+              <>
+                <LoaderCircle className="spin" size={18} /> Uploading…
+              </>
+            ) : (
+              <>
+                <Upload size={18} /> Upload video
+              </>
+            )}
+          </button>
+        )}
       </form>
     </div>
   );
@@ -1227,8 +1637,11 @@ function ProfilePage() {
   const updateUsername = useMutation(convexApi.users.updateUsername);
   const generateAvatarUploadUrl = useMutation(convexApi.users.generateAvatarUploadUrl);
   const updateProfileImage = useMutation(convexApi.users.updateProfileImage);
+  const deleteOwnVideo = useAction(convexApi.videoDeletion.deleteOwnVideo);
   const [handle, setHandle] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deletingMuxAssetId, setDeletingMuxAssetId] = useState<string | null>(null);
+  const [deleteMessage, setDeleteMessage] = useState<{ error: boolean; text: string } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const avatarInput = useRef<HTMLInputElement>(null);
 
@@ -1254,6 +1667,28 @@ function ProfilePage() {
     finally { setSaving(false); }
   };
 
+  const deleteVideo = async (video: FeedVideoItem) => {
+    if (deletingMuxAssetId) return;
+    const confirmed = window.confirm(
+      `Delete “${video.title}”?\n\nThis permanently removes the video from RoboTube and Mux. This cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingMuxAssetId(video.muxAssetId);
+    setDeleteMessage(null);
+    try {
+      await deleteOwnVideo({ muxAssetId: video.muxAssetId });
+      setDeleteMessage({ error: false, text: "Video deleted." });
+    } catch (cause) {
+      setDeleteMessage({
+        error: true,
+        text: cause instanceof Error ? cause.message : "Could not delete the video.",
+      });
+    } finally {
+      setDeletingMuxAssetId(null);
+    }
+  };
+
   return (
     <div className="page page--profile">
       <section className="profile-hero">
@@ -1275,7 +1710,22 @@ function ProfilePage() {
       </section>
       <section>
         <div className="row-heading"><div><h2>Your uploads</h2></div><span>{uploads?.length ?? 0} videos</span></div>
-        {uploads === undefined ? <LoadingGrid count={3} /> : uploads.length ? <div className="video-grid">{uploads.map((video) => <VideoCard video={video} key={video.muxAssetId} />)}</div> : <EmptyState icon={<Upload size={28} />} title="Nothing here yet" copy="Your published videos will live here." action={<Link to="/upload" className="button button--pink">Upload a video</Link>} />}
+        {deleteMessage ? <p className={`profile-delete-message ${deleteMessage.error ? "form-error" : "form-message"}`}>{deleteMessage.text}</p> : null}
+        {uploads === undefined ? <LoadingGrid count={3} /> : uploads.length ? <div className="video-grid">{uploads.map((video) => (
+          <div className="profile-video" key={video.muxAssetId}>
+            <VideoCard video={video} />
+            <button
+              aria-label={`Delete ${video.title}`}
+              className="profile-video__delete"
+              disabled={deletingMuxAssetId !== null}
+              onClick={() => void deleteVideo(video)}
+              title="Delete video"
+              type="button"
+            >
+              {deletingMuxAssetId === video.muxAssetId ? <LoaderCircle className="spin" size={17} /> : <Trash2 size={17} />}
+            </button>
+          </div>
+        ))}</div> : <EmptyState icon={<Upload size={28} />} title="Nothing here yet" copy="Your published videos will live here." action={<Link to="/upload" className="button button--pink">Upload a video</Link>} />}
       </section>
     </div>
   );
@@ -1284,6 +1734,10 @@ function ProfilePage() {
 function LiveWatchPage() {
   const { muxLiveStreamId = "" } = useParams();
   const stream = useQuery(convexApi.liveStreamQueries.getLiveStreamByMuxId, { muxLiveStreamId: decodeURIComponent(muxLiveStreamId) }) as LiveStream | null | undefined;
+  const attachLivePlayer = useCallback(
+    (element: HTMLVideoElement | null) => startPlaybackWithAudio(element, "play-muted"),
+    [],
+  );
   useDocumentTitle(stream?.title ?? "Live");
   if (stream === undefined) return <div className="live-watch"><LoaderCircle className="spin" size={28} /></div>;
   if (!stream) return <Navigate to="/" replace />;
@@ -1291,7 +1745,7 @@ function LiveWatchPage() {
     <div className="live-watch">
       <Link to="/" className="live-watch__back"><ArrowLeft size={18} /> Back</Link>
       <div className="live-watch__player">
-        {stream.playbackId ? <Suspense fallback={<div className="player-loading"><LoaderCircle className="spin" /></div>}><RoboTubePlayer playbackId={stream.playbackId} title={stream.title} posterUrl={stream.thumbnailUrl} metadata={{ video_title: stream.title, player_name: "RoboTube Web" }} streamType="live" autoPlay /></Suspense> : <div className="live-offline"><Radio size={34} /><h1>Waiting for the stream</h1></div>}
+        {stream.playbackId ? <Suspense fallback={<div className="player-loading"><LoaderCircle className="spin" /></div>}><RoboTubePlayer ref={attachLivePlayer} playbackId={stream.playbackId} title={stream.title} posterUrl={stream.thumbnailUrl} metadata={{ video_title: stream.title, player_name: "RoboTube Web" }} streamType="live" autoPlay muted={false} /></Suspense> : <div className="live-offline"><Radio size={34} /><h1>Waiting for the stream</h1></div>}
       </div>
       <div className="live-watch__info"><span className="live-badge"><span /> {stream.status === "active" ? "Live" : "Ended"}</span><div><h1>{stream.title}</h1><p>{stream.channelName}</p></div></div>
     </div>
@@ -1310,6 +1764,7 @@ export function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/watch/:muxAssetId" element={<WatchPage />} />
+        <Route path="/shorts/:muxAssetId" element={<ShortsPage />} />
         <Route path="/upload" element={<UploadPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/sign-in" element={<Navigate to="/profile" replace />} />

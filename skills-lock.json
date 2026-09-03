@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "mux-docs": {
+      "source": "/Users/joshuaalphonse/mux-projects/skills",
+      "sourceType": "local",
+      "computedHash": "23d128c325f1306020f7218fcffa6b2416464fd57b385a7cda4fc198a62d9e7c"
+    },
+    "mux-robots-directives": {
+      "source": "/Users/joshuaalphonse/mux-projects/skills",
+      "sourceType": "local",
+      "computedHash": "2ae4f2c18a566c9390f2b7f79117a76ad795f263b7681a6b85f8951797987e04"
+    }
+  }
+}
