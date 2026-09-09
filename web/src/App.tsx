@@ -144,12 +144,6 @@ function AppShell({ children }: { children: ReactNode }) {
           </form>
 
           <nav className="desktop-nav" aria-label="Primary navigation">
-            <NavLink to="/" end>
-              <Home size={19} /> <span>Home</span>
-            </NavLink>
-            <NavLink to="/search">
-              <Compass size={19} /> <span>Explore</span>
-            </NavLink>
             <NavLink to="/upload" className="upload-link">
               <Upload size={18} /> <span>Upload</span>
             </NavLink>
@@ -181,6 +175,18 @@ function AppShell({ children }: { children: ReactNode }) {
           </form>
         ) : null}
       </header>
+
+      <aside className="side-nav" aria-label="Sidebar navigation">
+        <NavLink to="/" end>
+          <Home size={20} /> <span>Home</span>
+        </NavLink>
+        <NavLink to="/search">
+          <Compass size={20} /> <span>Explore</span>
+        </NavLink>
+        <NavLink to="/profile">
+          <CircleUserRound size={20} /> <span>Profile</span>
+        </NavLink>
+      </aside>
 
       <main className="main-content">{children}</main>
 
