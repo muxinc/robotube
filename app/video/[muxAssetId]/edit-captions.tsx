@@ -468,7 +468,8 @@ function CaptionEditorForm() {
                 <Text selectable>{rule.find} → {rule.replace || "(delete)"} · {rule.caseSensitive ? "Case sensitive" : "Ignore case"}</Text>
                 <Pressable accessibilityRole="button" accessibilityLabel={`Remove correction ${index + 1}`} disabled={formDisabled} onPress={() => setReplacements(replacements.filter((_, i) => i !== index))}><Text style={styles.addButtonText}>Remove correction</Text></Pressable>
               </View>)}
-              <Text style={styles.sectionTitle}>Rename leading bracketed speakers</Text>
+              <Text style={styles.sectionTitle}>Speaker names</Text>
+              {captionSpeakerLabels(transcript.cues).length === 0 ? <Text style={styles.helper}>No speaker labels were found in these captions. For future uploads, enable Include speaker labels, then name discovered labels here in Edit captions.</Text> : null}
               <Text style={styles.helper}>Only leading labels change, not spoken mentions. Enter names without brackets.</Text>
               {captionSpeakerLabels(transcript.cues).map((label) => <Pressable key={label} accessibilityRole="radio" accessibilityState={{ checked: speaker === label }} disabled={formDisabled} onPress={() => setSpeaker(label)}><Text style={styles.addButtonText}>{speaker === label ? "●" : "○"} {label}</Text></Pressable>)}
               {speaker ? <>

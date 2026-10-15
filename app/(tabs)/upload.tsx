@@ -8,7 +8,7 @@ import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   ActivityIndicator,
@@ -18,6 +18,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   TextInput,
   View,
 } from "react-native";
@@ -389,6 +390,9 @@ export default function HomeScreen() {
   );
   const [currentStep, setCurrentStep] = useState<UploadStep>("media");
   const [isUploading, setIsUploading] = useState(false);
+  const uploadInFlight = useRef(false);
+  const [includeSpeakers, setIncludeSpeakers] = useState(false);
+  const [lastRequestedIncludeSpeakers, setLastRequestedIncludeSpeakers] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [status, setStatus] = useState("Choose a video to begin.");
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -725,6 +729,7 @@ export default function HomeScreen() {
   };
 
   const handleUpload = async () => {
+    if (uploadInFlight.current) return;
     if (!selectedVideo) {
       setStatus("Record or pick a video before uploading.");
       Alert.alert(
@@ -734,6 +739,9 @@ export default function HomeScreen() {
       return;
     }
 
+    uploadInFlight.current = true;
+    const requestedIncludeSpeakers = includeSpeakers;
+    setLastRequestedIncludeSpeakers(requestedIncludeSpeakers);
     try {
       const requestedAudioLanguageCodes = [
         ...selectedAudioTranslationLanguageCodes,
@@ -751,6 +759,7 @@ export default function HomeScreen() {
       setUploadProgress(12);
       setStatus("Creating a private Mux upload...");
       const { uploadId, uploadUrl } = await createMuxDirectUpload({
+        includeSpeakers: requestedIncludeSpeakers,
         useGeneratedTitle: true,
         useGeneratedDescription: true,
         audioTranslationLanguageCodes: requestedAudioLanguageCodes,
@@ -815,6 +824,7 @@ export default function HomeScreen() {
       setStatus(`Upload failed: ${message}`);
       Alert.alert("Could Not Create Draft", message);
     } finally {
+      uploadInFlight.current = false;
       setIsUploading(false);
     }
   };
@@ -965,6 +975,8 @@ export default function HomeScreen() {
   };
 
   const handleStartNewUpload = () => {
+    setIncludeSpeakers(false);
+    setLastRequestedIncludeSpeakers(false);
     setCurrentStep("media");
     setSelectedVideo(null);
     setRobotDraftTitle("");
@@ -1169,6 +1181,22 @@ export default function HomeScreen() {
               />
             </View>
 
+            <View style={styles.metadataJobCard}>
+              <View style={styles.robotMetadataCopy}>
+                <ThemedText type="defaultSemiBold">Include speaker labels</ThemedText>
+                <ThemedText style={styles.supportingText}>
+                  Request speaker labels in captions, then name them later in Edit captions. Labels do not identify real people.
+                </ThemedText>
+              </View>
+              <Switch
+                accessibilityLabel="Include speaker labels"
+                accessibilityHint="Request caption speaker labels to name later in Edit captions"
+                value={includeSpeakers}
+                onValueChange={setIncludeSpeakers}
+                disabled={isUploading}
+              />
+            </View>
+
             <PrimaryButton
               label="Next: Review"
               onPress={() => setCurrentStep("review")}
@@ -1207,6 +1235,12 @@ export default function HomeScreen() {
                     label="Translated captions"
                     onPress={() => setCurrentStep("robots")}
                     value={captionTranslationSummary}
+                  />
+                  <ReviewRow
+                    icon="people"
+                    label="Speaker labels requested"
+                    value={includeSpeakers ? "On · Name discovered labels later in Edit captions" : "Off"}
+                    onPress={() => setCurrentStep("robots")}
                   />
                 </View>
 
@@ -1468,6 +1502,9 @@ export default function HomeScreen() {
 
         {currentStep === "status" ? (
           <>
+            <ThemedText style={styles.supportingText}>
+              Speaker labels requested: {lastRequestedIncludeSpeakers ? "On" : "Off"}. This request does not confirm generated labels. Name discovered labels in Edit captions.
+            </ThemedText>
             {uploadError ? (
               <View style={styles.errorCard}>
                 <View style={styles.errorIcon}>
