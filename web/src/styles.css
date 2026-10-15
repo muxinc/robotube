@@ -308,6 +308,9 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
 .translation-fieldset legend { padding: 0 7px; color: var(--ink); display: inline-flex; align-items: center; gap: 7px; }
 .translation-fieldset legend svg { color: var(--pink-deep); }
 .translation-fieldset p { margin: 7px 0 14px; color: var(--muted); font-size: 13px; }
+.speaker-upload-option label { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+.speaker-upload-option input { width: 18px; height: 18px; accent-color: var(--pink-deep); }
+.speaker-upload-option p { margin-bottom: 0; }
 .chip-list button { min-height: 36px; padding: 0 12px; border: 1px solid #dbe2ec; border-radius: 999px; background: #fff; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; cursor: pointer; }
 .chip-list button.selected { border-color: #ffafd9; color: #a72a74; background: #fff0f8; }
 .chip-list button:disabled { opacity: .65; cursor: not-allowed; }

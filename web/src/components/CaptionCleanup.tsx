@@ -449,6 +449,17 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
                     {autoCensor ? <label>Profanity mode<select value={censorMode} onChange={(event) => { const mode = event.target.value; if (mode === "blank" || mode === "remove" || mode === "mask") setCensorMode(mode); }}><option value="blank">Blank — bracketed underscores</option><option value="remove">Remove — delete profanity</option><option value="mask">Mask — question marks</option></select></label> : null}
                   </fieldset>
 
+                  <fieldset className="caption-section caption-rules" disabled={formDisabled}>
+                    <legend>Speaker names</legend>
+                    <p>Assign names to the speaker labels discovered in this transcript. Only labels at the start of cues are renamed; spoken mentions are unchanged. Enter names without brackets.</p>
+                    {loadingTranscript ? <p>Loading speaker labels…</p> : transcriptCurrent && !labels.length ? <p>The current caption track has no speaker labels. For future uploads, enable Include speaker labels. Labels do not automatically identify real people.</p> : null}
+                    <label>Transcript speaker<select value={speaker} onChange={(event) => setSpeaker(event.target.value)}><option value="">Choose speaker</option>{labels.map((label) => <option key={label} value={label}>{label}</option>)}</select></label>
+                    <label>New speaker name<input value={speakerName} onChange={(event) => setSpeakerName(event.target.value)} maxLength={200} /></label>
+                    <button className="button button--outline" type="button" onClick={queueSpeaker} disabled={!labels.length}>Queue speaker rename</button>
+                    <button className="button button--outline" type="button" onClick={() => setSpeakerName("")}>Clear name</button>
+                    <ul>{speakers.map((rule, index) => <li key={rule.find}>{rule.find} → {rule.replace} <button type="button" aria-label={`Remove rename for ${rule.find}`} onClick={() => setSpeakers((current) => current.filter((_, i) => i !== index))}>Remove</button></li>)}</ul>
+                  </fieldset>
+
                   <section className="caption-section" aria-label="Caption transcript">
                     <h3>Transcript</h3>
                     <p>Select a word or phrase in the transcript to correct it, or use a caption’s Correct wording button and narrow the phrase. Every text correction applies everywhere in the track, not just at one timestamp.</p>
@@ -484,16 +495,6 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
                     <button className="button button--outline" type="button" onClick={queueCorrection} disabled={!find}>Queue correction</button>
                     <button className="button button--outline" type="button" onClick={() => { setFind(""); setReplacement(""); }}>Clear wording</button>
                     <ul>{replacements.map((rule, index) => <li key={index}>“{rule.find}” → {rule.replace ? `“${rule.replace}”` : "(delete)"} · {rule.caseSensitive ? "case-sensitive" : "any case"} <button type="button" aria-label={`Remove correction ${index + 1}`} onClick={() => setReplacements((current) => current.filter((_, i) => i !== index))}>Remove</button></li>)}</ul>
-                  </fieldset>
-                  <fieldset className="caption-section caption-rules" disabled={formDisabled}>
-                    <legend>Rename leading bracketed speakers</legend>
-                    <p>Only labels at the start of cues are renamed; spoken mentions are unchanged. Enter names without brackets.</p>
-                    {!labels.length ? <p>No leading bracketed speaker labels found.</p> : null}
-                    <label>Transcript speaker<select value={speaker} onChange={(event) => setSpeaker(event.target.value)}><option value="">Choose speaker</option>{labels.map((label) => <option key={label} value={label}>{label}</option>)}</select></label>
-                    <label>New speaker name<input value={speakerName} onChange={(event) => setSpeakerName(event.target.value)} maxLength={200} /></label>
-                    <button className="button button--outline" type="button" onClick={queueSpeaker}>Queue speaker rename</button>
-                    <button className="button button--outline" type="button" onClick={() => setSpeakerName("")}>Clear name</button>
-                    <ul>{speakers.map((rule, index) => <li key={rule.find}>{rule.find} → {rule.replace} <button type="button" aria-label={`Remove rename for ${rule.find}`} onClick={() => setSpeakers((current) => current.filter((_, i) => i !== index))}>Remove</button></li>)}</ul>
                   </fieldset>
                   {errors.form ? <p className="caption-form-message caption-form-message--error" role="alert">{errors.form}</p> : null}
                 </form>

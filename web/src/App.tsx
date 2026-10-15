@@ -1236,6 +1236,16 @@ function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [audioLanguages, setAudioLanguages] = useState<string[]>([]);
   const [captionLanguages, setCaptionLanguages] = useState<string[]>([]);
+  const [includeSpeakers, setIncludeSpeakers] = useState(() => {
+    try { return sessionStorage.getItem("robotube-upload-include-speakers") === "true"; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    try { sessionStorage.setItem("robotube-upload-include-speakers", String(includeSpeakers)); }
+    catch { /* Upload options still work when browser storage is unavailable. */ }
+  }, [includeSpeakers]);
+  const [submittedIncludeSpeakers, setSubmittedIncludeSpeakers] = useState<boolean | null>(null);
+  const [uploadIssued, setUploadIssued] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [openingCamera, setOpeningCamera] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -1375,6 +1385,8 @@ function UploadPage() {
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim() || !file || uploading || uploadId) return;
+    const requestedIncludeSpeakers = includeSpeakers;
+    setSubmittedIncludeSpeakers(requestedIncludeSpeakers);
     setUploading(true);
     setError(null);
     setUploadId(null);
@@ -1383,9 +1395,11 @@ function UploadPage() {
     try {
       const result = (await createUpload({
         title: title.trim(),
+        includeSpeakers: requestedIncludeSpeakers,
         audioTranslationLanguageCodes: audioLanguages,
         captionTranslationLanguageCodes: captionLanguages,
       })) as { uploadId: string; uploadUrl: string };
+      setUploadIssued(true);
       setProgress(10);
       setStatusText("Uploading your video…");
       await uploadFileWithProgress(result.uploadUrl, file, (fraction) =>
@@ -1409,6 +1423,9 @@ function UploadPage() {
     setFile(null);
     setAudioLanguages([]);
     setCaptionLanguages([]);
+    setIncludeSpeakers(false);
+    setSubmittedIncludeSpeakers(null);
+    setUploadIssued(false);
     setProgress(0);
     setStatusText("Choose a video to begin.");
     setError(null);
@@ -1557,6 +1574,20 @@ function UploadPage() {
             required
           />
         </label>
+        <fieldset className="translation-fieldset speaker-upload-option">
+          <legend>Caption options</legend>
+          <label>
+            <input
+              type="checkbox"
+              checked={includeSpeakers}
+              disabled={uploading || uploadIssued || Boolean(uploadId)}
+              onChange={(event) => setIncludeSpeakers(event.target.checked)}
+              aria-describedby="speaker-upload-help"
+            />
+            Include speaker labels
+          </label>
+          <p id="speaker-upload-help">Request labels like speaker_0 in captions. This does not identify real people. You can assign real names later in Edit captions.</p>
+        </fieldset>
         <div className="translation-grid">
           <fieldset className="translation-fieldset">
             <legend>
@@ -1636,6 +1667,9 @@ function UploadPage() {
               {statusText}
             </p>
           </div>
+        ) : null}
+        {submittedIncludeSpeakers !== null ? (
+          <p role="status">Speaker labels requested: {submittedIncludeSpeakers ? "On" : "Off"}. This is the submitted setting, not confirmation that labels exist. Review the actual track in Edit captions.</p>
         ) : null}
         {pipeline?.jobs?.length ? <UploadPipelineJobs jobs={pipeline.jobs} /> : null}
         {pipeline?.muxAssetId ? (
