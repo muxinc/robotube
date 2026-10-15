@@ -1,7 +1,29 @@
 import { v } from "convex/values";
-import { internalMutation } from "./_generated/server";
+import { internalMutation, internalQuery } from "./_generated/server";
 import { components, internal } from "./_generated/api";
 import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
+
+/** Webhooks are wakeups only: identity comes from durable app state. */
+export const getReconciliationContextInternal = internalQuery({
+  args: { muxAssetId: v.string(), userId: v.optional(v.string()), jobId: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const claim = await ctx.db.query("captionDirectiveClaims").withIndex("by_asset", q => q.eq("muxAssetId", args.muxAssetId)).unique();
+    const userId = claim?.userId ?? args.userId;
+    if (!userId) return null;
+    const cache = await ctx.runQuery(internal.muxAssetCache.getByMuxAssetIdInternal, { muxAssetId: args.muxAssetId });
+    const video: any = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, { muxAssetId: args.muxAssetId, userId });
+    const metadata = (Array.isArray(video?.metadata) ? video.metadata[0] : video?.metadata) ?? {};
+    const custom = metadata.custom ?? {};
+    if (cache?.isDeleted || !video?.asset || metadata.userId !== userId || custom.moderationPassed !== true || typeof custom.moderationCheckedAtMs !== "number") return null;
+    if (claim) {
+      if (!claim.runId || claim.includeSpeakers !== custom.includeSpeakers) return null;
+      return { kind: "directive" as const, muxAssetId: claim.muxAssetId, userId: claim.userId, runId: claim.runId };
+    }
+    // Preserve legacy synchronization only for the application's stored job.
+    if (typeof custom.includeSpeakers === "boolean" || !args.jobId || custom.aiCaptionsJobId !== args.jobId) return null;
+    return { kind: "legacy" as const, muxAssetId: args.muxAssetId, userId };
+  },
+});
 
 export const claimInternal = internalMutation({
   args: { muxAssetId: v.string(), userId: v.string(), directiveId: v.optional(v.string()), includeSpeakers: v.boolean() },

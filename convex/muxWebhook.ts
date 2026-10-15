@@ -252,15 +252,24 @@ export const ingestMuxWebhook = internalAction({
       }
 
       if (workflow === "generate-premium-captions") {
-        if (!muxAssetId || !userId) {
-          return { skipped: true, reason: "missing_robot_job_context" };
+        if (!muxAssetId) return { skipped: true, reason: "missing_robot_job_context" };
+        const context = await ctx.runQuery((internal as any).captionDirectives.getReconciliationContextInternal, {
+          muxAssetId, userId, jobId: objectId,
+        });
+        if (!context) return { skipped: true, reason: "missing_robot_job_context" };
+        if (context.kind === "directive") {
+          // Directive jobs need no app passthrough. Ignore event job/output
+          // fields and reconcile only the run pinned to this owned asset.
+          await ctx.scheduler.runAfter(0, (internal as any).captions.ensureGeneratedCaptionsTrackInternal, {
+            muxAssetId: context.muxAssetId, userId: context.userId, attempt: 0,
+          });
+        } else {
+          await ctx.scheduler.runAfter(
+            0,
+            (internal as any).captions.syncPremiumCaptionsJobInternal,
+            { muxAssetId: context.muxAssetId, userId: context.userId, job: data },
+          );
         }
-
-        await ctx.scheduler.runAfter(
-          0,
-          (internal as any).captions.syncPremiumCaptionsJobInternal,
-          { muxAssetId, userId, job: data },
-        );
         return { skipped: false, reason: "robots_premium_captions_event" };
       }
 

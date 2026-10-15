@@ -6,7 +6,7 @@ import { getFunctionName } from "convex/server";
 import { after, test } from "node:test";
 
 const hooks = registerHooks({ resolve(specifier, context, next) {
-  if (specifier === "@mux/mux-node") return { url: 'data:text/javascript,export default class Mux { video = { assets: { retrieve: async () => globalThis.__recoveryAsset, list: async function* () { yield globalThis.__recoveryAsset; } } }; }', shortCircuit: true };
+  if (specifier === "@mux/mux-node") return { url: 'data:text/javascript,export default class Mux { webhooks = { unwrap: raw => JSON.parse(raw) }; video = { assets: { retrieve: async () => { if (globalThis.__recoveryRetrieveError) throw new Error("temporary SDK asset retrieval failure"); return globalThis.__recoveryAsset; }, list: async function* () { yield globalThis.__recoveryAsset; } } }; }', shortCircuit: true };
   if (specifier.startsWith(".") && context.parentURL?.includes("/convex/")) {
     for (const ext of [".ts", ".js"]) {
       const url = new URL(specifier + ext, context.parentURL);
@@ -20,6 +20,7 @@ const { ensureGeneratedCaptionsTrackInternal, syncPremiumCaptionsJobInternal } =
 const { backfillRequestedTranslationTracksForReadyAssets } = await import("../convex/migrations.ts");
 const { ensureAiMetadataForAssetInternal } = await import("../convex/aiMetadata.ts");
 const { decodeUploadCustom } = await import("../convex/uploadPassthrough.ts");
+const { ingestMuxWebhook } = await import("../convex/muxWebhook.ts");
 after(() => hooks.deregister());
 
 function fixture(includeSpeakers = true) {
@@ -47,7 +48,11 @@ function fixture(includeSpeakers = true) {
   }) as any;
   const ctx: any = {
     async runQuery(_ref: any, args: any) {
-      return args.userId ? { asset: structuredClone(state.asset), metadata: { userId: "owner", custom: structuredClone(state.custom) } } : {};
+      let name = "component";
+      try { name = getFunctionName(_ref); } catch {}
+      if (name.startsWith("captionDirectives:")) return await (directives as any)[name.split(":")[1]]._handler(ctx, args);
+      if (name === "muxAssetCache:getByMuxAssetIdInternal") return { isDeleted: state.deleted === true };
+      return args.userId ? { asset: structuredClone(state.asset), metadata: { userId: state.metadataOwner ?? "owner", custom: structuredClone(state.custom) } } : {};
     },
     db: {
       query() { return { withIndex() { return { async unique() { return structuredClone(state.claim); } }; } }; },
@@ -65,7 +70,7 @@ function fixture(includeSpeakers = true) {
     },
     scheduler: { async runAfter(_delay: any, ref: any, args: any) { state.schedules.push({ name: getFunctionName(ref), args }); } },
   };
-  return { state, ctx, ensure: (attempt = 0) => (ensureGeneratedCaptionsTrackInternal as any)._handler(ctx, { muxAssetId: "asset", userId: "owner", attempt }), restore() { globalThis.fetch = oldFetch; delete (globalThis as any).__recoveryAsset; } };
+  return { state, ctx, ensure: (attempt = 0) => (ensureGeneratedCaptionsTrackInternal as any)._handler(ctx, { muxAssetId: "asset", userId: "owner", attempt }), restore() { globalThis.fetch = oldFetch; delete (globalThis as any).__recoveryAsset; delete (globalThis as any).__recoveryRetrieveError; } };
 }
 
 test("delayed generation cannot overwrite finalized captions or an advanced edit revision", async () => {
@@ -127,6 +132,120 @@ for (const pending of ["job", "track", "http"]) {
       assert.equal(f.state.custom.aiCaptionsLastError, null);
       assert.equal(f.state.custom.aiCaptionsFailedAtMs, null);
       assert.equal(f.state.requests.some((s: string) => s.startsWith("POST")), false);
+    } finally { f.restore(); }
+  });
+}
+
+test("last-attempt SDK retrieval failure permits late same-run recovery", async () => {
+  const f = fixture();
+  try {
+    (globalThis as any).__recoveryRetrieveError = true;
+    await f.ensure(9);
+    assert.match(f.state.custom.aiCaptionsLastError, /SDK asset retrieval/);
+    assert.equal(f.state.custom.aiCaptionsPollingTimedOut, true);
+    delete (globalThis as any).__recoveryRetrieveError;
+    await f.ensure();
+    assert.equal(f.state.custom.aiCaptionsTrackId, "original");
+    assert.equal(f.state.custom.aiCaptionsUnavailableReason, null);
+    assert.equal(f.state.requests.some((s: string) => s.startsWith("POST")), false);
+  } finally { f.restore(); }
+});
+
+test("legacy completed premium job preparing at exhaustion still recovers when ready", async () => {
+  const f = fixture();
+  delete f.state.custom.includeSpeakers;
+  f.state.custom.aiCaptionsJobId = "job";
+  f.state.claim = null;
+  f.state.asset.tracks[0].status = "preparing";
+  try {
+    await f.ensure(9);
+    assert.equal(f.state.custom.aiCaptionsTrackId, undefined);
+    f.state.asset.tracks[0].status = "ready";
+    await f.ensure();
+    assert.equal(f.state.custom.aiCaptionsTrackId, "original");
+    assert.equal(f.state.custom.aiCaptionsUnavailableReason, null);
+    assert.equal(f.state.requests.some((s: string) => s.startsWith("POST")), false);
+  } finally { f.restore(); }
+});
+
+for (const status of ["completed", "errored"]) {
+  test(`actual webhook ingress reconciles claimed directive ${status} job without user passthrough`, async () => {
+    const f = fixture();
+    process.env.MUX_WEBHOOK_SECRET = "test";
+    f.state.custom.aiCaptionsPollingTimedOut = true;
+    f.state.custom.aiCaptionsUnavailableReason = "polling timed out";
+    f.state.job.status = status;
+    if (status === "errored") f.state.job.errors = [{ message: "premium generation failed" }];
+    try {
+      const event = { type: `robots.job.generate_premium_captions.${status}`, data: f.state.job };
+      const result = await (ingestMuxWebhook as any)._handler(f.ctx, { rawBody: JSON.stringify(event), headers: {} });
+      assert.equal(result.skipped, false);
+      const scheduled = f.state.schedules.find((row: any) => row.name === "captions:ensureGeneratedCaptionsTrackInternal");
+      assert.ok(scheduled);
+      assert.deepEqual(scheduled.args, { muxAssetId: "asset", userId: "owner", attempt: 0 });
+      await (ensureGeneratedCaptionsTrackInternal as any)._handler(f.ctx, scheduled.args);
+      if (status === "completed") assert.equal(f.state.custom.aiCaptionsTrackId, "original");
+      else assert.match(f.state.custom.aiCaptionsUnavailableReason, /premium generation failed/);
+      assert.equal(f.state.requests.some((s: string) => s.startsWith("POST")), false);
+    } finally { f.restore(); }
+  });
+}
+
+test("directive webhook identifiers are only a wakeup; canonical run and owner win", async () => {
+  const f = fixture();
+  process.env.MUX_WEBHOOK_SECRET = "test";
+  try {
+    const event = { type: "robots.job.generate_premium_captions.completed", data: {
+      ...f.state.job, id: "unrelated-event-job", passthrough: { userId: "attacker" }, outputs: { track_id: "forged" },
+    } };
+    await (ingestMuxWebhook as any)._handler(f.ctx, { rawBody: JSON.stringify(event), headers: {} });
+    const scheduled = f.state.schedules[0];
+    assert.deepEqual(scheduled.args, { muxAssetId: "asset", userId: "owner", attempt: 0 });
+    await (ensureGeneratedCaptionsTrackInternal as any)._handler(f.ctx, scheduled.args);
+    assert.equal(f.state.custom.aiCaptionsJobId, "job");
+    assert.equal(f.state.custom.aiCaptionsTrackId, "original");
+    assert.equal(f.state.requests.some((s: string) => s.includes("unrelated-event-job")), false);
+  } finally { f.restore(); }
+});
+
+for (const jobId of ["job", "unrelated-job"]) {
+  test(`actual legacy webhook sync requires durable matching job identity: ${jobId}`, async () => {
+    const f = fixture();
+    process.env.MUX_WEBHOOK_SECRET = "test";
+    f.state.claim = null;
+    delete f.state.custom.includeSpeakers;
+    f.state.custom.aiCaptionsJobId = "job";
+    try {
+      const event = { type: "robots.job.generate_premium_captions.completed", data: { ...f.state.job, id: jobId, passthrough: { userId: "owner" } } };
+      const result = await (ingestMuxWebhook as any)._handler(f.ctx, { rawBody: JSON.stringify(event), headers: {} });
+      assert.equal(result.skipped, jobId !== "job");
+      assert.equal(f.state.schedules.length, jobId === "job" ? 1 : 0);
+      if (jobId === "job") {
+        assert.equal(f.state.schedules[0].name, "captions:syncPremiumCaptionsJobInternal");
+        await (syncPremiumCaptionsJobInternal as any)._handler(f.ctx, f.state.schedules[0].args);
+        assert.equal(f.state.custom.aiCaptionsJobId, "job");
+      }
+    } finally { f.restore(); }
+  });
+}
+
+for (const condition of ["no_claim", "no_run", "deleted", "moderation_pending", "moderation_rejected", "wrong_owner", "changed_choice"]) {
+  test(`webhook without user context cannot bypass trusted claim guard: ${condition}`, async () => {
+    const f = fixture();
+    process.env.MUX_WEBHOOK_SECRET = "test";
+    if (condition === "no_claim") f.state.claim = null;
+    if (condition === "no_run") delete f.state.claim.runId;
+    if (condition === "deleted") f.state.deleted = true;
+    if (condition === "moderation_pending") delete f.state.custom.moderationCheckedAtMs;
+    if (condition === "moderation_rejected") f.state.custom.moderationPassed = false;
+    if (condition === "wrong_owner") f.state.metadataOwner = "different-owner";
+    if (condition === "changed_choice") f.state.custom.includeSpeakers = false;
+    try {
+      const event = { type: "robots.job.generate_premium_captions.completed", data: f.state.job };
+      const result = await (ingestMuxWebhook as any)._handler(f.ctx, { rawBody: JSON.stringify(event), headers: {} });
+      assert.equal(result.skipped, true);
+      assert.equal(f.state.schedules.length, 0);
+      assert.equal(f.state.writes.length, 0);
     } finally { f.restore(); }
   });
 }

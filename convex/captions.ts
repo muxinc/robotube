@@ -486,6 +486,12 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
 
     let hasClaimedDirectiveRun = false;
     try {
+      if (typeof custom.includeSpeakers === "boolean") {
+        const context = await ctx.runQuery((internal as any).captionDirectives.getReconciliationContextInternal, {
+          muxAssetId: args.muxAssetId,
+        });
+        hasClaimedDirectiveRun = context?.kind === "directive";
+      }
       const asset = await mux.video.assets.retrieve(args.muxAssetId);
       if (asset.status !== "ready") {
         const shouldRetry = nextAttempt < MAX_ATTEMPTS;
@@ -578,7 +584,7 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
           const shouldRetry = nextAttempt < MAX_ATTEMPTS;
           await upsertCaptionMetadataFields(ctx, args, {
             aiCaptionsRetryScheduled: shouldRetry,
-            ...(!shouldRetry ? { aiCaptionsUnavailableReason: "Premium captions polling timed out.", aiCaptionsPollingTimedOut: directiveMode } : {}),
+            ...(!shouldRetry && directiveMode ? { aiCaptionsUnavailableReason: "Premium captions polling timed out.", aiCaptionsPollingTimedOut: true } : {}),
           });
           if (shouldRetry) {
             await ctx.scheduler.runAfter(
@@ -683,7 +689,7 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
         const shouldRetry = nextAttempt < MAX_ATTEMPTS;
         await upsertCaptionMetadataFields(ctx, args, {
           aiCaptionsRetryScheduled: shouldRetry,
-          ...(!shouldRetry ? { aiCaptionsUnavailableReason: "Premium caption output track readiness timed out.", aiCaptionsPollingTimedOut: directiveMode } : {}),
+          ...(!shouldRetry && directiveMode ? { aiCaptionsUnavailableReason: "Premium caption output track readiness timed out.", aiCaptionsPollingTimedOut: true } : {}),
         });
         if (shouldRetry) {
           await ctx.scheduler.runAfter(
