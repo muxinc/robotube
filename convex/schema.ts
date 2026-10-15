@@ -4,6 +4,11 @@ import { v } from "convex/values";
 
 export default defineSchema({
   ...authTables,
+  captionDirectiveClaims: defineTable({
+    muxAssetId: v.string(), userId: v.string(), directiveId: v.string(),
+    includeSpeakers: v.boolean(), runId: v.optional(v.string()),
+    createdAtMs: v.number(),
+  }).index("by_asset", ["muxAssetId"]),
   users: defineTable({
     name: v.optional(v.string()),
     image: v.optional(v.string()),

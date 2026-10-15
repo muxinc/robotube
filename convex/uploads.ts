@@ -10,6 +10,7 @@ import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-trans
 import { components, internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import { selectCaptionDirectiveId } from "./captionDirectivesConfig";
 
 function requiredEnv(name: string, value: string | undefined): string {
   if (!value) throw new Error(`Missing env var: ${name}`);
@@ -71,7 +72,11 @@ function parseMetadataPassthrough(passthrough: unknown): {
       description: asString(parsedObj.description),
       tags: asStringArray(parsedObj.tags),
       visibility: asVisibility(parsedObj.visibility),
-      custom: asRecord(parsedObj.custom),
+      custom: parsedObj.v === 1 ? {
+        ...asRecord(parsedObj.custom),
+        audioTranslationLanguageCodes: normalizeAudioTranslationLanguageCodes(asStringArray(parsedObj.a) ?? []),
+        captionTranslationLanguageCodes: normalizeAudioTranslationLanguageCodes(asStringArray(parsedObj.c) ?? []),
+      } : asRecord(parsedObj.custom),
       audioTranslationLanguageCodes: normalizeAudioTranslationLanguageCodes(
         asStringArray(asRecord(parsedObj.custom)?.audioTranslationLanguageCodes) ?? [],
       ),
@@ -114,6 +119,7 @@ export const createMuxDirectUpload = action({
       throw new Error("You must be signed in to upload videos.");
     }
 
+    selectCaptionDirectiveId(args.includeSpeakers ?? false, process.env);
     const mux = createMuxClient();
     const userId = authUserId;
     const title = args.title?.trim() || undefined;
@@ -137,16 +143,21 @@ export const createMuxDirectUpload = action({
     const muxReferenceId = `rt-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
     const passthrough = JSON.stringify({
       userId,
+      v: 1,
+      a: audioTranslationLanguageCodes,
+      c: captionTranslationLanguageCodes,
       // Upload and process privately. The uploader explicitly publishes after
       // reviewing the generated Mux Robots metadata draft.
       visibility: "private",
       custom: {
         awaitingMetadataReview: true,
-        audioTranslationLanguageCodes,
-        captionTranslationLanguageCodes,
+        includeSpeakers: args.includeSpeakers ?? false,
       },
     });
 
+    if (passthrough.length > 255) {
+      throw new Error("Upload options exceed Mux's 255-character passthrough limit. Reduce translation languages.");
+    }
     const upload = await mux.video.uploads.create({
       cors_origin: "*",
       new_asset_settings: {

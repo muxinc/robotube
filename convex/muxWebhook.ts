@@ -57,7 +57,11 @@ function parseMetadataPassthrough(passthrough: unknown): {
     const parsed = JSON.parse(raw);
     const parsedObj = asRecord(parsed);
     if (!parsedObj) return { userId: raw };
-    const custom = asRecord(parsedObj.custom);
+    const custom = parsedObj.v === 1 ? {
+      ...asRecord(parsedObj.custom),
+      audioTranslationLanguageCodes: normalizeAudioTranslationLanguageCodes(asStringArray(parsedObj.a) ?? []),
+      captionTranslationLanguageCodes: normalizeAudioTranslationLanguageCodes(asStringArray(parsedObj.c) ?? []),
+    } : asRecord(parsedObj.custom);
     const audioLanguageCodes = asStringArray(
       custom?.audioTranslationLanguageCodes,
     );

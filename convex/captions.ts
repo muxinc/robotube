@@ -6,6 +6,7 @@ import { v } from "convex/values";
 import { components, internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import { selectCaptionDirectiveId } from "./captionDirectivesConfig";
 import {
   buildMuxPremiumCaptionsRequest,
   createMuxPremiumCaptionsJob,
@@ -279,8 +280,16 @@ async function upsertCaptionMetadataFields(
     muxAssetId: args.muxAssetId,
     userId: args.userId,
   });
+  const cache = await ctx.runQuery((internal as any).muxAssetCache.getByMuxAssetIdInternal, { muxAssetId: args.muxAssetId });
+  if (cache?.isDeleted || !latestVideo?.asset) return {};
   const latestMetadata = getMetadataRecord(latestVideo?.metadata);
+  if (latestMetadata.userId !== args.userId) return {};
   const latestCustom = asCustomRecord(latestMetadata.custom);
+  if (typeof latestCustom.includeSpeakers === "boolean") {
+    return await ctx.runMutation((internal as any).captionDirectives.updateMetadataInternal, {
+      muxAssetId: args.muxAssetId, userId: args.userId, fields: customFields,
+    });
+  }
   const nextCustom = {
     ...latestCustom,
     ...customFields,
@@ -359,6 +368,11 @@ export const syncPremiumCaptionsJobInternal = internalAction({
     job: v.any(),
   },
   handler: async (ctx, args) => {
+    const video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, { muxAssetId: args.muxAssetId, userId: args.userId });
+    if (typeof asCustomRecord(getMetadataRecord(video?.metadata).custom).includeSpeakers === "boolean") {
+      await ctx.scheduler.runAfter(0, (internal as any).captions.ensureGeneratedCaptionsTrackInternal, { muxAssetId: args.muxAssetId, userId: args.userId });
+      return { ok: true, skipped: true, reason: "directive_poll_owned" };
+    }
     const job = parseMuxPremiumCaptionsJob(args.job);
     const result = await applyPremiumCaptionsJobUpdate(ctx, args, job);
 
@@ -493,19 +507,63 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
       }
 
       let premiumJob: MuxPremiumCaptionsJob | undefined;
-      const existingPremiumJobId = asString(custom.aiCaptionsJobId);
+      const directiveMode = typeof custom.includeSpeakers === "boolean";
+      let directiveJobId: string | undefined;
+      if (directiveMode) {
+        const claim: any = await ctx.runMutation((internal as any).captionDirectives.claimInternal, {
+          muxAssetId: args.muxAssetId, userId: args.userId,
+          includeSpeakers: custom.includeSpeakers,
+          directiveId: selectCaptionDirectiveId(custom.includeSpeakers as boolean, process.env),
+        });
+        if (!claim) return { ok: true, skipped: true, reason: "asset_not_owned_or_deleted" };
+        const url = `https://api.mux.com/robots/v0/directives/${encodeURIComponent(claim.directiveId)}/runs`;
+        let runId = claim.runId;
+        if (claim.acquired) {
+          // The claim is permanent: an ambiguous POST must never be reposted.
+          const response = await fetch(url, {
+            method: "POST", signal: AbortSignal.timeout(60_000), headers: { Authorization: createMuxBasicAuthHeader(), "Content-Type": "application/json" },
+            body: JSON.stringify({ asset_id: args.muxAssetId }),
+          });
+          if (!response.ok) throw new MuxPremiumCaptionsHttpError(response.status, `Caption Directive submission: ${await response.text()}. Manual reconciliation required; no automatic resubmission.`);
+          runId = (await response.json()).data?.run_id;
+          if (!runId) throw new Error("Caption Directive returned no run_id; manual reconciliation required.");
+          await ctx.runMutation((internal as any).captionDirectives.recordRunInternal, { claimId: claim._id, runId });
+        }
+        if (runId) {
+          const response = await fetch(`${url}/${encodeURIComponent(runId)}`, { signal: AbortSignal.timeout(60_000), headers: { Authorization: createMuxBasicAuthHeader() } });
+          if (!response.ok) throw new Error(`Caption Directive polling failed (${response.status}).`);
+          const run = (await response.json()).data;
+          const node = run?.node_states?.find((item: any) => item.reference_id === "premium_captions");
+          if (node?.status === "failed" || ["partial", "errored"].includes(run?.status)) {
+            const message = node?.reason || `Caption Directive ${run.status}`;
+            await upsertCaptionMetadataFields(ctx, args, { aiCaptionsUnavailableReason: message, aiCaptionsLastError: message, aiCaptionsRetryScheduled: false });
+            return { ok: false, error: message };
+          }
+          directiveJobId = node?.job_id;
+          await upsertCaptionMetadataFields(ctx, args, { aiCaptionsDirectiveId: claim.directiveId, aiCaptionsDirectiveRunId: runId });
+        }
+        if (!directiveJobId) throw new Error(runId ? "Caption Directive awaiting premium job." : "Caption Directive submission outcome unknown; manual reconciliation required.");
+      }
+      if (directiveMode && asString(custom.aiCaptionsJobId) && custom.aiCaptionsJobId !== directiveJobId) {
+        return { ok: true, skipped: true, reason: "job_replaced" };
+      }
+      const existingPremiumJobId = directiveJobId ?? asString(custom.aiCaptionsJobId);
       if (existingPremiumJobId) {
         premiumJob = await getMuxPremiumCaptionsJob(
           fetch,
           `${PREMIUM_CAPTIONS_API_URL}/${existingPremiumJobId}`,
           createMuxBasicAuthHeader(),
         );
+        if (directiveMode && asCustomRecord(premiumJob.parameters).asset_id !== args.muxAssetId) {
+          throw new Error("Caption Directive premium job asset does not match the claimed asset.");
+        }
         await applyPremiumCaptionsJobUpdate(ctx, args, premiumJob);
 
         if (isActiveMuxRobotsJobStatus(premiumJob.status)) {
           const shouldRetry = nextAttempt < MAX_ATTEMPTS;
           await upsertCaptionMetadataFields(ctx, args, {
             aiCaptionsRetryScheduled: shouldRetry,
+            ...(!shouldRetry ? { aiCaptionsUnavailableReason: "Premium captions polling timed out." } : {}),
           });
           if (shouldRetry) {
             await ctx.scheduler.runAfter(
@@ -537,13 +595,12 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
         }
       }
 
-      const preferredPremiumTrackId =
-        asString(premiumJob?.outputs?.track_id) ??
-        asString(custom.aiCaptionsPremiumTrackId);
-      const sourceCaptionsTrack = findSourceCaptionsTrack(
-        asset,
-        preferredPremiumTrackId,
-      );
+      const preferredPremiumTrackId = directiveMode
+        ? asString(premiumJob?.outputs?.track_id)
+        : asString(premiumJob?.outputs?.track_id) ?? asString(custom.aiCaptionsPremiumTrackId);
+      const sourceCaptionsTrack = directiveMode
+        ? (asset.tracks ?? []).find((track: any) => track.id === preferredPremiumTrackId && track.type === "text" && track.status === "ready")
+        : findSourceCaptionsTrack(asset, preferredPremiumTrackId);
       if (sourceCaptionsTrack) {
         const detectedLanguageCode = getTrackLanguageCode(sourceCaptionsTrack);
         const captionsReady = sourceCaptionsTrack.status === "ready";
@@ -579,6 +636,7 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
         });
 
         const nextCustom = await upsertCaptionMetadataFields(ctx, args, {
+          ...(existingPremiumJobId ? { aiCaptionsJobId: existingPremiumJobId } : {}),
           aiCaptionsGeneratedAtMs: Date.now(),
           aiCaptionsTrackId: sourceCaptionsTrack.id,
           aiSourceLanguageCode: detectedLanguageCode,
@@ -594,6 +652,7 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
           aiCaptionsUnavailableReason: null,
           aiCaptionsRetryScheduled: false,
         });
+        if (!nextCustom.aiCaptionsGeneratedAtMs) return { ok: true, skipped: true, reason: "asset_not_owned_or_deleted" };
         const scheduledAiMetadata = await maybeScheduleAiMetadataForReadyCaptions(
           ctx,
           args,
@@ -602,10 +661,11 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
         return { ok: true, skipped: false, alreadyExisted: true, scheduledAiMetadata };
       }
 
-      if (premiumJob?.status === "completed") {
+      if (directiveMode || premiumJob?.status === "completed") {
         const shouldRetry = nextAttempt < MAX_ATTEMPTS;
         await upsertCaptionMetadataFields(ctx, args, {
           aiCaptionsRetryScheduled: shouldRetry,
+          ...(!shouldRetry ? { aiCaptionsUnavailableReason: "Premium caption output track readiness timed out." } : {}),
         });
         if (shouldRetry) {
           await ctx.scheduler.runAfter(
@@ -692,7 +752,7 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
         aiCaptionsLastError: message,
         aiCaptionsAttemptCount: nextAttempt,
         aiCaptionsRetryScheduled: shouldRetry,
-        ...(retryable ? {} : { aiCaptionsUnavailableReason: message }),
+        ...(!shouldRetry ? { aiCaptionsUnavailableReason: message } : {}),
       });
 
       if (shouldRetry) {
