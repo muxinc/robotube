@@ -2,8 +2,6 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 
-import type { Id } from "./_generated/dataModel";
-
 import { components } from "./_generated/api";
 import { internalQuery, query } from "./_generated/server";
 import {
@@ -16,7 +14,6 @@ import {
   type FeedReadModelAsset,
   type FeedSearchIndexItem,
   type FeedVideoCardItem,
-  DEFAULT_FEED_CHANNEL,
   asFiniteNumber,
   asNonEmptyString,
   asPlainRecord,
@@ -82,7 +79,8 @@ type FeedDetailBuildResult =
       hiddenReason:
         | "not_ready_or_deleted"
         | "no_public_playback"
-        | "private_visibility";
+        | "private_visibility"
+        | "missing_uploader";
     };
 
 const FEED_SCAN_MULTIPLIER = 3;
@@ -137,33 +135,35 @@ async function resolveFeedChannels(
     }),
   );
 
-  return new Map(entries);
+  const channels = new Map<string, FeedChannelInfo>();
+  for (const [userId, channel] of entries) {
+    if (channel) channels.set(userId, channel);
+  }
+  return channels;
 }
 
 async function resolveChannelInfoForUser(
   ctx: any,
   uploaderUserId: string,
   getAvatarUrlOnce: (storageId: string) => Promise<string | null>,
-): Promise<FeedChannelInfo> {
-  try {
-    const uploader = await ctx.db.get(uploaderUserId as Id<"users">);
-    if (!uploader) return DEFAULT_FEED_CHANNEL;
+): Promise<FeedChannelInfo | null> {
+  const userId = ctx.db.normalizeId("users", uploaderUserId);
+  if (!userId) return null;
+  const uploader = await ctx.db.get(userId);
+  if (!uploader) return null;
+  const channelName = deriveChannelNameFromUser(uploader);
+  if (!channelName) return null;
 
-    const avatarStorageId = asNonEmptyString(uploader.avatarStorageId);
-    const storageAvatarUrl = avatarStorageId
-      ? await getAvatarUrlOnce(avatarStorageId)
-      : null;
+  const avatarStorageId = asNonEmptyString(uploader.avatarStorageId);
+  const storageAvatarUrl = avatarStorageId
+    ? await getAvatarUrlOnce(avatarStorageId)
+    : null;
 
-    return {
-      channelName: deriveChannelNameFromUser(uploader),
-      channelAvatarUrl:
-        asNonEmptyString(storageAvatarUrl) ?? asNonEmptyString(uploader.image),
-    };
-  } catch {
-    // Non-user ids (for example the "default" metadata owner) fall back to the
-    // shared channel identity rather than failing the page.
-    return DEFAULT_FEED_CHANNEL;
-  }
+  return {
+    channelName,
+    channelAvatarUrl:
+      asNonEmptyString(storageAvatarUrl) ?? asNonEmptyString(uploader.image),
+  };
 }
 
 /**
@@ -304,9 +304,8 @@ async function buildFeedVideoDetailFromSource(
     ctx,
     metadataUserId ? [metadataUserId] : [],
   );
-  const channelInfo =
-    (metadataUserId ? channels.get(metadataUserId) : undefined) ??
-    DEFAULT_FEED_CHANNEL;
+  const channelInfo = metadataUserId ? channels.get(metadataUserId) : undefined;
+  if (!channelInfo) return { row: null, hiddenReason: "missing_uploader" };
   const channelName = metadata?.custom?.channelName ?? channelInfo.channelName;
 
   return {
@@ -607,6 +606,7 @@ export const getFeedVisibilityDebugStats = query({
     let hiddenNotReadyOrDeleted = 0;
     let hiddenNoPublicPlayback = 0;
     let hiddenPrivateVisibility = 0;
+    let hiddenMissingUploader = 0;
 
     for (const asset of assets) {
       const result = await buildFeedVideoDetail(ctx, asset as any);
@@ -621,6 +621,8 @@ export const getFeedVisibilityDebugStats = query({
         hiddenNoPublicPlayback += 1;
       } else if (result.hiddenReason === "private_visibility") {
         hiddenPrivateVisibility += 1;
+      } else if (result.hiddenReason === "missing_uploader") {
+        hiddenMissingUploader += 1;
       }
     }
 
@@ -630,8 +632,12 @@ export const getFeedVisibilityDebugStats = query({
       hiddenNotReadyOrDeleted,
       hiddenNoPublicPlayback,
       hiddenPrivateVisibility,
+      hiddenMissingUploader,
       hiddenTotal:
-        hiddenNotReadyOrDeleted + hiddenNoPublicPlayback + hiddenPrivateVisibility,
+        hiddenNotReadyOrDeleted +
+        hiddenNoPublicPlayback +
+        hiddenPrivateVisibility +
+        hiddenMissingUploader,
     };
   },
 });

@@ -457,7 +457,14 @@ function getAiMetadataJobStatus(
 
 async function scheduleAiMetadataFallbackPoll(
   ctx: any,
-  args: { muxAssetId: string; userId: string; workflow: AiRobotsWorkflow; jobId: string; attempt: number },
+  args: {
+    muxAssetId: string;
+    userId: string;
+    workflow: AiRobotsWorkflow;
+    jobId: string;
+    attempt: number;
+    forceConvexOwnership?: boolean;
+  },
 ) {
   await ctx.scheduler.runAfter(
     AI_METADATA_FALLBACK_POLL_DELAY_MS,
@@ -713,7 +720,9 @@ async function createGenerateChaptersJob(args: {
       passthrough: args.passthrough,
       parameters: {
         asset_id: args.assetId,
-        from_language_code: args.fromLanguageCode,
+        language_code: args.fromLanguageCode,
+        // Keep titles in English even when the source transcript is another language.
+        output_language_code: "en",
       },
     }),
   });
@@ -1154,7 +1163,12 @@ function asFiniteNumber(value: unknown): number | undefined {
 
 async function scheduleAiMetadataRetry(
   ctx: any,
-  args: { muxAssetId: string; userId: string; attempt: number },
+  args: {
+    muxAssetId: string;
+    userId: string;
+    attempt: number;
+    forceConvexOwnership?: boolean;
+  },
 ) {
   await ctx.scheduler.runAfter(
     getRetryDelayMs(args.attempt),
@@ -1165,7 +1179,12 @@ async function scheduleAiMetadataRetry(
 
 async function applyAiMetadataJobUpdate(
   ctx: any,
-  args: { muxAssetId: string; userId: string; workflow: AiRobotsWorkflow },
+  args: {
+    muxAssetId: string;
+    userId: string;
+    workflow: AiRobotsWorkflow;
+    forceConvexOwnership?: boolean;
+  },
   job: SummarizeJob | GenerateChaptersJob | FindKeyMomentsJob,
 ) {
   const video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
@@ -1287,6 +1306,7 @@ async function applyAiMetadataJobUpdate(
         muxAssetId: args.muxAssetId,
         userId: args.userId,
         attempt: nextOverallAttempt,
+        forceConvexOwnership: args.forceConvexOwnership,
       });
     }
 
@@ -1329,6 +1349,11 @@ async function applyAiMetadataJobUpdate(
           aiChapters: normalizedChapters,
           aiChaptersGeneratedAtMs: Date.now(),
           aiChaptersProvider: "mux",
+          // A regenerated chapter job replaces this Laravel run's old output.
+          // Replaying that run must not undo the regeneration.
+          ...(asFiniteNumber(existingCustom.laravelRunId) !== undefined
+            ? { aiChaptersSupersededLaravelRunId: existingCustom.laravelRunId }
+            : {}),
           aiChaptersAttemptCount:
             currentJobId === chaptersJob.id && currentJobStatus === chaptersJob.status
               ? (asFiniteNumber(existingCustom.aiChaptersAttemptCount) ?? 1)
@@ -1361,6 +1386,7 @@ async function applyAiMetadataJobUpdate(
         muxAssetId: args.muxAssetId,
         userId: args.userId,
         attempt: nextOverallAttempt,
+        forceConvexOwnership: args.forceConvexOwnership,
       });
     }
 
@@ -1425,6 +1451,7 @@ async function applyAiMetadataJobUpdate(
       muxAssetId: args.muxAssetId,
       userId: args.userId,
       attempt: nextOverallAttempt,
+      forceConvexOwnership: args.forceConvexOwnership,
     });
   }
 
@@ -1552,6 +1579,7 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
     muxAssetId: v.string(),
     userId: v.string(),
     attempt: v.optional(v.number()),
+    forceConvexOwnership: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<GenerateSummaryAndTagsResult> => {
     // Laravel owns the summarize/chapters/key-moments Robots jobs when the flag
@@ -1559,7 +1587,7 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
     // no-op here guarantees Convex creates zero AI-metadata Robots jobs
     // regardless of caller (captions chain, ensure* impl, retries, job-update
     // reschedules, migrations).
-    if (isLaravelOrchestrationEnabled()) {
+    if (isLaravelOrchestrationEnabled() && !args.forceConvexOwnership) {
       console.log(
         `[aiMetadata] generateSummaryAndTagsForAssetInternal skipped for ${args.muxAssetId}: USE_LARAVEL_ORCHESTRATION on`,
       );
@@ -1629,7 +1657,7 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
         return { ok: true, skipped: true, reason: "already_generated" };
       }
 
-      if (isMuxRobotsPollingDisabled()) {
+      if (isMuxRobotsPollingDisabled() && !args.forceConvexOwnership) {
         return { ok: true, skipped: true, reason: "polling_disabled" };
       }
 
@@ -1684,6 +1712,7 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
                   muxAssetId: args.muxAssetId,
                   userId: args.userId,
                   workflow: "summarize",
+                  forceConvexOwnership: args.forceConvexOwnership,
                 },
                 createdJob,
               );
@@ -1694,6 +1723,7 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
                 workflow: "summarize",
                 jobId: summaryJobId,
                 attempt: 0,
+                forceConvexOwnership: args.forceConvexOwnership,
               });
             }
           } else if (summaryJobId && isActiveMuxRobotsJobStatus(summaryJobStatus)) {
@@ -1703,6 +1733,7 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
               workflow: "summarize",
               jobId: summaryJobId,
               attempt: 0,
+              forceConvexOwnership: args.forceConvexOwnership,
             });
           }
         } catch (error) {
@@ -1738,6 +1769,7 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
                   muxAssetId: args.muxAssetId,
                   userId: args.userId,
                   workflow: "generate-chapters",
+                  forceConvexOwnership: args.forceConvexOwnership,
                 },
                 createdJob,
               );
@@ -1748,6 +1780,7 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
                 workflow: "generate-chapters",
                 jobId: chaptersJobId,
                 attempt: 0,
+                forceConvexOwnership: args.forceConvexOwnership,
               });
             }
           } else if (chaptersJobId && isActiveMuxRobotsJobStatus(chaptersJobStatus)) {
@@ -1757,6 +1790,7 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
               workflow: "generate-chapters",
               jobId: chaptersJobId,
               attempt: 0,
+              forceConvexOwnership: args.forceConvexOwnership,
             });
           }
         } catch (error) {
@@ -1794,6 +1828,7 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
                   muxAssetId: args.muxAssetId,
                   userId: args.userId,
                   workflow: "find-key-moments",
+                  forceConvexOwnership: args.forceConvexOwnership,
                 },
                 createdJob,
               );
@@ -1804,6 +1839,7 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
                 workflow: "find-key-moments",
                 jobId: keyMomentsJobId,
                 attempt: 0,
+                forceConvexOwnership: args.forceConvexOwnership,
               });
             }
           } else if (keyMomentsJobId && isActiveMuxRobotsJobStatus(keyMomentsJobStatus)) {
@@ -1813,6 +1849,7 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
               workflow: "find-key-moments",
               jobId: keyMomentsJobId,
               attempt: 0,
+              forceConvexOwnership: args.forceConvexOwnership,
             });
           }
         } catch (error) {
@@ -1860,6 +1897,7 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
               muxAssetId: args.muxAssetId,
               userId: args.userId,
               attempt: nextAttempt,
+              forceConvexOwnership: args.forceConvexOwnership,
             },
           );
         } else {
@@ -1867,6 +1905,7 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
             muxAssetId: args.muxAssetId,
             userId: args.userId,
             attempt: nextAttempt,
+            forceConvexOwnership: args.forceConvexOwnership,
           });
         }
       }
@@ -1923,9 +1962,10 @@ export const pollAiMetadataJobStatusInternal = internalAction({
     ),
     jobId: v.string(),
     attempt: v.optional(v.number()),
+    forceConvexOwnership: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    if (isMuxRobotsPollingDisabled()) {
+    if (isMuxRobotsPollingDisabled() && !args.forceConvexOwnership) {
       return { ok: false, skipped: true, reason: "polling_disabled" };
     }
 
@@ -1968,6 +2008,7 @@ export const pollAiMetadataJobStatusInternal = internalAction({
           workflow: args.workflow,
           jobId: args.jobId,
           attempt: nextAttempt,
+          forceConvexOwnership: args.forceConvexOwnership,
         });
         return { ok: false, skipped: false, retryScheduled: true };
       }
@@ -1989,6 +2030,7 @@ export const pollAiMetadataJobStatusInternal = internalAction({
           muxAssetId: args.muxAssetId,
           userId: args.userId,
           attempt: overallAttempt,
+          forceConvexOwnership: args.forceConvexOwnership,
         });
       }
 

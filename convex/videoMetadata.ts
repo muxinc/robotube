@@ -2,7 +2,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 
 import { components } from "./_generated/api";
-import { mutation } from "./_generated/server";
+import { internalMutation, mutation } from "./_generated/server";
 import { parsePassthroughUserId } from "./feedContracts";
 import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
@@ -49,13 +49,44 @@ function normalizeTags(tags: string[]) {
   return normalized;
 }
 
+/** Apply a reviewed title correction only to the expected generated chapter. */
+export const correctChapterTitleInternal = internalMutation({
+  args: {
+    muxAssetId: v.string(), jobId: v.string(), startTime: v.number(),
+    originalTitle: v.string(), title: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
+      muxAssetId: args.muxAssetId,
+    });
+    const metadata = getMetadataRecord(video?.metadata);
+    const custom = asRecord(metadata.custom) ?? {};
+    const chapters = Array.isArray(custom.aiChapters) ? custom.aiChapters : [];
+    if (custom.aiChaptersJobId !== args.jobId) throw new Error("Chapter job has changed.");
+    const chapter = chapters.find((value) =>
+      value.startTime === args.startTime && value.title === args.originalTitle,
+    );
+    if (!chapter || !args.title.trim()) throw new Error("Chapter title has changed or is empty.");
+    await upsertVideoMetadataAndSyncFeedReadModel(ctx, {
+      muxAssetId: args.muxAssetId,
+      userId: asString(metadata.userId) ?? "default",
+      custom: {
+        ...custom,
+        aiChapters: chapters.map((value) => value === chapter ? { ...value, title: args.title.trim() } : value),
+        aiChaptersEditedAtMs: Date.now(),
+      },
+    });
+    return { ok: true };
+  },
+});
+
 /** Save an uploader's edits to the Mux Robots metadata draft. */
 export const updateOwnVideoMetadata = mutation({
   args: {
     muxAssetId: v.string(),
     title: v.string(),
-    description: v.string(),
-    tags: v.array(v.string()),
+    description: v.optional(v.string()),
+    tags: v.optional(v.array(v.string())),
     publish: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
@@ -86,8 +117,11 @@ export const updateOwnVideoMetadata = mutation({
       throw new Error("This video cannot be published before moderation passes.");
     }
     const title = args.title.trim().slice(0, 120);
-    const description = args.description.trim().slice(0, 500);
-    const tags = normalizeTags(args.tags);
+    // Publishing without editing these fields must preserve generated results,
+    // including results that arrive after publishing. Explicit empty values
+    // still mean the uploader intentionally cleared the draft.
+    const description = args.description?.trim().slice(0, 500);
+    const tags = args.tags === undefined ? undefined : normalizeTags(args.tags);
 
     await upsertVideoMetadataAndSyncFeedReadModel(ctx, {
       muxAssetId: args.muxAssetId,
@@ -102,8 +136,8 @@ export const updateOwnVideoMetadata = mutation({
         // Once the uploader edits the draft, a delayed/replayed Robots sync
         // must not replace those edits with its original suggestions.
         aiUseGeneratedTitle: false,
-        aiUseGeneratedDescription: false,
-        aiUseGeneratedTags: false,
+        ...(args.description !== undefined ? { aiUseGeneratedDescription: false } : {}),
+        ...(args.tags !== undefined ? { aiUseGeneratedTags: false } : {}),
         aiMetadataEditedAtMs: Date.now(),
         ...(args.publish === true
           ? {

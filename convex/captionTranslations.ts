@@ -5,6 +5,7 @@ import {
   normalizeAudioTranslationLanguageCodes,
 } from "../constants/audio-translation-languages";
 import { internalMutation, internalQuery, query } from "./_generated/server";
+import { blocksCaptionEditing } from "./captionEditingWorkflow";
 
 type TranslateCaptionJobStatus =
   | "requested"
@@ -45,6 +46,26 @@ export const listForAsset = query({
   },
 });
 
+export const getRequestedLanguageCodesInternal = internalQuery({
+  args: { muxAssetId: v.string() },
+  handler: async (ctx, args) => {
+    const rows = await (ctx.db as any)
+      .query("captionTranslationJobs")
+      .withIndex("by_asset", (q: any) => q.eq("muxAssetId", args.muxAssetId))
+      .collect();
+    return normalizeAudioTranslationLanguageCodes(rows.map((row: any) => row.languageCode));
+  },
+});
+
+export const getTranslationRowsInternal = internalQuery({
+  args: { muxAssetId: v.string() },
+  handler: async (ctx, args) =>
+    await (ctx.db as any)
+      .query("captionTranslationJobs")
+      .withIndex("by_asset", (q: any) => q.eq("muxAssetId", args.muxAssetId))
+      .collect(),
+});
+
 export const claimRequestedTranslationsInternal = internalMutation({
   args: {
     muxAssetId: v.string(),
@@ -58,6 +79,11 @@ export const claimRequestedTranslationsInternal = internalMutation({
       (languageCode) => languageCode !== args.fromLanguageCode,
     );
     const claimed: Array<{ languageCode: string; shouldCreate: boolean }> = [];
+    const edits = await (ctx.db as any).query("captionEditingJobs")
+      .withIndex("by_asset", (q: any) => q.eq("muxAssetId", args.muxAssetId)).collect();
+    // Reconciliation starts fresh translations only after applying the new source.
+    if (edits.some((row: any) => blocksCaptionEditing(row) && !(row.status === "completed" && row.sourceAppliedAtMs)))
+      return languageCodes.map((languageCode) => ({ languageCode, shouldCreate: false }));
 
     for (const languageCode of languageCodes) {
       const existing = await (ctx.db as any)
@@ -77,6 +103,19 @@ export const claimRequestedTranslationsInternal = internalMutation({
         // Skip if the job is completed and has a track ID
         if (existing.status === "completed" && existing.uploadedTrackId) {
           claimed.push({ languageCode, shouldCreate: false });
+          continue;
+        }
+
+        if (existing.status === "completed" && !existing.uploadedTrackId) {
+          await (ctx.db as any).patch(existing._id, {
+            status: "requested",
+            updatedAtMs: requestedAtMs,
+            errorMessage: undefined,
+            jobId: undefined,
+            temporaryVttUrl: undefined,
+            passthrough: undefined,
+          });
+          claimed.push({ languageCode, shouldCreate: true });
           continue;
         }
 

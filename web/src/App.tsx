@@ -26,6 +26,7 @@ import {
   Languages,
   LogOut,
   Menu,
+  MoreVertical,
   Play,
   Radio,
   Search,
@@ -62,6 +63,13 @@ import {
 } from "react-router-dom";
 
 import { ShortsCard } from "./components/ShortsCard";
+import { RenderErrorBoundary } from "./components/RenderErrorBoundary";
+import {
+  CaptionCleanup,
+  CaptionReviewCard,
+  isCaptionEditActive,
+  useOwnCaptionEditorState,
+} from "./components/CaptionCleanup";
 import { VideoCard } from "./components/VideoCard";
 import { categories } from "./data/categories";
 import { api } from "./lib/convex";
@@ -112,8 +120,37 @@ function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation();
   const [query, setQuery] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [sidebarExpanded, setSidebarExpanded] = useState(() => {
+    try {
+      const saved = localStorage.getItem("robotube:sidebar-expanded");
+      if (saved !== null) return saved === "true";
+    } catch { /* Keep navigation usable when browser storage is unavailable. */ }
+    return !location.pathname.startsWith("/watch/");
+  });
+  const mobileNavToggleRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => setMobileMenuOpen(false), [location.pathname]);
+  useEffect(() => {
+    setMobileMenuOpen(false);
+    setMobileSearchOpen(false);
+  }, [location.pathname]);
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileMenuOpen(false);
+        mobileNavToggleRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [mobileMenuOpen]);
+
+  const toggleSidebar = () => {
+    const next = !sidebarExpanded;
+    setSidebarExpanded(next);
+    try { localStorage.setItem("robotube:sidebar-expanded", String(next)); } catch { /* Optional preference. */ }
+  };
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
@@ -123,12 +160,36 @@ function AppShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${location.pathname === "/" ? " app-shell--home" : ""}${sidebarExpanded ? "" : " app-shell--sidebar-collapsed"}${mobileMenuOpen ? " app-shell--mobile-nav-open" : ""}`}>
       <header className="topbar">
         <div className="topbar__inner">
-          <Link to="/" className="brand" aria-label="RoboTube home">
-            <img src="/images/robotube-logo.png" alt="RoboTube" />
-          </Link>
+          <div className="topbar__brand">
+            <button
+              className="sidebar-toggle sidebar-toggle--desktop"
+              onClick={toggleSidebar}
+              aria-label={sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"}
+              aria-expanded={sidebarExpanded}
+              aria-controls="sidebar-navigation"
+            >
+              <Menu size={22} />
+            </button>
+            <button
+              ref={mobileNavToggleRef}
+              className="sidebar-toggle sidebar-toggle--mobile"
+              onClick={() => {
+                setMobileSearchOpen(false);
+                setMobileMenuOpen((open) => !open);
+              }}
+              aria-label={mobileMenuOpen ? "Close navigation" : "Open navigation"}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="sidebar-navigation"
+            >
+              <Menu size={22} />
+            </button>
+            <Link to="/" className="brand" aria-label="RoboTube home">
+              <img src="/images/robotube-logo.png" alt="RoboTube" />
+            </Link>
+          </div>
 
           <form className="global-search" onSubmit={submitSearch} role="search">
             <Search size={19} aria-hidden="true" />
@@ -154,16 +215,20 @@ function AppShell({ children }: { children: ReactNode }) {
 
           <button
             className="mobile-menu-button"
-            onClick={() => setMobileMenuOpen((open) => !open)}
-            aria-label="Open navigation"
-            aria-expanded={mobileMenuOpen}
+            onClick={() => {
+              setMobileMenuOpen(false);
+              setMobileSearchOpen((open) => !open);
+            }}
+            aria-label={mobileSearchOpen ? "Close search" : "Open search"}
+            aria-expanded={mobileSearchOpen}
+            aria-controls="mobile-search"
           >
-            {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
+            {mobileSearchOpen ? <X size={22} /> : <Search size={22} />}
           </button>
         </div>
 
-        {mobileMenuOpen ? (
-          <form className="mobile-search" onSubmit={submitSearch} role="search">
+        {mobileSearchOpen ? (
+          <form id="mobile-search" className="mobile-search" onSubmit={submitSearch} role="search">
             <Search size={18} />
             <input
               value={query}
@@ -176,14 +241,15 @@ function AppShell({ children }: { children: ReactNode }) {
         ) : null}
       </header>
 
-      <aside className="side-nav" aria-label="Sidebar navigation">
-        <NavLink to="/" end>
+      {mobileMenuOpen ? <button className="sidebar-backdrop" aria-label="Close navigation" onClick={() => setMobileMenuOpen(false)} /> : null}
+      <aside id="sidebar-navigation" className="side-nav" aria-label="Sidebar navigation">
+        <NavLink to="/" end aria-label="Home">
           <Home size={20} /> <span>Home</span>
         </NavLink>
-        <NavLink to="/search">
+        <NavLink to="/search" aria-label="Explore">
           <Compass size={20} /> <span>Explore</span>
         </NavLink>
-        <NavLink to="/profile">
+        <NavLink to="/profile" aria-label="Profile">
           <CircleUserRound size={20} /> <span>Profile</span>
         </NavLink>
       </aside>
@@ -643,25 +709,76 @@ function formatTime(seconds: number) {
   return `${minutes}:${String(rest).padStart(2, "0")}`;
 }
 
-function WatchPage() {
+function WatchPageRoute() {
   const { muxAssetId = "" } = useParams();
-  const decodedId = decodeURIComponent(muxAssetId);
+  return <RenderErrorBoundary key={muxAssetId} title="Could not load this video"><WatchPage /></RenderErrorBoundary>;
+}
+
+function WatchPage() {
+  // React Router already decodes path parameters.
+  const { muxAssetId: decodedId = "" } = useParams();
   const video = useQuery(convexApi.feed.getFeedVideoByMuxAssetId, {
     muxAssetId: decodedId,
   }) as FeedVideoItem | null | undefined;
   const upNext = useQuery(convexApi.feed.listFeedVideos, { limit: 8 }) as
     | FeedVideoItem[]
     | undefined;
-  const [tab, setTab] = useState<"overview" | "moments" | "chapters" | "ask">("overview");
+  const { state: captionEditorState } = useOwnCaptionEditorState(decodedId);
+  const [tab, setTab] = useState<"moments" | "chapters" | "ask">("chapters");
   const playerRef = useRef<any>(null);
+  const captionTrackCleanupRef = useRef<(() => void) | null>(null);
+  const preservedPlaybackTime = useRef(0);
+  const shouldResumePlayback = useRef(true);
+  const playerAssetId = useRef(decodedId);
   const startTime = useStartTimeParam();
+  const preferredCaptionLanguage = captionEditorState?.sourceTrack?.languageCode;
+  const shouldSelectReviewedCaptions =
+    captionEditorState?.latestJob?.status === "completed" &&
+    Boolean(captionEditorState.latestJob.uploadedTrackId);
   const attachPlayer = useCallback(
     (element: HTMLVideoElement | null) => {
+      captionTrackCleanupRef.current?.();
+      captionTrackCleanupRef.current = null;
+      if (!element) {
+        preservedPlaybackTime.current = playerRef.current?.currentTime || preservedPlaybackTime.current;
+        if (playerRef.current) shouldResumePlayback.current = !playerRef.current.paused;
+        playerRef.current = null;
+        return;
+      }
+      if (playerAssetId.current !== decodedId) {
+        playerAssetId.current = decodedId;
+        preservedPlaybackTime.current = 0;
+        shouldResumePlayback.current = true;
+      }
       playerRef.current = element;
-      applyStartTime(element, startTime);
-      startPlaybackWithAudio(element);
+      applyStartTime(element, preservedPlaybackTime.current || startTime);
+      if (shouldResumePlayback.current) startPlaybackWithAudio(element);
+
+      if (shouldSelectReviewedCaptions) {
+        const selectReviewedTrack = () => {
+          const tracks = Array.from(element.textTracks ?? []);
+          const preferred =
+            tracks.find((track) => /reviewed/i.test(track.label)) ??
+            tracks.find(
+              (track) =>
+                preferredCaptionLanguage &&
+                track.language.toLowerCase() === preferredCaptionLanguage.toLowerCase(),
+            );
+          if (!preferred) return;
+          for (const track of tracks) {
+            track.mode = track === preferred ? "showing" : "disabled";
+          }
+        };
+        element.addEventListener("loadedmetadata", selectReviewedTrack);
+        element.textTracks?.addEventListener?.("addtrack", selectReviewedTrack);
+        queueMicrotask(selectReviewedTrack);
+        captionTrackCleanupRef.current = () => {
+          element.removeEventListener("loadedmetadata", selectReviewedTrack);
+          element.textTracks?.removeEventListener?.("addtrack", selectReviewedTrack);
+        };
+      }
     },
-    [startTime],
+    [decodedId, preferredCaptionLanguage, shouldSelectReviewedCaptions, startTime],
   );
 
   useDocumentTitle(video?.title ?? "Watch");
@@ -670,7 +787,6 @@ function WatchPage() {
     if (playerRef.current) {
       playerRef.current.currentTime = seconds;
       void playerRef.current.play?.();
-      window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
 
@@ -689,86 +805,125 @@ function WatchPage() {
 
   return (
     <div className="page page--watch">
-      <Link className="back-link" to="/"><ArrowLeft size={17} /> Back to feed</Link>
       <div className="watch-layout">
         <div className="watch-main">
           <div className="player-frame">
+            <RenderErrorBoundary key={video.muxAssetId} title="Could not load the video player">
             <Suspense fallback={<div className="player-loading"><LoaderCircle className="spin" /></div>}>
               <RoboTubePlayer
-                key={video.muxAssetId}
+                key={`${video.muxAssetId}:${captionEditorState?.captionRevision ?? 0}:${captionEditorState?.latestJob?.uploadedTrackId ?? "source"}`}
                 ref={attachPlayer}
                 playbackId={video.playbackId}
                 title={video.title}
                 posterUrl={video.thumbnailUrl}
                 metadata={{ video_id: video.muxAssetId, video_title: video.title, player_name: "RoboTube Web" }}
+                chapters={video.chapters}
+                durationSeconds={video.durationSeconds}
                 streamType="on-demand"
                 autoPlay
                 muted={false}
               />
             </Suspense>
+            </RenderErrorBoundary>
           </div>
           <div className="watch-title-row">
-            <div>
-              <h1>{video.title}</h1>
-              <p>{video.channelName}</p>
-            </div>
+            <h1>{video.title}</h1>
             <div className="ai-chip"><Bot size={16} /> Mux Robots ready</div>
           </div>
-
-          <div className="detail-tabs" role="tablist" aria-label="Video details">
-            {([
-              ["overview", "Overview", Sparkles],
-              ["moments", "Key moments", Play],
-              ["chapters", "Chapters", Clock3],
-              ["ask", "Ask RoboTube", Bot],
-            ] as const).map(([value, label, Icon]) => (
-              <button
-                role="tab"
-                aria-selected={tab === value}
-                className={tab === value ? "active" : ""}
-                onClick={() => setTab(value)}
-                key={value}
-              >
-                <Icon size={16} /> {label}
-              </button>
-            ))}
+          <div className="watch-creator-row">
+            <p className="watch-creator"><CircleUserRound size={23} /> {video.channelName}</p>
+            <div
+              className="detail-tabs"
+              role="tablist"
+              aria-label="Video details"
+              onKeyDown={(event) => {
+                const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+                const index = tabs.indexOf(event.target as HTMLButtonElement);
+                if (index < 0) return;
+                const next = event.key === "ArrowRight" ? (index + 1) % tabs.length
+                  : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length
+                  : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : -1;
+                if (next < 0) return;
+                event.preventDefault();
+                tabs[next].focus();
+                tabs[next].click();
+              }}
+            >
+              {([
+                ["chapters", "Chapters", Clock3],
+                ["moments", "Key moments", Play],
+                ["ask", "Ask questions", Bot],
+              ] as const).map(([value, label, Icon]) => (
+                <button
+                  id={`video-tab-${value}`}
+                  role="tab"
+                  aria-selected={tab === value}
+                  aria-controls={`video-panel-${value}`}
+                  tabIndex={tab === value ? 0 : -1}
+                  className={tab === value ? "active" : ""}
+                  onClick={() => setTab(value)}
+                  key={value}
+                >
+                  <Icon size={15} /> {label}
+                </button>
+              ))}
+            </div>
           </div>
-
-          <div className="detail-panel">
-            {tab === "overview" ? (
-              <div className="overview-panel">
-                <span className="eyebrow">AI summary</span>
-                <p>{video.summary || "RoboTube is still building a summary for this video."}</p>
-                {video.tags.length ? <div className="tag-list">{video.tags.map((tag) => <span key={tag}>#{tag}</span>)}</div> : null}
-              </div>
-            ) : null}
-            {tab === "moments" ? (
-              <div className="moment-list">
-                {video.keyMoments.length ? video.keyMoments.map((moment, index) => (
-                  <button onClick={() => seekTo(moment.startMs / 1000)} key={`${moment.startMs}-${index}`}>
-                    <span className="moment-list__time">{formatTime(moment.startMs / 1000)}</span>
-                    <span><strong>{moment.title || `Moment ${index + 1}`}</strong><small>{moment.audibleNarrative || moment.visualNarrative || "Jump to this highlight."}</small></span>
-                    <Play size={17} fill="currentColor" />
-                  </button>
-                )) : <EmptyInline copy="Key moments are still processing for this video." />}
-              </div>
-            ) : null}
-            {tab === "chapters" ? (
-              <div className="chapter-list">
-                {video.chapters.length ? video.chapters.map((chapter, index) => (
-                  <button onClick={() => seekTo(chapter.startTime)} key={`${chapter.startTime}-${index}`}>
-                    <span>{formatTime(chapter.startTime)}</span><strong>{chapter.title}</strong><ChevronRight size={17} />
-                  </button>
-                )) : <EmptyInline copy="Chapters are still processing for this video." />}
-              </div>
-            ) : null}
-            {tab === "ask" ? <VideoAssistant muxAssetId={video.muxAssetId} /> : null}
-          </div>
+          <section className="overview-panel watch-summary" aria-label="Video summary">
+            <span className="eyebrow"><Sparkles size={14} /> AI summary</span>
+            <p>{video.summary || "RoboTube is still building a summary for this video."}</p>
+            {video.tags.length ? <div className="tag-list">{video.tags.map((tag) => <span key={tag}>#{tag}</span>)}</div> : null}
+          </section>
         </div>
 
-        <aside className="up-next">
-          <div className="row-heading"><div><h2>Up next</h2></div></div>
-          {suggestions.length ? suggestions.map((item) => <CompactVideo video={item} key={item.muxAssetId} />) : <p className="muted">More videos are on the way.</p>}
+        <aside className="watch-sidebar" aria-label="Video tools">
+          <section className="detail-panel">
+            <header className="detail-panel__heading">
+              <div className="detail-panel__title">
+                <span className="detail-panel__icon">
+                  {tab === "chapters" ? <Clock3 size={19} /> : tab === "moments" ? <Play size={19} /> : <Bot size={19} />}
+                </span>
+                <div>
+                  <h2>{tab === "chapters" ? "Chapters" : tab === "moments" ? "Key moments" : "Ask questions"}</h2>
+                  <p>{tab === "chapters" ? "Find your place in the video" : tab === "moments" ? "Go straight to the highlights" : "Explore this video with RoboTube"}</p>
+                </div>
+              </div>
+              {tab !== "ask" ? <span className="detail-panel__count">{tab === "chapters" ? video.chapters.length : video.keyMoments.length}</span> : null}
+            </header>
+            <div className="detail-panel__body">
+              <div id="video-panel-chapters" role="tabpanel" aria-labelledby="video-tab-chapters" hidden={tab !== "chapters"} tabIndex={0}>
+                <div className="chapter-list">
+                  {video.chapters.length ? video.chapters.map((chapter, index) => (
+                    <button onClick={() => seekTo(chapter.startTime)} key={`${chapter.startTime}-${index}`}>
+                      <span>{formatTime(chapter.startTime)}</span><strong>{chapter.title}</strong><ChevronRight size={16} />
+                    </button>
+                  )) : <EmptyInline copy="Chapters are still processing for this video." />}
+                </div>
+              </div>
+              <div id="video-panel-moments" role="tabpanel" aria-labelledby="video-tab-moments" hidden={tab !== "moments"} tabIndex={0}>
+                <div className="moment-list">
+                  {video.keyMoments.length ? video.keyMoments.map((moment, index) => (
+                    <button onClick={() => seekTo(moment.startMs / 1000)} key={`${moment.startMs}-${index}`}>
+                      <span className="moment-list__time">{formatTime(moment.startMs / 1000)}</span>
+                      <span><strong>{moment.title || `Moment ${index + 1}`}</strong><small>{moment.audibleNarrative || moment.visualNarrative || "Jump to this highlight."}</small></span>
+                      <Play size={15} />
+                    </button>
+                  )) : <EmptyInline copy="Key moments are still processing for this video." />}
+                </div>
+              </div>
+              <div id="video-panel-ask" role="tabpanel" aria-labelledby="video-tab-ask" hidden={tab !== "ask"} tabIndex={0}>
+                {tab === "ask" ? (
+                  <RenderErrorBoundary key={video.muxAssetId} title="The video assistant is unavailable">
+                    <VideoAssistant muxAssetId={video.muxAssetId} />
+                  </RenderErrorBoundary>
+                ) : null}
+              </div>
+            </div>
+          </section>
+          <section className="up-next">
+            <div className="row-heading"><div><h2>Up next</h2></div></div>
+            {suggestions.length ? suggestions.map((item) => <CompactVideo video={item} key={item.muxAssetId} />) : <p className="muted">More videos are on the way.</p>}
+          </section>
         </aside>
       </div>
     </div>
@@ -1100,6 +1255,7 @@ function UploadPage() {
     useState<number | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [published, setPublished] = useState(false);
+  const [captionEditorOpen, setCaptionEditorOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const previewUrl = useMemo(
     () => (file ? URL.createObjectURL(file) : null),
@@ -1148,10 +1304,15 @@ function UploadPage() {
     pendingThumbnailTimestampMs ??
     pipeline?.thumbnailSelection?.selectedTimestampMs ??
     thumbnailCandidates[0]?.timestampMs;
+  const { state: captionEditorState } = useOwnCaptionEditorState(pipeline?.muxAssetId);
+  const captionEditActive = isCaptionEditActive(captionEditorState);
   const canPublish = Boolean(
     uploadId &&
       pipeline?.muxAssetId &&
       pipeline.passed === true &&
+      captionEditorState !== undefined &&
+      captionEditorState !== null &&
+      !captionEditActive &&
       !publishing &&
       !published,
   );
@@ -1289,8 +1450,6 @@ function UploadPage() {
       await updateOwnVideoMetadata({
         muxAssetId: pipeline.muxAssetId,
         title: title.trim(),
-        description: "",
-        tags: [],
         publish: true,
       });
       setPublished(true);
@@ -1487,6 +1646,9 @@ function UploadPage() {
           </div>
         ) : null}
         {pipeline?.jobs?.length ? <UploadPipelineJobs jobs={pipeline.jobs} /> : null}
+        {pipeline?.muxAssetId ? (
+          <CaptionReviewCard muxAssetId={pipeline.muxAssetId} onOpen={() => setCaptionEditorOpen(true)} />
+        ) : null}
         {pipeline?.playbackId &&
         pipeline.thumbnailSelection?.candidates.length ? (
           <section className="thumbnail-picker" aria-labelledby="thumbnail-picker-title">
@@ -1608,6 +1770,12 @@ function UploadPage() {
           </button>
         )}
       </form>
+      <CaptionCleanup
+        muxAssetId={pipeline?.muxAssetId}
+        open={captionEditorOpen}
+        onClose={() => setCaptionEditorOpen(false)}
+        title={title.trim() || undefined}
+      />
     </div>
   );
 }
@@ -1634,6 +1802,99 @@ function AuthGate({ title, copy }: { title: string; copy: string }) {
   );
 }
 
+function ProfileVideoMenu({
+  video,
+  deleting,
+  deletionDisabled,
+  onDelete,
+  onEditCaptions,
+}: {
+  video: FeedVideoItem;
+  deleting: boolean;
+  deletionDisabled: boolean;
+  onDelete: () => void;
+  onEditCaptions: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuId = `profile-video-menu-${video.muxAssetId}`;
+
+  return (
+    <div
+      className="profile-video__actions"
+      onBlur={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+          setOpen(false);
+        }
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setOpen(false);
+          event.currentTarget.querySelector<HTMLButtonElement>(".profile-video__menu-trigger")?.focus();
+          return;
+        }
+        if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
+          const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)'));
+          if (!items.length) return;
+          event.preventDefault();
+          const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+          const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : event.key === "ArrowDown" ? (currentIndex + 1) % items.length : (currentIndex <= 0 ? items.length : currentIndex) - 1;
+          items[nextIndex]?.focus();
+        }
+      }}
+    >
+      <button
+        aria-controls={open ? menuId : undefined}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={`Open options for ${video.title}`}
+        className="profile-video__menu-trigger"
+        disabled={deletionDisabled}
+        onClick={() => setOpen((current) => !current)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setOpen(true);
+            requestAnimationFrame(() => document.getElementById(menuId)?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus());
+          }
+        }}
+        title="Video options"
+        type="button"
+      >
+        {deleting ? <LoaderCircle className="spin" size={18} /> : <MoreVertical size={20} />}
+      </button>
+      {open ? (
+        <div aria-label={`Options for ${video.title}`} className="profile-video__menu" id={menuId} role="menu">
+          <button
+            className="profile-video__menu-edit"
+            disabled={deletionDisabled}
+            onClick={() => {
+              setOpen(false);
+              onEditCaptions();
+            }}
+            role="menuitem"
+            type="button"
+          >
+            <Captions size={17} /> Edit captions
+          </button>
+          <button
+            className="profile-video__menu-delete"
+            disabled={deletionDisabled}
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+            role="menuitem"
+            type="button"
+          >
+            <Trash2 size={17} /> Delete video
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function ProfilePage() {
   useDocumentTitle("Profile");
   const { isAuthenticated, isLoading } = useConvexAuth();
@@ -1649,6 +1910,7 @@ function ProfilePage() {
   const [deletingMuxAssetId, setDeletingMuxAssetId] = useState<string | null>(null);
   const [deleteMessage, setDeleteMessage] = useState<{ error: boolean; text: string } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [captionVideo, setCaptionVideo] = useState<FeedVideoItem | null>(null);
   const avatarInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => setHandle(currentUser?.username ?? ""), [currentUser?.username]);
@@ -1720,19 +1982,22 @@ function ProfilePage() {
         {uploads === undefined ? <LoadingGrid count={3} /> : uploads.length ? <div className="video-grid">{uploads.map((video) => (
           <div className="profile-video" key={video.muxAssetId}>
             <VideoCard video={video} />
-            <button
-              aria-label={`Delete ${video.title}`}
-              className="profile-video__delete"
-              disabled={deletingMuxAssetId !== null}
-              onClick={() => void deleteVideo(video)}
-              title="Delete video"
-              type="button"
-            >
-              {deletingMuxAssetId === video.muxAssetId ? <LoaderCircle className="spin" size={17} /> : <Trash2 size={17} />}
-            </button>
+            <ProfileVideoMenu
+              video={video}
+              deleting={deletingMuxAssetId === video.muxAssetId}
+              deletionDisabled={deletingMuxAssetId !== null}
+              onEditCaptions={() => setCaptionVideo(video)}
+              onDelete={() => void deleteVideo(video)}
+            />
           </div>
         ))}</div> : <EmptyState icon={<Upload size={28} />} title="Nothing here yet" copy="Your published videos will live here." action={<Link to="/upload" className="button button--pink">Upload a video</Link>} />}
       </section>
+      <CaptionCleanup
+        muxAssetId={captionVideo?.muxAssetId}
+        open={captionVideo !== null}
+        onClose={() => setCaptionVideo(null)}
+        title={captionVideo?.title}
+      />
     </div>
   );
 }
@@ -1769,7 +2034,7 @@ export function App() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/search" element={<SearchPage />} />
-        <Route path="/watch/:muxAssetId" element={<WatchPage />} />
+        <Route path="/watch/:muxAssetId" element={<WatchPageRoute />} />
         <Route path="/shorts/:muxAssetId" element={<ShortsPage />} />
         <Route path="/upload" element={<UploadPage />} />
         <Route path="/profile" element={<ProfilePage />} />

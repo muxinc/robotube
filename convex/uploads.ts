@@ -10,7 +10,6 @@ import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-trans
 import { components, internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
-import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 function requiredEnv(name: string, value: string | undefined): string {
   if (!value) throw new Error(`Missing env var: ${name}`);
@@ -286,7 +285,7 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
         metadataArgs.custom = mergedCustom;
       }
 
-      await upsertVideoMetadataAndSyncFeedReadModel(ctx, metadataArgs);
+      await ctx.runMutation((internal as any).uploadMetadata.seedInternal, metadataArgs);
 
       if (asString(asset.status) !== "ready") {
         const nextAttempt = attempt + 1;
@@ -322,14 +321,11 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
         // orchestration backend instead of kicking off the Convex-native
         // moderation -> AI-metadata pipeline (which would create duplicate
         // Robots jobs). Convex creates zero Robots jobs on this path.
-        await ctx.scheduler.runAfter(
-          0,
-          (internal as any).laravelOrchestration.startLaravelRobotRun,
+        await ctx.runMutation(
+          (internal as any).laravelKickoff.enqueueForReadyAssetInternal,
           {
             muxAssetId,
             userId: metadataArgs.userId,
-            title: resolvedTitle,
-            attempt: 0,
           },
         );
       } else if (!isMuxRobotsPollingDisabled()) {

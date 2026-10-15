@@ -6,6 +6,7 @@ import { v } from "convex/values";
 
 import { components, internal } from "./_generated/api";
 import { action } from "./_generated/server";
+import { parsePassthroughUserId } from "./feedContracts";
 
 function requiredEnv(name: string, value: string | undefined): string {
   if (!value) throw new Error(`Missing env var: ${name}`);
@@ -27,6 +28,11 @@ function errorStatus(error: unknown): number | undefined {
 export const deleteOwnVideo = action({
   args: { muxAssetId: v.string() },
   handler: async (ctx, args) => {
+    const muxAssetId = args.muxAssetId.trim();
+    if (!muxAssetId) {
+      throw new Error("A video asset ID is required.");
+    }
+
     const userId = await getAuthUserId(ctx);
     if (!userId) {
       throw new Error("You must be signed in to delete a video.");
@@ -34,12 +40,17 @@ export const deleteOwnVideo = action({
 
     const video = asRecord(
       await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
-        muxAssetId: args.muxAssetId,
+        muxAssetId,
         userId,
       }),
     );
+    const asset = asRecord(video?.asset);
     const metadata = asRecord(video?.metadata);
-    if (!video?.asset || metadata?.userId !== userId) {
+    const passthroughOwnerUserId = parsePassthroughUserId(asset?.passthrough);
+    if (
+      !asset ||
+      (metadata?.userId !== userId && passthroughOwnerUserId !== userId)
+    ) {
       throw new Error("Video not found or you do not have permission to delete it.");
     }
 
@@ -49,7 +60,7 @@ export const deleteOwnVideo = action({
     });
 
     try {
-      await mux.video.assets.delete(args.muxAssetId);
+      await mux.video.assets.delete(muxAssetId);
     } catch (error) {
       // Retrying a partially completed deletion is safe if Mux already removed
       // the asset; every other Mux failure leaves Convex data intact for retry.
@@ -58,7 +69,7 @@ export const deleteOwnVideo = action({
 
     const threadIds = await ctx.runQuery(
       (internal as any).libraryReset.getVideoChatThreadIdsInternal,
-      { muxAssetId: args.muxAssetId },
+      { muxAssetId },
     );
 
     for (const threadId of threadIds as string[]) {
@@ -70,14 +81,14 @@ export const deleteOwnVideo = action({
 
     await ctx.runMutation(
       (internal as any).libraryReset.deleteVideoDataInternal,
-      { muxAssetId: args.muxAssetId },
+      { muxAssetId },
     );
 
     await ctx.runMutation(
       (components as any).mux.videos.deleteVideoByMuxAssetIdPublic,
-      { muxAssetId: args.muxAssetId },
+      { muxAssetId },
     );
 
-    return { ok: true, muxAssetId: args.muxAssetId };
+    return { ok: true, muxAssetId };
   },
 });

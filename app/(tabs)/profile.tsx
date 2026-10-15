@@ -293,6 +293,48 @@ export default function ProfileScreen() {
     );
   };
 
+  const handleOpenVideoMenu = (video: FeedVideoItem) => {
+    if (deletingMuxAssetId) return;
+
+    if (Platform.OS === "ios") {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          title: video.title,
+          options: ["Cancel", "Edit captions", "Delete video"],
+          cancelButtonIndex: 0,
+          destructiveButtonIndex: 2,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1) {
+            router.push({
+              pathname: "/video/[muxAssetId]/edit-captions",
+              params: { muxAssetId: video.muxAssetId },
+            });
+          }
+          if (buttonIndex === 2) handleDeleteVideo(video);
+        },
+      );
+      return;
+    }
+
+    Alert.alert(video.title, "Video options", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Edit captions",
+        onPress: () =>
+          router.push({
+            pathname: "/video/[muxAssetId]/edit-captions",
+            params: { muxAssetId: video.muxAssetId },
+          }),
+      },
+      {
+        text: "Delete video",
+        style: "destructive",
+        onPress: () => handleDeleteVideo(video),
+      },
+    ]);
+  };
+
   if (currentUser === undefined) {
     return (
       <View style={styles.loadingContainer}>
@@ -462,23 +504,27 @@ export default function ProfileScreen() {
         keyExtractor={(item) => item.muxAssetId}
         renderItem={({ item }) => (
           <View style={styles.uploadedVideoItem}>
-            <FeedVideoCard item={item} showPlayIcon={false} />
+            <FeedVideoCard
+              item={item}
+              showMoreIcon={false}
+              showPlayIcon={false}
+            />
             <Pressable
-              accessibilityLabel={`Delete ${item.title}`}
+              accessibilityLabel={`Open options for ${item.title}`}
               accessibilityRole="button"
               disabled={deletingMuxAssetId !== null}
               hitSlop={8}
-              onPress={() => handleDeleteVideo(item)}
+              onPress={() => handleOpenVideoMenu(item)}
               style={({ pressed }) => [
-                styles.deleteVideoButton,
-                pressed && styles.deleteVideoButtonPressed,
+                styles.videoMenuButton,
+                pressed && styles.videoMenuButtonPressed,
                 deletingMuxAssetId !== null && styles.signOutDisabled,
               ]}
             >
               {deletingMuxAssetId === item.muxAssetId ? (
                 <ActivityIndicator color="#FFFFFF" size="small" />
               ) : (
-                <Ionicons name="trash-outline" size={19} color="#FFFFFF" />
+                <Ionicons name="ellipsis-vertical" size={20} color="#FFFFFF" />
               )}
             </Pressable>
           </View>
@@ -722,7 +768,7 @@ const styles = StyleSheet.create({
   uploadedVideoItem: {
     position: "relative",
   },
-  deleteVideoButton: {
+  videoMenuButton: {
     position: "absolute",
     zIndex: 3,
     top: 10,
@@ -736,8 +782,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#FFFFFF55",
   },
-  deleteVideoButtonPressed: {
-    backgroundColor: "#B4233E",
+  videoMenuButtonPressed: {
+    backgroundColor: "#111111EE",
     transform: [{ scale: 0.96 }],
   },
   signOutPressed: {

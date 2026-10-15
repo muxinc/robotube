@@ -59,6 +59,8 @@ function FullVideoPlayer({
   tags,
   chapters,
   keyMoments,
+  captionRevision,
+  preferredCaptionTrackId,
   startAtSeconds,
   seekToSeconds,
   onSeekHandled,
@@ -71,6 +73,8 @@ function FullVideoPlayer({
   tags?: string[];
   chapters?: { title: string; startTime: number }[];
   keyMoments?: FeedVideoKeyMoment[];
+  captionRevision?: number;
+  preferredCaptionTrackId?: string | null;
   startAtSeconds?: number;
   seekToSeconds?: number | null;
   onSeekHandled?: () => void;
@@ -78,6 +82,8 @@ function FullVideoPlayer({
 }) {
   const didSeekToStartRef = useRef(false);
   const didSelectInitialCaptionTrackRef = useRef(false);
+  const sourceReloadPositionRef = useRef<number | null>(null);
+  const resumeAfterSourceLoadRef = useRef(true);
 
   const source = useMemo(
     () => ({
@@ -91,7 +97,15 @@ function FullVideoPlayer({
     }),
     [muxAssetId, playbackId, title],
   );
-  const sourceKey = useMemo(() => JSON.stringify(source), [source]);
+  const sourceKey = useMemo(
+    () =>
+      JSON.stringify({
+        source,
+        captionRevision: captionRevision ?? 0,
+        preferredCaptionTrackId: preferredCaptionTrackId ?? null,
+      }),
+    [captionRevision, preferredCaptionTrackId, source],
+  );
   const sourceKeyRef = useRef(sourceKey);
   const [player] = useState<MuxVideoPlayer>(() => {
     const videoPlayer = createMuxVideoPlayer(source);
@@ -140,11 +154,18 @@ function FullVideoPlayer({
     }
 
     sourceKeyRef.current = sourceKey;
+    sourceReloadPositionRef.current =
+      player.currentTime > 0.5 ? player.currentTime : null;
+    const shouldResumeAfterReload =
+      player.status === "playing" ||
+      player.status === "buffering" ||
+      player.status === "loading";
+    resumeAfterSourceLoadRef.current = shouldResumeAfterReload;
     didSeekToStartRef.current = false;
     didSelectInitialCaptionTrackRef.current = false;
     setVideoControlsEnabled(false);
     player.replace(source);
-    requestAutoplay();
+    if (shouldResumeAfterReload) requestAutoplay();
   }, [player, requestAutoplay, source, sourceKey]);
 
   useEffect(
@@ -156,6 +177,15 @@ function FullVideoPlayer({
 
   const seekToStartPosition = useCallback(() => {
     if (didSeekToStartRef.current) return;
+
+    const reloadPosition = sourceReloadPositionRef.current;
+    if (reloadPosition !== null) {
+      sourceReloadPositionRef.current = null;
+      didSeekToStartRef.current = true;
+      runMuxPlayerCommand(player.seekTo(reloadPosition));
+      return;
+    }
+
     if (startAtSeconds === undefined || Number.isNaN(startAtSeconds)) return;
 
     didSeekToStartRef.current = true;
@@ -169,16 +199,30 @@ function FullVideoPlayer({
     ) => {
       if (
         didSelectInitialCaptionTrackRef.current ||
-        selectedCaptionTrackId ||
         !captionTracks?.length
       ) {
         return;
       }
 
+      if (preferredCaptionTrackId) {
+        const preferredTrackIsReady = captionTracks.some(
+          (track) => track.id === preferredCaptionTrackId,
+        );
+        if (!preferredTrackIsReady) return;
+
+        didSelectInitialCaptionTrackRef.current = true;
+        if (selectedCaptionTrackId !== preferredCaptionTrackId) {
+          runMuxPlayerCommand(player.setCaptionTrack(preferredCaptionTrackId));
+        }
+        return;
+      }
+
+      if (selectedCaptionTrackId) return;
+
       didSelectInitialCaptionTrackRef.current = true;
       runMuxPlayerCommand(player.setCaptionTrack(captionTracks[0].id));
     },
-    [player],
+    [player, preferredCaptionTrackId],
   );
 
   useEffect(() => {
@@ -215,7 +259,8 @@ function FullVideoPlayer({
         onSourceLoad={(event) => {
           seekToStartPosition();
           selectInitialCaptionTrack(event.captionTracks, event.selectedCaptionTrackId);
-          requestAutoplay();
+          if (resumeAfterSourceLoadRef.current) requestAutoplay();
+          resumeAfterSourceLoadRef.current = true;
         }}
         onStatusChange={(event) => {
           selectInitialCaptionTrack(event.captionTracks, event.selectedCaptionTrackId);
@@ -611,6 +656,21 @@ export default function VideoDetailPage() {
     muxAssetId ? { muxAssetId } : "skip",
   ) as FeedVideoDetailItem | null | undefined;
 
+  const captionEditorState = useQuery(
+    (api as any).captionEditing.getOwnCaptionEditorState,
+    muxAssetId ? { muxAssetId } : "skip",
+  ) as
+    | {
+        captionRevision?: number;
+        latestJob?: {
+          status?: string;
+          uploadedTrackId?: string;
+          reconciliationStatus?: string;
+        };
+      }
+    | null
+    | undefined;
+
   const feedVideos = useQuery((api as any).feed.listFeedVideos, {
     limit: 20,
   }) as FeedVideoItem[] | undefined;
@@ -819,6 +879,12 @@ export default function VideoDetailPage() {
           tags={selectedVideo.tags}
           chapters={selectedVideo.chapters}
           keyMoments={selectedVideo.keyMoments}
+          captionRevision={captionEditorState?.captionRevision ?? 0}
+          preferredCaptionTrackId={
+            captionEditorState?.latestJob?.status === "completed"
+              ? captionEditorState.latestJob.uploadedTrackId
+              : null
+          }
           startAtSeconds={startAtSeconds}
           seekToSeconds={seekToSeconds}
           onSeekHandled={() => setSeekToSeconds(null)}

@@ -94,6 +94,59 @@ export default defineSchema({
   })
     .index("by_asset", ["muxAssetId"])
     .index("by_asset_language", ["muxAssetId", "languageCode"]),
+  captionEditingJobs: defineTable({
+    operation: v.optional(v.union(v.literal("manual"), v.literal("robots"))),
+    pipelineStage: v.optional(v.string()),
+    intermediateTrackId: v.optional(v.string()),
+    temporaryStorageId: v.optional(v.id("_storage")),
+    autoCensorProfanity: v.optional(v.boolean()),
+    censorAttempt: v.optional(v.number()),
+    pipelineUpdatedAtMs: v.optional(v.number()),
+    pipelineLeaseExpiresAtMs: v.optional(v.number()),
+    sourceTrackName: v.optional(v.string()),
+    muxAssetId: v.string(),
+    userId: v.string(),
+    sourceTrackId: v.string(),
+    sourceLanguageCode: v.optional(v.string()),
+    status: v.union(
+      v.literal("requested"),
+      v.literal("pending"),
+      v.literal("processing"),
+      v.literal("completed"),
+      v.literal("errored"),
+      v.literal("cancelled"),
+    ),
+    jobId: v.optional(v.string()),
+    passthrough: v.optional(v.string()),
+    uploadedTrackId: v.optional(v.string()),
+    totalReplacementCount: v.optional(v.number()),
+    errorMessage: v.optional(v.string()),
+    submissionUncertainAtMs: v.optional(v.number()),
+    pollingTimedOutAtMs: v.optional(v.number()),
+    revision: v.number(),
+    reconciliationStatus: v.optional(
+      v.union(
+        v.literal("waiting"),
+        v.literal("processing"),
+        v.literal("completed"),
+        v.literal("errored"),
+      ),
+    ),
+    reconciliationAttempt: v.optional(v.number()),
+    reconciliationLeaseExpiresAtMs: v.optional(v.number()),
+    reconciliationError: v.optional(v.string()),
+    sourceAppliedAtMs: v.optional(v.number()),
+    dependentsInvalidatedAtMs: v.optional(v.number()),
+    regenerationScheduledAtMs: v.optional(v.number()),
+    dependentsReadyAtMs: v.optional(v.number()),
+    createdAtMs: v.number(),
+    updatedAtMs: v.number(),
+    completedAtMs: v.optional(v.number()),
+  })
+    .index("by_asset", ["muxAssetId"])
+    .index("by_asset_created", ["muxAssetId", "createdAtMs"])
+    .index("by_job", ["jobId"])
+    .index("by_user_created", ["userId", "createdAtMs"]),
   muxAssetCache: defineTable({
     muxAssetId: v.string(),
     status: v.string(),

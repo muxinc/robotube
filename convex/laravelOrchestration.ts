@@ -6,8 +6,8 @@
  * When USE_LARAVEL_ORCHESTRATION is on, Robotube's Convex backend hands off the
  * Mux Robots pipeline to the Laravel orchestration backend. This action is the
  * outbound half of that handoff: after a Mux asset is `ready` (see
- * convex/uploads.ts), we sign and POST the asset to Laravel, and mirror the
- * returned run id/status into the mounted Mux component's videoMetadata.custom.
+ * convex/muxWebhook.ts and convex/uploads.ts), we sign and POST the asset to
+ * Laravel, and mirror the returned run id/status into videoMetadata.custom.
  *
  * Env vars (read via process.env; documented in convex/laravelFlag.ts):
  * - USE_LARAVEL_ORCHESTRATION    : master flag ("true"/"1" => on).
@@ -30,7 +30,6 @@ import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-trans
 import { components, internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
-import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 const START_RUN_PATH = "/api/robotube/robot-runs";
 const TRANSLATIONS_PATH = "/api/robotube/translations";
@@ -91,14 +90,6 @@ function asStringArray(value: unknown): string[] | undefined {
   return strings.length > 0 ? strings : undefined;
 }
 
-function asVisibility(
-  value: unknown,
-): "private" | "unlisted" | "public" | undefined {
-  return value === "private" || value === "unlisted" || value === "public"
-    ? value
-    : undefined;
-}
-
 function getMetadataRecord(value: unknown): Record<string, unknown> {
   if (Array.isArray(value)) return asRecord(value[0]) ?? {};
   return asRecord(value) ?? {};
@@ -156,53 +147,6 @@ async function getRequestedTranslationLanguages(
   return { audio, captions };
 }
 
-/**
- * Merge Laravel run id/status into videoMetadata.custom without clobbering any
- * existing custom keys (mirrors the read-then-upsert pattern used across the
- * Convex Robots pipeline).
- */
-async function storeLaravelRunOnVideo(
-  ctx: any,
-  args: { muxAssetId: string; userId: string; runId: number; runStatus: string },
-) {
-  const video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
-    muxAssetId: args.muxAssetId,
-    userId: args.userId,
-  });
-  const metadata = getMetadataRecord((video as any)?.metadata);
-  const existingCustom = asRecord(metadata.custom) ?? {};
-
-  const payload: {
-    muxAssetId: string;
-    userId: string;
-    title?: string;
-    description?: string;
-    tags?: string[];
-    visibility?: "private" | "unlisted" | "public";
-    custom: Record<string, unknown>;
-  } = {
-    muxAssetId: args.muxAssetId,
-    userId: asString(metadata.userId) ?? args.userId,
-    custom: {
-      ...existingCustom,
-      laravelRunId: args.runId,
-      laravelRunStatus: args.runStatus,
-      laravelRunUpdatedAtMs: Date.now(),
-    },
-  };
-
-  const title = asString(metadata.title);
-  if (title !== undefined) payload.title = title;
-  const description = asString(metadata.description);
-  if (description !== undefined) payload.description = description;
-  const tags = asStringArray(metadata.tags);
-  if (tags !== undefined) payload.tags = tags;
-  const visibility = asVisibility(metadata.visibility);
-  if (visibility !== undefined) payload.visibility = visibility;
-
-  await upsertVideoMetadataAndSyncFeedReadModel(ctx, payload);
-}
-
 export const startLaravelRobotRun = internalAction({
   args: {
     muxAssetId: v.string(),
@@ -231,6 +175,20 @@ export const startLaravelRobotRun = internalAction({
 
     const attempt = Math.max(0, Math.floor(args.attempt ?? 0));
     const url = `${baseUrl.replace(/\/+$/, "")}${START_RUN_PATH}`;
+
+    const cache = await ctx.runQuery(internal.muxAssetCache.getByMuxAssetIdInternal, {
+      muxAssetId: args.muxAssetId,
+    });
+    if (cache?.isDeleted) return { ok: false, skipped: true, reason: "deleted" };
+    const video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
+      muxAssetId: args.muxAssetId, userId: args.userId,
+    });
+    if (!video?.asset) return { ok: false, skipped: true, reason: "missing_asset" };
+    const custom = asRecord(getMetadataRecord(video.metadata).custom) ?? {};
+    // A sync can confirm the run even if the original POST response was lost.
+    // Do not retry that POST after the confirmed run has already completed.
+    if (typeof custom.laravelRunId === "number")
+      return { ok: true, skipped: true, reason: "already_started", runId: custom.laravelRunId };
 
     const requestedLanguages = await getRequestedTranslationLanguages(
       ctx,
@@ -335,7 +293,7 @@ export const startLaravelRobotRun = internalAction({
       return { ok: false, skipped: false, error: "missing_run_id", retryScheduled };
     }
 
-    await storeLaravelRunOnVideo(ctx, {
+    await ctx.runMutation((internal as any).laravelKickoff.storeRunInternal, {
       muxAssetId: args.muxAssetId,
       userId: args.userId,
       runId,

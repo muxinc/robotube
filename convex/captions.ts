@@ -6,10 +6,20 @@ import { v } from "convex/values";
 import { components, internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import {
+  buildMuxPremiumCaptionsRequest,
+  createMuxPremiumCaptionsJob,
+  getMuxPremiumCaptionsJob,
+  MuxPremiumCaptionsHttpError,
+  parseMuxPremiumCaptionsJob,
+  type MuxPremiumCaptionsJob,
+} from "./premiumCaptionsMuxAdapter";
 import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 const MAX_ATTEMPTS = 10;
-const GENERATED_CAPTIONS_PASSTHROUGH = "robotube:auto-generated";
+const LEGACY_GENERATED_CAPTIONS_PASSTHROUGH = "robotube:auto-generated";
+const PREMIUM_CAPTIONS_API_URL =
+  "https://api.mux.com/robots/v0/jobs/generate-premium-captions";
 
 function requiredEnv(name: string, value: string | undefined): string {
   if (!value) throw new Error(`Missing env var: ${name}`);
@@ -102,7 +112,7 @@ function findGeneratedCaptionsTrack(asset: any) {
       track?.type === "text" &&
       (track?.text_source === "generated_vod" ||
         track?.textSource === "generated_vod" ||
-        track?.passthrough === GENERATED_CAPTIONS_PASSTHROUGH),
+        track?.passthrough === LEGACY_GENERATED_CAPTIONS_PASSTHROUGH),
   );
 }
 
@@ -110,7 +120,7 @@ function getTrackLanguageCode(track: any) {
   return normalizeLanguageCode(track?.language_code ?? track?.languageCode ?? track?.language);
 }
 
-function findSourceCaptionsTrack(asset: any) {
+function findSourceCaptionsTrack(asset: any, preferredTrackId?: string) {
   const textTracks = (asset?.tracks ?? []).filter(
     (track: any) =>
       track?.type === "text" &&
@@ -121,6 +131,15 @@ function findSourceCaptionsTrack(asset: any) {
 
   if (textTracks.length === 0) {
     return null;
+  }
+
+  if (preferredTrackId) {
+    const preferredTrack = textTracks.find(
+      (track: any) => track?.id === preferredTrackId,
+    );
+    if (preferredTrack) {
+      return preferredTrack;
+    }
   }
 
   const generatedTrack = findGeneratedCaptionsTrack(asset);
@@ -214,17 +233,23 @@ function isNonRetryableCaptionsError(message: string) {
   );
 }
 
-// Mux returns HTTP 422 "A text track for language <x> already exists on this
-// asset" when a generated-subtitles job is requested for a track that already
-// exists (racing kicks, or a track already in `preparing`). This is benign:
-// the caption already exists / is being prepared, so treat it as success.
-function isCaptionsAlreadyExistError(message: string) {
-  return /already exists/i.test(message) && /text track|language/i.test(message);
+function isRetryableCaptionsError(error: unknown, message: string) {
+  if (error instanceof MuxPremiumCaptionsHttpError) {
+    return (
+      error.status === 404 ||
+      error.status === 408 ||
+      error.status === 409 ||
+      error.status === 425 ||
+      error.status === 429 ||
+      error.status >= 500
+    );
+  }
+  return !isNonRetryableCaptionsError(message);
 }
 
 // Any text track on the asset that is not in a failed state means captions are
-// ready or in flight — the `video.asset.track.ready` webhook will finish the
-// flow, so a fresh generateSubtitles call would only race and 422.
+// ready or in flight. Reuse it rather than creating a conflicting Premium
+// Captions track for the same language.
 function hasNonErroredTextTrack(asset: any) {
   return (asset?.tracks ?? []).some(
     (track: any) => track?.type === "text" && track?.status !== "errored",
@@ -233,6 +258,16 @@ function hasNonErroredTextTrack(asset: any) {
 
 function isActiveMuxRobotsJobStatus(value: unknown) {
   return value === "pending" || value === "processing";
+}
+
+function formatPremiumCaptionsErrors(job: MuxPremiumCaptionsJob) {
+  if (!job.errors || job.errors.length === 0) {
+    return `Mux Premium Captions job ${job.status}.`;
+  }
+
+  return job.errors
+    .map((error) => error?.message || error?.type || "Unknown error")
+    .join("; ");
 }
 
 async function upsertCaptionMetadataFields(
@@ -263,6 +298,85 @@ async function upsertCaptionMetadataFields(
 
   return nextCustom;
 }
+
+async function applyPremiumCaptionsJobUpdate(
+  ctx: any,
+  args: { muxAssetId: string; userId: string },
+  job: MuxPremiumCaptionsJob,
+) {
+  const video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
+    muxAssetId: args.muxAssetId,
+    userId: args.userId,
+  });
+  const metadata = getMetadataRecord(video?.metadata);
+  const custom = asCustomRecord(metadata.custom);
+  const currentJobId = asString(custom.aiCaptionsJobId);
+
+  if (currentJobId && currentJobId !== job.id) {
+    return { ok: true, skipped: true, reason: "job_replaced" as const };
+  }
+
+  if (isActiveMuxRobotsJobStatus(job.status)) {
+    await upsertCaptionMetadataFields(ctx, args, {
+      aiCaptionsJobId: job.id,
+      aiCaptionsJobStatus: job.status,
+      aiCaptionsSource: "mux_premium",
+      aiCaptionsUnavailableReason: null,
+    });
+    return { ok: true, skipped: false, status: job.status };
+  }
+
+  if (job.status === "completed") {
+    await upsertCaptionMetadataFields(ctx, args, {
+      aiCaptionsJobId: job.id,
+      aiCaptionsJobStatus: job.status,
+      aiCaptionsPremiumTrackId: asString(job.outputs?.track_id),
+      aiCaptionsPremiumLanguageCode:
+        normalizeLanguageCode(job.outputs?.language_code) || "en",
+      aiCaptionsSource: "mux_premium",
+      aiCaptionsUnavailableReason: null,
+      aiCaptionsRetryScheduled: false,
+    });
+    return { ok: true, skipped: false, status: job.status };
+  }
+
+  const message = formatPremiumCaptionsErrors(job);
+  await upsertCaptionMetadataFields(ctx, args, {
+    aiCaptionsJobId: job.id,
+    aiCaptionsJobStatus: job.status,
+    aiCaptionsFailedAtMs: Date.now(),
+    aiCaptionsLastError: message,
+    aiCaptionsUnavailableReason: message,
+    aiCaptionsRetryScheduled: false,
+  });
+  return { ok: false, skipped: false, status: job.status, error: message };
+}
+
+export const syncPremiumCaptionsJobInternal = internalAction({
+  args: {
+    muxAssetId: v.string(),
+    userId: v.string(),
+    job: v.any(),
+  },
+  handler: async (ctx, args) => {
+    const job = parseMuxPremiumCaptionsJob(args.job);
+    const result = await applyPremiumCaptionsJobUpdate(ctx, args, job);
+
+    if (job.status === "completed") {
+      await ctx.scheduler.runAfter(
+        0,
+        (internal as any).captions.ensureGeneratedCaptionsTrackInternal,
+        {
+          muxAssetId: args.muxAssetId,
+          userId: args.userId,
+          attempt: 0,
+        },
+      );
+    }
+
+    return result;
+  },
+});
 
 async function maybeScheduleAiMetadataForReadyCaptions(
   ctx: any,
@@ -378,7 +492,58 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
         };
       }
 
-      const sourceCaptionsTrack = findSourceCaptionsTrack(asset);
+      let premiumJob: MuxPremiumCaptionsJob | undefined;
+      const existingPremiumJobId = asString(custom.aiCaptionsJobId);
+      if (existingPremiumJobId) {
+        premiumJob = await getMuxPremiumCaptionsJob(
+          fetch,
+          `${PREMIUM_CAPTIONS_API_URL}/${existingPremiumJobId}`,
+          createMuxBasicAuthHeader(),
+        );
+        await applyPremiumCaptionsJobUpdate(ctx, args, premiumJob);
+
+        if (isActiveMuxRobotsJobStatus(premiumJob.status)) {
+          const shouldRetry = nextAttempt < MAX_ATTEMPTS;
+          await upsertCaptionMetadataFields(ctx, args, {
+            aiCaptionsRetryScheduled: shouldRetry,
+          });
+          if (shouldRetry) {
+            await ctx.scheduler.runAfter(
+              getRetryDelayMs(nextAttempt),
+              (internal as any).captions.ensureGeneratedCaptionsTrackInternal,
+              {
+                muxAssetId: args.muxAssetId,
+                userId: args.userId,
+                attempt: nextAttempt,
+              },
+            );
+          }
+          return {
+            ok: true,
+            skipped: true,
+            reason: "premium_captions_in_flight",
+            retryScheduled: shouldRetry,
+            nextAttempt,
+          };
+        }
+
+        if (premiumJob.status !== "completed") {
+          return {
+            ok: false,
+            skipped: false,
+            reason: "premium_captions_failed",
+            status: premiumJob.status,
+          };
+        }
+      }
+
+      const preferredPremiumTrackId =
+        asString(premiumJob?.outputs?.track_id) ??
+        asString(custom.aiCaptionsPremiumTrackId);
+      const sourceCaptionsTrack = findSourceCaptionsTrack(
+        asset,
+        preferredPremiumTrackId,
+      );
       if (sourceCaptionsTrack) {
         const detectedLanguageCode = getTrackLanguageCode(sourceCaptionsTrack);
         const captionsReady = sourceCaptionsTrack.status === "ready";
@@ -418,10 +583,12 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
           aiCaptionsTrackId: sourceCaptionsTrack.id,
           aiSourceLanguageCode: detectedLanguageCode,
           aiSourceLanguageLabel: getLanguageDisplayLabel(detectedLanguageCode),
-          aiCaptionsSource:
-            sourceCaptionsTrack.text_source === "generated_vod" ||
-            sourceCaptionsTrack.textSource === "generated_vod" ||
-            sourceCaptionsTrack.passthrough === GENERATED_CAPTIONS_PASSTHROUGH
+          aiCaptionsSource: existingPremiumJobId
+            ? "mux_premium"
+            : sourceCaptionsTrack.text_source === "generated_vod" ||
+                sourceCaptionsTrack.textSource === "generated_vod" ||
+                sourceCaptionsTrack.passthrough ===
+                  LEGACY_GENERATED_CAPTIONS_PASSTHROUGH
               ? "mux_generated"
               : "existing",
           aiCaptionsUnavailableReason: null,
@@ -435,12 +602,34 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
         return { ok: true, skipped: false, alreadyExisted: true, scheduledAiMetadata };
       }
 
-      // Idempotency guard: findSourceCaptionsTrack above only matches `ready`
-      // text tracks, so a track still in `preparing` (or a generated track that
-      // has not finished) slips past it and a fresh generateSubtitles call would
-      // 422. If ANY non-errored text track already exists, captions are already
-      // in flight — no-op and let the track.ready webhook finish. Errored-only
-      // tracks fall through to (re)create below.
+      if (premiumJob?.status === "completed") {
+        const shouldRetry = nextAttempt < MAX_ATTEMPTS;
+        await upsertCaptionMetadataFields(ctx, args, {
+          aiCaptionsRetryScheduled: shouldRetry,
+        });
+        if (shouldRetry) {
+          await ctx.scheduler.runAfter(
+            getRetryDelayMs(nextAttempt),
+            (internal as any).captions.ensureGeneratedCaptionsTrackInternal,
+            {
+              muxAssetId: args.muxAssetId,
+              userId: args.userId,
+              attempt: nextAttempt,
+            },
+          );
+        }
+        return {
+          ok: true,
+          skipped: true,
+          reason: "premium_track_not_ready",
+          retryScheduled: shouldRetry,
+          nextAttempt,
+        };
+      }
+
+      // A ready or preparing text track means caption work is already complete
+      // or in flight. Let the track.ready webhook reconcile it instead of
+      // creating a conflicting same-language Premium Captions job.
       if (hasNonErroredTextTrack(asset)) {
         await upsertCaptionMetadataFields(ctx, args, {
           aiCaptionsRequestedAtMs:
@@ -451,57 +640,32 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
         return { ok: true, skipped: true, reason: "captions_in_flight" };
       }
 
-      const audioTrack = findPrimaryAudioTrack(asset);
-      if (!audioTrack?.id) {
-        await upsertCaptionMetadataFields(ctx, args, {
-          aiCaptionsUnavailableReason: "No audio track available for subtitle generation.",
-          aiCaptionsRetryScheduled: false,
-        });
-        return { ok: false, skipped: true, reason: "no_audio_track", retryScheduled: false };
-      }
+      const createdJob = await createMuxPremiumCaptionsJob(
+        fetch,
+        PREMIUM_CAPTIONS_API_URL,
+        createMuxBasicAuthHeader(),
+        buildMuxPremiumCaptionsRequest(args),
+      );
 
-      try {
-        await mux.video.assets.generateSubtitles(args.muxAssetId, audioTrack.id, {
-          generated_subtitles: [
-            {
-              language_code: "auto" as any,
-              name: "Original audio (generated)",
-              passthrough: GENERATED_CAPTIONS_PASSTHROUGH,
-            },
-          ],
-        });
-      } catch (error) {
-        // Benign race: a text track was created concurrently (or already
-        // existed in a non-`ready` state the guard above could not see). Treat
-        // as success — do NOT mark captions failed; the track.ready webhook
-        // drives the rest.
-        const message = getErrorMessage(error);
-        if (isCaptionsAlreadyExistError(message)) {
-          console.log(
-            `[captions] generateSubtitles for ${args.muxAssetId} no-op: text track already exists`,
-          );
-          await upsertCaptionMetadataFields(ctx, args, {
-            aiCaptionsRequestedAtMs:
-              asNumber(custom.aiCaptionsRequestedAtMs) ?? Date.now(),
-            aiCaptionsUnavailableReason: null,
-            aiCaptionsRetryScheduled: false,
-          });
-          return { ok: true, skipped: true, reason: "captions_already_exist" };
-        }
-        throw error;
-      }
-
-      const shouldRetry = nextAttempt < MAX_ATTEMPTS;
+      const shouldRetry =
+        (isActiveMuxRobotsJobStatus(createdJob.status) ||
+          createdJob.status === "completed") &&
+        nextAttempt < MAX_ATTEMPTS;
       await upsertCaptionMetadataFields(ctx, args, {
-        aiCaptionsRequestedAtMs: Date.now(),
+        aiCaptionsRequestedAtMs:
+          asNumber(custom.aiCaptionsRequestedAtMs) ?? Date.now(),
+        aiCaptionsJobId: createdJob.id,
+        aiCaptionsJobStatus: createdJob.status,
+        aiCaptionsSource: "mux_premium",
         aiCaptionsAttemptCount: nextAttempt,
         aiCaptionsUnavailableReason: null,
         aiCaptionsRetryScheduled: shouldRetry,
       });
+      await applyPremiumCaptionsJobUpdate(ctx, args, createdJob);
 
       if (shouldRetry) {
         await ctx.scheduler.runAfter(
-          getRetryDelayMs(nextAttempt),
+          createdJob.status === "completed" ? 0 : getRetryDelayMs(nextAttempt),
           (internal as any).captions.ensureGeneratedCaptionsTrackInternal,
           {
             muxAssetId: args.muxAssetId,
@@ -511,10 +675,16 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
         );
       }
 
-      return { ok: true, skipped: false, retryScheduled: shouldRetry, nextAttempt };
+      return {
+        ok: createdJob.status !== "errored" && createdJob.status !== "cancelled",
+        skipped: false,
+        status: createdJob.status,
+        retryScheduled: shouldRetry,
+        nextAttempt,
+      };
     } catch (error) {
       const message = getErrorMessage(error);
-      const retryable = !isNonRetryableCaptionsError(message);
+      const retryable = isRetryableCaptionsError(error, message);
       const shouldRetry = retryable && nextAttempt < MAX_ATTEMPTS;
 
       await upsertCaptionMetadataFields(ctx, args, {

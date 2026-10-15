@@ -39,6 +39,23 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function errorStatus(value: unknown): number | undefined {
+  const error = asRecord(value);
+  return asNumber(error?.status) ?? asNumber(error?.statusCode);
+}
+
+function isNonDeletableMuxAssetReference(value: unknown): boolean {
+  const error = asRecord(value);
+  const message = asString(error?.message)?.toLowerCase() ?? "";
+  if (errorStatus(value) !== 400) return false;
+  return (
+    (message.includes("invalid external asset id") &&
+      message.includes("mismatching environment")) ||
+    (message.includes("you provided a ") &&
+      message.includes(" id but this api requires a asset id"))
+  );
+}
+
 function asVisibility(
   value: unknown
 ): "private" | "unlisted" | "public" | undefined {
@@ -273,13 +290,65 @@ export const resetVideoLibrary = action({
   handler: async (
     ctx,
   ): Promise<{
+    discoveredComponentAssets: number;
+    deletedCurrentMuxAssets: number;
+    skippedLegacyMuxAssets: number;
+    deletedComponentVideos: number;
     clearedAgentUsers: number;
     agentUserScanCount: number;
     deletedVideoEmbeddings: number;
     deletedVideoChatThreads: number;
     deletedAudioTranslationJobs: number;
+    deletedCaptionTranslationJobs: number;
+    deletedCaptionEditingJobs: number;
     deletedMuxAssetCacheRows: number;
   }> => {
+    const mux = new Mux({
+      tokenId: requiredEnv("MUX_TOKEN_ID", process.env.MUX_TOKEN_ID),
+      tokenSecret: requiredEnv("MUX_TOKEN_SECRET", process.env.MUX_TOKEN_SECRET),
+    });
+    let discoveredComponentAssets = 0;
+    let deletedCurrentMuxAssets = 0;
+    let skippedLegacyMuxAssets = 0;
+    let deletedComponentVideos = 0;
+
+    // listAssets is limit-based rather than cursor-based. Removing each batch
+    // makes the next query advance until the component contains no assets.
+    while (true) {
+      const assets = (await ctx.runQuery(components.mux.catalog.listAssets, {
+        limit: 100,
+      })) as Array<Record<string, unknown>>;
+      if (assets.length === 0) break;
+
+      for (const asset of assets) {
+        const raw = asRecord(asset.raw);
+        const muxAssetId = asString(asset.muxAssetId) ?? asString(raw?.id);
+        if (!muxAssetId) {
+          throw new Error("Mux component contains an asset without an asset ID.");
+        }
+        discoveredComponentAssets += 1;
+
+        try {
+          await mux.video.assets.delete(muxAssetId);
+          deletedCurrentMuxAssets += 1;
+        } catch (error) {
+          if (errorStatus(error) === 404) {
+            // A prior partial reset already removed this asset remotely.
+          } else if (isNonDeletableMuxAssetReference(error)) {
+            skippedLegacyMuxAssets += 1;
+          } else {
+            throw error;
+          }
+        }
+
+        await ctx.runMutation(
+          (components as any).mux.videos.deleteVideoByMuxAssetIdPublic,
+          { muxAssetId },
+        );
+        deletedComponentVideos += 1;
+      }
+    }
+
     const agentUserIds = new Set<string>();
     let cursor: string | null = null;
     let agentUserScanCount = 0;
@@ -322,10 +391,16 @@ export const resetVideoLibrary = action({
       deletedVideoEmbeddings: number;
       deletedVideoChatThreads: number;
       deletedAudioTranslationJobs: number;
+      deletedCaptionTranslationJobs: number;
+      deletedCaptionEditingJobs: number;
       deletedMuxAssetCacheRows: number;
     };
 
     return {
+      discoveredComponentAssets,
+      deletedCurrentMuxAssets,
+      skippedLegacyMuxAssets,
+      deletedComponentVideos,
       clearedAgentUsers,
       agentUserScanCount,
       ...clearedTables,

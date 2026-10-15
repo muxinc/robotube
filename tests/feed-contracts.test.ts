@@ -13,7 +13,6 @@ import { test } from "node:test";
 import {
   type FeedChannelInfo,
   type FeedReadModelAsset,
-  DEFAULT_CHANNEL_NAME,
   FEED_VIDEO_CARD_FIELDS,
   buildFeedCardTitle,
   buildFeedThumbnailUrl,
@@ -302,24 +301,28 @@ test("a missing title falls back to a deterministic placeholder", () => {
   assert.equal(buildFeedCardTitle("Real title", "abcdef123456"), "Real title");
 });
 
-test("a missing uploader falls back to the default channel and no avatar", () => {
-  const card = buildFeedVideoCard(
-    makeAsset({ muxAssetId: "n1", feedUploaderUserId: undefined }),
-    CHANNELS,
-  ).card!;
+for (const uploader of [undefined, "default", "user_missing", "premiere-pro:tears_of_steel_1080p.mov"]) {
+  test(`an unlinked uploader (${uploader}) is hidden even with a channel override`, () => {
+    assert.deepEqual(buildFeedVideoCard(
+      makeAsset({ muxAssetId: "external", feedUploaderUserId: uploader, feedChannelName: "Robotube" }),
+      CHANNELS,
+    ), { card: null, hiddenReason: "missing_uploader" });
+  });
+}
 
-  assert.equal(card.channelName, DEFAULT_CHANNEL_NAME);
-  assert.equal(card.channelAvatarUrl, null);
-});
-
-test("an unresolvable uploader falls back to the default channel", () => {
-  const card = buildFeedVideoCard(
-    makeAsset({ muxAssetId: "n2", feedUploaderUserId: "user_missing" }),
-    CHANNELS,
-  ).card!;
-
-  assert.equal(card.channelName, DEFAULT_CHANNEL_NAME);
-  assert.equal(card.channelAvatarUrl, null);
+test("external and missing uploaders are removed without changing the pagination cursor", () => {
+  const result = buildFeedVideoCardPageResult({
+    page: [
+      makeAsset({ muxAssetId: "external", feedUploaderUserId: "premiere-pro:tears_of_steel_1080p.mov" }),
+      makeAsset({ muxAssetId: "owned" }),
+      makeAsset({ muxAssetId: "deleted-owner", feedUploaderUserId: "user_missing" }),
+    ],
+    continueCursor: "next-page",
+    isDone: false,
+  }, CHANNELS);
+  assert.deepEqual(result.page.map((card) => card.muxAssetId), ["owned"]);
+  assert.equal(result.continueCursor, "next-page");
+  assert.equal(result.isDone, false);
 });
 
 test("an uploader without an avatar still resolves its channel name", () => {
@@ -343,15 +346,15 @@ test("an explicit channel-name override wins over the uploader name", () => {
   assert.equal(card.channelAvatarUrl, "https://cdn.example/a.png");
 });
 
-test("channel name derivation follows username, name, email, default", () => {
+test("channel name derivation uses account identity without a shared fallback", () => {
   assert.equal(
     deriveChannelNameFromUser({ username: "ada", name: "Ada L" }),
     "@ada",
   );
   assert.equal(deriveChannelNameFromUser({ name: "Ada L" }), "Ada L");
   assert.equal(deriveChannelNameFromUser({ email: "ada@example.com" }), "ada");
-  assert.equal(deriveChannelNameFromUser({}), DEFAULT_CHANNEL_NAME);
-  assert.equal(deriveChannelNameFromUser(null), DEFAULT_CHANNEL_NAME);
+  assert.equal(deriveChannelNameFromUser({}), null);
+  assert.equal(deriveChannelNameFromUser(null), null);
 });
 
 test("a missing duration or creation timestamp degrades safely", () => {

@@ -7,6 +7,7 @@ import {
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useVideoPlayer, VideoView } from "expo-video";
+import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   Alert,
@@ -373,6 +374,7 @@ function ThumbnailPicker({
 }
 
 export default function HomeScreen() {
+  const router = useRouter();
   const createMuxDirectUpload = useAction(
     (api as any).uploads.createMuxDirectUpload,
   );
@@ -489,6 +491,59 @@ export default function HomeScreen() {
           .join(", ")
       : "Not requested";
   const thumbnailSelection = pipelineStatus?.thumbnailSelection;
+  const captionEditorState = useQuery(
+    (api as any).captionEditing.getOwnCaptionEditorState,
+    draftMuxAssetId ? { muxAssetId: draftMuxAssetId } : "skip",
+  ) as
+    | {
+        canEdit: boolean;
+        unavailableReason?: string;
+        sourceTrack?: { status: string };
+        latestJob?: {
+          status: string;
+          reconciliationStatus?: string;
+          submissionUncertain?: boolean;
+          pollingTimedOut?: boolean;
+        };
+      }
+    | null
+    | undefined;
+  const captionEditStatus = captionEditorState?.latestJob?.status;
+  const captionStateLoading =
+    Boolean(draftMuxAssetId) && captionEditorState == null;
+  const captionReconciliationStatus =
+    captionEditorState?.latestJob?.reconciliationStatus;
+  const captionEditActive =
+    captionEditStatus === "requested" ||
+    captionEditStatus === "pending" ||
+    captionEditStatus === "processing";
+  const captionUnavailableReason =
+    captionEditorState?.unavailableReason?.toLowerCase() ?? "";
+  const captionsPreparing =
+    captionEditorState === undefined ||
+    captionEditorState?.sourceTrack?.status === "preparing" ||
+    captionUnavailableReason.includes("prepar") ||
+    captionUnavailableReason.includes("not ready");
+  const captionReviewLabel = captionEditorState?.latestJob?.submissionUncertain
+    ? "Needs review"
+    : captionEditorState?.latestJob?.pollingTimedOut
+      ? "Check status"
+      : captionEditActive
+        ? "Applying edits"
+    : captionEditStatus === "completed"
+      ? captionReconciliationStatus === "waiting" ||
+        captionReconciliationStatus === "processing"
+        ? "Finishing update"
+        : captionReconciliationStatus === "errored"
+          ? "Needs refresh"
+          : "Reviewed"
+      : captionEditStatus === "errored" || captionEditStatus === "cancelled"
+        ? "Could not apply edits"
+        : captionEditorState?.canEdit
+          ? "Ready to review"
+          : captionsPreparing
+            ? "Preparing captions"
+            : "Unavailable";
 
   useEffect(() => {
     if (!lastUploadId || isUploading) return;
@@ -853,7 +908,7 @@ export default function HomeScreen() {
 
   const handlePublishRobotDraft = async () => {
     const muxAssetId = pipelineStatus?.muxAssetId;
-    if (!muxAssetId) return;
+    if (!muxAssetId || captionStateLoading || captionEditActive) return;
 
     try {
       setIsSavingMetadata(true);
@@ -1328,6 +1383,18 @@ export default function HomeScreen() {
                   </View>
                 </View>
 
+                <ReviewRow
+                  icon="logo-closed-captioning"
+                  label="Review captions"
+                  onPress={() =>
+                    router.push({
+                      pathname: "/video/[muxAssetId]/edit-captions",
+                      params: { muxAssetId: draftMuxAssetId },
+                    })
+                  }
+                  value={captionReviewLabel}
+                />
+
                 <View style={styles.draftStatusRow}>
                   <Ionicons
                     name={isRegeneratingMetadata ? "sync" : "checkmark-circle"}
@@ -1384,7 +1451,12 @@ export default function HomeScreen() {
                 </View>
 
                 <PrimaryButton
-                  disabled={isRegeneratingMetadata || isSavingMetadata}
+                  disabled={
+                    isRegeneratingMetadata ||
+                    isSavingMetadata ||
+                    captionStateLoading ||
+                    captionEditActive
+                  }
                   icon="paper-plane-outline"
                   label={isSavingMetadata ? "Publishing..." : "Publish video"}
                   onPress={handlePublishRobotDraft}

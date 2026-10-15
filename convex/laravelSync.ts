@@ -364,6 +364,8 @@ export const syncRobotRunInternal = internalMutation({
 
     const existingRunId = existingCustom.laravelRunId;
     const existingStatus = asString(existingCustom.laravelRunStatus);
+    const captionDependentsOwnedByConvex =
+      asNumber(existingCustom.captionRevisionOwnedByConvex) !== undefined;
     const results = args.results ?? undefined;
 
     // Run-id authority: an OLDER run_id must never overwrite a newer run's data.
@@ -391,6 +393,9 @@ export const syncRobotRunInternal = internalMutation({
     const translations = results?.translations;
     if (Array.isArray(translations)) {
       for (const entry of translations) {
+        if (entry.type === "captions" && captionDependentsOwnedByConvex) {
+          continue;
+        }
         const mappedStatus =
           entry.status === "completed"
             ? "completed"
@@ -439,7 +444,7 @@ export const syncRobotRunInternal = internalMutation({
       }
 
       // Summary -> video description (feed.ts maps summary <- metadata.description).
-      if (typeof results.summary === "string") {
+      if (!captionDependentsOwnedByConvex && typeof results.summary === "string") {
         const suggestedDescription = results.summary.trim();
         if (suggestedDescription.length > 0) {
           nextCustom.aiSuggestedDescription = suggestedDescription;
@@ -455,7 +460,11 @@ export const syncRobotRunInternal = internalMutation({
       // Keep the suggestion for the finishing screen, but only apply it when
       // the uploader explicitly asked Mux Robots to write the title. Legacy
       // uploads retain the previous fill-only-when-empty behavior.
-      if (typeof results.title === "string" && results.title.trim().length > 0) {
+      if (
+        !captionDependentsOwnedByConvex &&
+        typeof results.title === "string" &&
+        results.title.trim().length > 0
+      ) {
         const suggestedTitle = results.title.trim();
         nextCustom.aiSuggestedTitle = suggestedTitle;
         if (
@@ -468,7 +477,7 @@ export const syncRobotRunInternal = internalMutation({
 
       // Tags -> video tags. Native replaces tags with the generated set on
       // summarize completion (normalizeGeneratedTags), so replace when provided.
-      if (Array.isArray(results.tags)) {
+      if (!captionDependentsOwnedByConvex && Array.isArray(results.tags)) {
         const suggestedTags = normalizeGeneratedTags(results.tags);
         nextCustom.aiSuggestedTags = suggestedTags;
         if (existingCustom.aiUseGeneratedTags !== false) {
@@ -479,7 +488,12 @@ export const syncRobotRunInternal = internalMutation({
       // Chapters -> custom.aiChapters, converted to the EXACT native camelCase
       // shape ({ title, startTime }) feed.ts asChapterArray reads. Laravel
       // forwards Mux snake_case ({ start_time }), which the UI silently drops.
-      if (Array.isArray(results.chapters)) {
+      const supersededChaptersRunId = asNumber(existingCustom.aiChaptersSupersededLaravelRunId);
+      if (
+        !captionDependentsOwnedByConvex &&
+        !(supersededChaptersRunId !== undefined && args.runId <= supersededChaptersRunId) &&
+        Array.isArray(results.chapters)
+      ) {
         nextCustom.aiChapters = toNativeChapters(results.chapters);
         nextCustom.aiChaptersJobStatus = "completed";
         nextCustom.aiChaptersProvider = "laravel_orchestration";
@@ -491,7 +505,7 @@ export const syncRobotRunInternal = internalMutation({
       // Key moments -> custom.aiKeyMoments, converted to the EXACT native
       // camelCase StoredKeyMoment shape (startMs/audibleNarrative/...) feed.ts
       // asKeyMomentArray reads. Laravel forwards Mux snake_case.
-      if (Array.isArray(results.key_moments)) {
+      if (!captionDependentsOwnedByConvex && Array.isArray(results.key_moments)) {
         nextCustom.aiKeyMoments = toNativeKeyMoments(results.key_moments);
         nextCustom.aiKeyMomentsJobStatus = "completed";
         nextCustom.aiKeyMomentsProvider = "laravel_orchestration";

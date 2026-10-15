@@ -52,19 +52,12 @@ export type FeedSearchIndexItem = FeedVideoCardItem & {
   tags: string[];
 };
 
-export const DEFAULT_CHANNEL_NAME = "Robotube";
-
 /** Maximum server-generated thumbnail width; clients may request less. */
 export const FEED_THUMBNAIL_WIDTH = 1280;
 
 export type FeedChannelInfo = {
   channelName: string;
   channelAvatarUrl: string | null;
-};
-
-export const DEFAULT_FEED_CHANNEL: FeedChannelInfo = {
-  channelName: DEFAULT_CHANNEL_NAME,
-  channelAvatarUrl: null,
 };
 
 /** Metadata visibility, denormalized onto the cache as `feedVisibility`. */
@@ -105,7 +98,8 @@ export type FeedReadModelAsset = {
 export type FeedCardHiddenReason =
   | "not_ready_or_deleted"
   | "no_public_playback"
-  | "private_visibility";
+  | "private_visibility"
+  | "missing_uploader";
 
 export type FeedCardBuildResult =
   | { card: FeedVideoCardItem; hiddenReason: null }
@@ -211,7 +205,7 @@ export function deriveChannelNameFromUser(
     | { username?: unknown; name?: unknown; email?: unknown }
     | null
     | undefined,
-): string {
+): string | null {
   const username = asNonEmptyString(user?.username);
   if (username) return `@${username}`;
 
@@ -219,9 +213,9 @@ export function deriveChannelNameFromUser(
   if (name) return name;
 
   const email = asNonEmptyString(user?.email);
-  if (email) return email.split("@")[0] || DEFAULT_CHANNEL_NAME;
+  if (email) return email.split("@")[0] || null;
 
-  return DEFAULT_CHANNEL_NAME;
+  return null;
 }
 
 /**
@@ -296,6 +290,10 @@ export function buildFeedVideoCard(
 
   const uploaderUserId = resolveFeedUploaderUserId(asset);
   const channel = uploaderUserId ? channels.get(uploaderUserId) : undefined;
+  // A display override cannot stand in for a real Robotube uploader.
+  if (!channel) {
+    return { card: null, hiddenReason: "missing_uploader" };
+  }
 
   return {
     hiddenReason: null,
@@ -309,10 +307,8 @@ export function buildFeedVideoCard(
       ),
       title: buildFeedCardTitle(asset.feedTitle, asset.muxAssetId),
       channelName:
-        asNonEmptyString(asset.feedChannelName) ??
-        channel?.channelName ??
-        DEFAULT_CHANNEL_NAME,
-      channelAvatarUrl: channel?.channelAvatarUrl ?? null,
+        asNonEmptyString(asset.feedChannelName) ?? channel.channelName,
+      channelAvatarUrl: channel.channelAvatarUrl,
       durationSeconds: asFiniteNumber(asset.durationSeconds),
       createdAtMs: asFiniteNumber(asset.createdAtMs) ?? 0,
     },

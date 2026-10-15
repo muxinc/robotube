@@ -101,6 +101,7 @@ type FeedVideoCardProps = {
   thumbnailUrl?: string;
   onPress?: (item: FeedVideoItem, startAtSeconds?: number) => void;
   showPlayIcon?: boolean;
+  showMoreIcon?: boolean;
   playback?: FeedVideoCardPlayback;
   onMeasured?: (layout: { y: number; height: number }) => void;
 };
@@ -110,6 +111,7 @@ function FeedVideoCardComponent({
   thumbnailUrl,
   onPress,
   showPlayIcon = true,
+  showMoreIcon = true,
   playback,
   onMeasured,
 }: FeedVideoCardProps) {
@@ -272,9 +274,11 @@ function FeedVideoCardComponent({
             {item.channelName} · {formatPublished(item.createdAtMs)}
           </Text>
         </View>
-        <View style={styles.moreButton}>
-          <Ionicons name="ellipsis-vertical" size={18} color="#4A4A4A" />
-        </View>
+        {showMoreIcon ? (
+          <View style={styles.moreButton}>
+            <Ionicons name="ellipsis-vertical" size={18} color="#4A4A4A" />
+          </View>
+        ) : null}
       </View>
     </Pressable>
   );
@@ -297,6 +301,7 @@ export const FeedVideoCard = memo(
     previous.item === next.item &&
     previous.thumbnailUrl === next.thumbnailUrl &&
     previous.showPlayIcon === next.showPlayIcon &&
+    previous.showMoreIcon === next.showMoreIcon &&
     previous.onPress === next.onPress &&
     previous.onMeasured === next.onMeasured &&
     previous.playback?.player === next.playback?.player &&

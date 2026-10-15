@@ -250,7 +250,10 @@ async function applyCaptionTranslationJobUpdate(
     return { ok: false, skipped: true, reason: "job_missing_or_replaced" as const };
   }
 
-  if (typeof row.jobId === "string" && row.jobId.length > 0 && row.jobId !== job.id) {
+  // A requested row with no job id has been invalidated and is waiting for a
+  // new translation job. Never let a late webhook from the prior source
+  // revision claim that row again.
+  if (typeof row.jobId !== "string" || !row.jobId || row.jobId !== job.id) {
     return { ok: false, skipped: true, reason: "job_missing_or_replaced" as const };
   }
 
@@ -349,12 +352,13 @@ export const ensureCaptionTranslationsForAssetInternal = internalAction({
     languageCodes: v.array(v.string()),
     title: v.optional(v.string()),
     attempt: v.optional(v.number()),
+    forceConvexOwnership: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<EnsureCaptionTranslationsResult> => {
     // Laravel owns caption/audio translation Robots jobs when the flag is on.
     // No-op so Convex creates zero caption-translation Robots jobs (covers all
     // callers: moderation, migrations, self-reschedule).
-    if (isLaravelOrchestrationEnabled()) {
+    if (isLaravelOrchestrationEnabled() && !args.forceConvexOwnership) {
       return { ok: true, skipped: true, reason: "laravel_orchestration" };
     }
 
@@ -409,6 +413,7 @@ export const ensureCaptionTranslationsForAssetInternal = internalAction({
             languageCodes,
             title: args.title,
             attempt: nextAttempt,
+            forceConvexOwnership: args.forceConvexOwnership,
           },
         );
       }
@@ -422,7 +427,7 @@ export const ensureCaptionTranslationsForAssetInternal = internalAction({
       };
     }
 
-    if (isMuxRobotsPollingDisabled()) {
+    if (isMuxRobotsPollingDisabled() && !args.forceConvexOwnership) {
       return { ok: true, skipped: true, reason: "polling_disabled" };
     }
 
@@ -512,6 +517,7 @@ export const ensureCaptionTranslationsForAssetInternal = internalAction({
               languageCode: item.languageCode,
               jobId,
               attempt: 0,
+              forceConvexOwnership: args.forceConvexOwnership,
             },
           );
         }
@@ -552,9 +558,10 @@ export const pollCaptionTranslationJobStatusInternal = internalAction({
     languageCode: v.string(),
     jobId: v.string(),
     attempt: v.optional(v.number()),
+    forceConvexOwnership: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<PollCaptionTranslationsResult> => {
-    if (isMuxRobotsPollingDisabled()) {
+    if (isMuxRobotsPollingDisabled() && !args.forceConvexOwnership) {
       return { ok: false, skipped: true, reason: "job_missing_or_replaced" };
     }
 
@@ -619,6 +626,7 @@ export const pollCaptionTranslationJobStatusInternal = internalAction({
             languageCode: args.languageCode,
             jobId: args.jobId,
             attempt: nextAttempt,
+            forceConvexOwnership: args.forceConvexOwnership,
           },
         );
       }
@@ -662,6 +670,7 @@ export const pollCaptionTranslationJobStatusInternal = internalAction({
           languageCode: args.languageCode,
           jobId: args.jobId,
           attempt: nextAttempt,
+          forceConvexOwnership: args.forceConvexOwnership,
         },
       );
       return { ok: false, skipped: false, retryScheduled: true };

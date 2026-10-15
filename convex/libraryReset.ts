@@ -46,6 +46,14 @@ export const deleteVideoDataInternal = internalMutation({
       "captionTranslationJobs",
       args.muxAssetId,
     );
+    const captionEditingJobs = await deleteRowsForAsset(
+      db,
+      "captionEditingJobs",
+      args.muxAssetId,
+    );
+    for (const row of captionEditingJobs) {
+      if (row.temporaryStorageId) await ctx.storage.delete(row.temporaryStorageId);
+    }
     const aiMetadataLocks = await deleteRowsForAsset(
       db,
       "aiMetadataLocks",
@@ -97,6 +105,7 @@ export const deleteVideoDataInternal = internalMutation({
       deletedVideoChatThreads: videoChatThreads.length,
       deletedAudioTranslationJobs: audioTranslationJobs.length,
       deletedCaptionTranslationJobs: captionTranslationJobs.length,
+      deletedCaptionEditingJobs: captionEditingJobs.length,
       deletedAiMetadataLocks: aiMetadataLocks.length,
       deletedModerationLocks: moderationLocks.length,
     };
@@ -134,6 +143,17 @@ export const clearVideoLibraryInternal = internalMutation({
       await db.delete(row._id);
     }
 
+    const captionTranslationJobs = await db.query("captionTranslationJobs").collect();
+    for (const row of captionTranslationJobs) {
+      await db.delete(row._id);
+    }
+
+    const captionEditingJobs = await db.query("captionEditingJobs").collect();
+    for (const row of captionEditingJobs) {
+      if (row.temporaryStorageId) await ctx.storage.delete(row.temporaryStorageId);
+      await db.delete(row._id);
+    }
+
     const muxAssetCache = await db.query("muxAssetCache").collect();
     for (const row of muxAssetCache) {
       await db.delete(row._id);
@@ -143,6 +163,8 @@ export const clearVideoLibraryInternal = internalMutation({
       deletedVideoEmbeddings: videoEmbeddings.length,
       deletedVideoChatThreads: videoChatThreads.length,
       deletedAudioTranslationJobs: audioTranslationJobs.length,
+      deletedCaptionTranslationJobs: captionTranslationJobs.length,
+      deletedCaptionEditingJobs: captionEditingJobs.length,
       deletedMuxAssetCacheRows: muxAssetCache.length,
     };
   },
