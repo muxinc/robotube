@@ -3,6 +3,7 @@ import { v } from "convex/values";
 
 import { components, internal } from "./_generated/api";
 import { internalMutation, internalQuery, query } from "./_generated/server";
+import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 import { parsePassthroughUserId } from "./feedContracts";
 import { acceptsCensorEvent, blocksCaptionEditing, canRecoverCaptionCensor } from "./captionEditingWorkflow";
 
@@ -102,8 +103,10 @@ export const getOwnCaptionEditorState = query({
         row.status === "pending" ||
         row.status === "processing",
     );
-    const source =
-      readyTextTracks.find((track) => track.id === preferredId) ??
+    const failedRobotsSource = latest?.operation === "robots" && ["errored", "cancelled"].includes(latest.status);
+    const source = failedRobotsSource && preferredId
+      ? readyTextTracks.find((track) => track.id === preferredId)
+      : readyTextTracks.find((track) => track.id === preferredId) ??
       readyTextTracks.find((track) => track.id === latest?.uploadedTrackId) ??
       (latest?.reconciliationStatus === "completed" && latest.uploadedTrackId
         ? {
@@ -120,7 +123,7 @@ export const getOwnCaptionEditorState = query({
     let unavailableReason: string | undefined;
     if (!isEnabled) unavailableReason = "Caption cleanup is temporarily unavailable.";
     else if (asset.status !== "ready") unavailableReason = "The video is still preparing.";
-    else if (!source) unavailableReason = "No ready caption track is available.";
+    else if (!source) unavailableReason = typeof custom.aiCaptionsUnavailableReason === "string" ? custom.aiCaptionsUnavailableReason : "No ready caption track is available. The original captions may require recovery.";
     else if (translationsActive)
       unavailableReason = "Caption translations are still processing. Try cleanup after they finish.";
     else if (latest?.submissionUncertainAtMs)
@@ -498,6 +501,11 @@ export const syncEditJobInternal = internalMutation({
       if (patch.pipelineStage === "censor_failed") patch.errorMessage = "Censoring failed. Your original and manually edited captions are retained.";
     }
     await ctx.db.patch(row._id, patch);
+    if (row.operation === "robots" && !args.pollingTimedOut &&
+        (args.status === "errored" || args.status === "cancelled") &&
+        (row.status !== args.status || row.pollingTimedOutAtMs)) {
+      await ctx.scheduler.runAfter(0, (internal as any).captionEditingNode.reconcileFailedRobotsSourceInternal, { requestId: row._id });
+    }
     if (args.status === "completed" && row.status !== "completed") {
       await ctx.scheduler.runAfter(0, (internal as any).captionEditingNode.reconcileCompletedCaptionEditInternal, { requestId: row._id });
     }
@@ -507,6 +515,44 @@ export const syncEditJobInternal = internalMutation({
       shouldReconcile: args.status === "completed" && row.status !== "completed",
       row: { ...row, ...patch },
     };
+  },
+});
+
+// Keep the guarded component/cache/metadata writes in one mutation transaction.
+export const rebindFailedRobotsSourceInternal = internalMutation({
+  args: { requestId: v.id("captionEditingJobs"), asset: v.any() },
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.requestId);
+    if (!row || row.operation !== "robots" || row.pollingTimedOutAtMs ||
+        !["errored", "cancelled"].includes(row.status)) return { skipped: true };
+    const rows = await ctx.db.query("captionEditingJobs").withIndex("by_asset_created", q => q.eq("muxAssetId", row.muxAssetId)).order("desc").collect();
+    if (rows[0]?._id !== row._id) return { skipped: true };
+    const cached = await ctx.runQuery((internal as any).muxAssetCache.getByMuxAssetIdInternal, { muxAssetId: row.muxAssetId });
+    if (cached?.isDeleted) return { skipped: true };
+    const video: any = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, { muxAssetId: row.muxAssetId, userId: row.userId });
+    const metadata = record(Array.isArray(video?.metadata) ? video.metadata[0] : video?.metadata);
+    const owner = metadata.userId ?? parsePassthroughUserId(record(video?.asset).passthrough);
+    const custom = record(metadata.custom);
+    if (!video?.asset || owner !== row.userId || (custom.aiCaptionsRevision ?? 0) !== row.revision - 1 ||
+        custom.aiCaptionsTrackId !== row.sourceTrackId || args.asset.id !== row.muxAssetId) return { skipped: true };
+    const tracks = Array.isArray(args.asset.tracks) ? args.asset.tracks : [];
+    const original = tracks.find((track: any) => track.id === row.sourceTrackId);
+    if (original?.type === "text" && original.status === "ready") return { skipped: true };
+    const candidates = !original && row.sourceTrackName && row.sourceLanguageCode
+      ? tracks.filter((track: any) => track.type === "text" && track.status === "ready" &&
+          track.name === row.sourceTrackName &&
+          (track.language_code ?? track.languageCode ?? track.language) === row.sourceLanguageCode)
+      : [];
+    const restored = candidates.length === 1 ? candidates[0] : undefined;
+    await ctx.runMutation(components.mux.sync.upsertAssetFromPayloadPublic, { asset: args.asset });
+    await ctx.runMutation((internal as any).muxAssetCache.upsertFromPayloadInternal, { asset: args.asset });
+    // Restored text is unchanged: retain the source revision and all dependent AI data.
+    await upsertVideoMetadataAndSyncFeedReadModel(ctx, { muxAssetId: row.muxAssetId, userId: row.userId, custom: {
+      ...custom,
+      aiCaptionsTrackId: restored?.id ?? row.sourceTrackId,
+      aiCaptionsUnavailableReason: restored ? null : "Caption editing failed and the original track is unavailable. The restored source could not be identified safely; manual recovery is required.",
+    } });
+    return { restored: Boolean(restored), trackId: restored?.id };
   },
 });
 

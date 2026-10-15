@@ -449,6 +449,7 @@ export const editCaptionsForAsset = action({
     if (args.captionRevision !== undefined && args.captionRevision !== revision) throw new Error("Caption document is stale. Refresh and try again.");
     const created: any = await ctx.runMutation((internal as any).captionEditing.createRequestedEditInternal, {
       muxAssetId, userId, sourceTrackId: trackId, operation: "robots",
+      sourceTrackName: typeof selected.name === "string" ? selected.name : undefined,
       sourceLanguageCode: stringValue(selected.language_code ?? selected.languageCode ?? selected.language), revision: revision + 1,
     });
     if (!created.created) {
@@ -494,6 +495,16 @@ export const editCaptionsForAsset = action({
       }
       throw new Error(message);
     }
+  },
+});
+
+export const reconcileFailedRobotsSourceInternal = internalAction({
+  args: { requestId: v.id("captionEditingJobs") },
+  handler: async (ctx, args): Promise<any> => {
+    const row: any = await ctx.runQuery((internal as any).captionEditing.getEditJobInternal, args);
+    if (!row || row.operation !== "robots" || row.pollingTimedOutAtMs || !["errored", "cancelled"].includes(row.status)) return { skipped: true };
+    const asset = await muxClient().video.assets.retrieve(row.muxAssetId);
+    return ctx.runMutation((internal as any).captionEditing.rebindFailedRobotsSourceInternal, { requestId: row._id, asset });
   },
 });
 
