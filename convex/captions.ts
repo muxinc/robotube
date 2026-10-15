@@ -776,7 +776,9 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
         aiCaptionsLastError: message,
         aiCaptionsAttemptCount: nextAttempt,
         aiCaptionsRetryScheduled: shouldRetry,
-        ...(!shouldRetry ? { aiCaptionsUnavailableReason: message, aiCaptionsPollingTimedOut: hasClaimedDirectiveRun && retryable } : {}),
+        ...(!retryable || (!shouldRetry && typeof custom.includeSpeakers === "boolean")
+          ? { aiCaptionsUnavailableReason: message, aiCaptionsPollingTimedOut: hasClaimedDirectiveRun && retryable }
+          : {}),
       });
 
       if (shouldRetry) {

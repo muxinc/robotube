@@ -168,6 +168,26 @@ test("legacy completed premium job preparing at exhaustion still recovers when r
   } finally { f.restore(); }
 });
 
+for (const failure of ["asset", "job"]) {
+  test(`legacy transient ${failure} failure at polling exhaustion permits late recovery`, async () => {
+    const f = fixture();
+    delete f.state.custom.includeSpeakers;
+    f.state.custom.aiCaptionsJobId = "job";
+    f.state.claim = null;
+    try {
+      if (failure === "asset") (globalThis as any).__recoveryRetrieveError = true;
+      else f.state.fetchError = true;
+      await f.ensure(9);
+      assert.equal(f.state.custom.aiCaptionsUnavailableReason, undefined);
+      delete (globalThis as any).__recoveryRetrieveError;
+      f.state.fetchError = false;
+      await f.ensure();
+      assert.equal(f.state.custom.aiCaptionsTrackId, "original");
+      assert.equal(f.state.requests.some((request: string) => request.startsWith("POST")), false);
+    } finally { f.restore(); }
+  });
+}
+
 for (const status of ["completed", "errored"]) {
   test(`actual webhook ingress reconciles claimed directive ${status} job without user passthrough`, async () => {
     const f = fixture();
