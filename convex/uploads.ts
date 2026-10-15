@@ -104,6 +104,7 @@ export const createMuxDirectUpload = action({
     description: v.optional(v.string()),
     useGeneratedTitle: v.optional(v.boolean()),
     useGeneratedDescription: v.optional(v.boolean()),
+    includeSpeakers: v.optional(v.boolean()),
     audioTranslationLanguageCodes: v.optional(v.array(v.string())),
     captionTranslationLanguageCodes: v.optional(v.array(v.string())),
   },
