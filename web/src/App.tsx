@@ -121,13 +121,7 @@ function AppShell({ children }: { children: ReactNode }) {
   const [query, setQuery] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
-  const [sidebarExpanded, setSidebarExpanded] = useState(() => {
-    try {
-      const saved = localStorage.getItem("robotube:sidebar-expanded");
-      if (saved !== null) return saved === "true";
-    } catch { /* Keep navigation usable when browser storage is unavailable. */ }
-    return !location.pathname.startsWith("/watch/");
-  });
+  const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const mobileNavToggleRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -147,9 +141,7 @@ function AppShell({ children }: { children: ReactNode }) {
   }, [mobileMenuOpen]);
 
   const toggleSidebar = () => {
-    const next = !sidebarExpanded;
-    setSidebarExpanded(next);
-    try { localStorage.setItem("robotube:sidebar-expanded", String(next)); } catch { /* Optional preference. */ }
+    setSidebarExpanded((expanded) => !expanded);
   };
 
   const submitSearch = (event: FormEvent) => {
@@ -160,7 +152,7 @@ function AppShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className={`app-shell${location.pathname === "/" ? " app-shell--home" : ""}${sidebarExpanded ? "" : " app-shell--sidebar-collapsed"}${mobileMenuOpen ? " app-shell--mobile-nav-open" : ""}`}>
+    <div className={`app-shell${sidebarExpanded ? "" : " app-shell--sidebar-collapsed"}${mobileMenuOpen ? " app-shell--mobile-nav-open" : ""}`}>
       <header className="topbar">
         <div className="topbar__inner">
           <div className="topbar__brand">

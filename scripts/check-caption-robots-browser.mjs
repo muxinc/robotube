@@ -65,6 +65,24 @@ if(exceptions.length) console.log(JSON.stringify(exceptions));
 assert.equal(await evaluate('!!document.querySelector("dialog[open]")'),true);
 assert.equal(await evaluate('document.querySelectorAll(".caption-cue").length'),3);
 assert.equal(await evaluate('document.querySelectorAll(".caption-cue textarea").length'),0);
+for (const viewport of [{width:1280,height:800,mobile:false},{width:390,height:844,mobile:true}]) {
+ await send('Emulation.setDeviceMetricsOverride',{...viewport,deviceScaleFactor:1});await pause(100);
+ await evaluate('document.querySelector(".caption-dialog__body").scrollTop=0');
+ assert.equal(await evaluate(`(()=>{
+   const body=document.querySelector('.caption-dialog__body').getBoundingClientRect();
+   const cleanup=document.querySelector('.caption-switch').getBoundingClientRect();
+   const transcript=document.querySelector('[aria-label="Caption transcript"]').getBoundingClientRect();
+   return cleanup.top>=body.top && cleanup.bottom<=body.bottom && cleanup.bottom<transcript.top;
+ })()`),true,`AI cleanup must be visible before the transcript without scrolling at ${viewport.width}px`);
+ await evaluate('document.querySelector("input[role=switch]").click()');await pause(50);
+ assert.equal(await evaluate(`(()=>{
+   const body=document.querySelector('.caption-dialog__body').getBoundingClientRect();
+   const mode=document.querySelector('.caption-switch').closest('fieldset').querySelector('select').getBoundingClientRect();
+   return mode.top>=body.top && mode.bottom<=body.bottom;
+ })()`),true,`Profanity mode must be visible without scrolling at ${viewport.width}px`);
+ await evaluate('document.querySelector("input[role=switch]").click()');await pause(50);
+}
+await send('Emulation.setDeviceMetricsOverride',{width:1280,height:800,deviceScaleFactor:1,mobile:false});await pause(100);
 await evaluate(`(()=>{const p=document.querySelector('.caption-cue__text');const text=p.firstChild;const index=text.textContent.indexOf('Mucks');const range=document.createRange();range.setStart(text,index);range.setEnd(text,index+5);const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);p.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));})()`);
 await pause(50);
 assert.equal(await evaluate('document.querySelector(".caption-rules input").value'),'Mucks');

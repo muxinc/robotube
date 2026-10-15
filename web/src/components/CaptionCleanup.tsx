@@ -443,6 +443,12 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
 
               {state.canEdit ? (
                 <form id="caption-cleanup-form" onSubmit={requestConfirmation} noValidate>
+                  <fieldset className="caption-section" disabled={formDisabled}>
+                    <legend>Optional AI cleanup</legend>
+                    <label className="caption-switch"><span><strong>Auto-censor profanity with Mux Robots</strong><small>Censor profanity across the track in the same Robots job. Spoken audio is unchanged. AI results cannot be previewed.</small></span><input type="checkbox" role="switch" checked={autoCensor} onChange={(event) => setAutoCensor(event.target.checked)} /><i aria-hidden="true" /></label>
+                    {autoCensor ? <label>Profanity mode<select value={censorMode} onChange={(event) => { const mode = event.target.value; if (mode === "blank" || mode === "remove" || mode === "mask") setCensorMode(mode); }}><option value="blank">Blank — bracketed underscores</option><option value="remove">Remove — delete profanity</option><option value="mask">Mask — question marks</option></select></label> : null}
+                  </fieldset>
+
                   <section className="caption-section" aria-label="Caption transcript">
                     <h3>Transcript</h3>
                     <p>Select a word or phrase in the transcript to correct it, or use a caption’s Correct wording button and narrow the phrase. Every text correction applies everywhere in the track, not just at one timestamp.</p>
@@ -488,11 +494,6 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
                     <button className="button button--outline" type="button" onClick={queueSpeaker}>Queue speaker rename</button>
                     <button className="button button--outline" type="button" onClick={() => setSpeakerName("")}>Clear name</button>
                     <ul>{speakers.map((rule, index) => <li key={rule.find}>{rule.find} → {rule.replace} <button type="button" aria-label={`Remove rename for ${rule.find}`} onClick={() => setSpeakers((current) => current.filter((_, i) => i !== index))}>Remove</button></li>)}</ul>
-                  </fieldset>
-                  <fieldset className="caption-section" disabled={formDisabled}>
-                    <legend>Optional AI cleanup</legend>
-                    <label className="caption-switch"><span><strong>Auto-censor profanity with Mux Robots</strong><small>Censor profanity across the track in the same Robots job. Spoken audio is unchanged. AI results cannot be previewed.</small></span><input type="checkbox" role="switch" checked={autoCensor} onChange={(event) => setAutoCensor(event.target.checked)} /><i aria-hidden="true" /></label>
-                    {autoCensor ? <label>Profanity mode<select value={censorMode} onChange={(event) => { const mode = event.target.value; if (mode === "blank" || mode === "remove" || mode === "mask") setCensorMode(mode); }}><option value="blank">Blank — bracketed underscores</option><option value="remove">Remove — delete profanity</option><option value="mask">Mask — question marks</option></select></label> : null}
                   </fieldset>
                   {errors.form ? <p className="caption-form-message caption-form-message--error" role="alert">{errors.form}</p> : null}
                 </form>

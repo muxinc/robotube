@@ -6,6 +6,8 @@ const ALLOWED_WEB_REDIRECT_ORIGINS = new Set([
   "https://robotube.vercel.app",
   "http://localhost:5173",
   "http://127.0.0.1:5173",
+  "http://localhost:5175",
+  "http://127.0.0.1:5175",
 ]);
 
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({

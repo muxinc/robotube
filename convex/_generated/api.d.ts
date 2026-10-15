@@ -43,6 +43,7 @@ import type * as moderation from "../moderation.js";
 import type * as moderationLocks from "../moderationLocks.js";
 import type * as muxAssetCache from "../muxAssetCache.js";
 import type * as muxWebhook from "../muxWebhook.js";
+import type * as premiumCaptionsMuxAdapter from "../premiumCaptionsMuxAdapter.js";
 import type * as search from "../search.js";
 import type * as searchFast from "../searchFast.js";
 import type * as uploadMetadata from "../uploadMetadata.js";
@@ -98,6 +99,7 @@ declare const fullApi: ApiFromModules<{
   moderationLocks: typeof moderationLocks;
   muxAssetCache: typeof muxAssetCache;
   muxWebhook: typeof muxWebhook;
+  premiumCaptionsMuxAdapter: typeof premiumCaptionsMuxAdapter;
   search: typeof search;
   searchFast: typeof searchFast;
   uploadMetadata: typeof uploadMetadata;
