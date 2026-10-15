@@ -116,13 +116,14 @@ test("real gateway polls run then premium job then exact ready track, never edit
     if (options?.method === "POST") { postCount++; assert.deepEqual(JSON.parse(options.body), { asset_id: "asset" }); return Response.json({ data: { run_id: "run" } }); }
     if (url.endsWith("/runs/run")) return Response.json({ data: { status: "completed", node_states: [{ reference_id: "premium_captions", status: "dispatched", job_id: "job" }] } });
     assert.match(url, /jobs\/generate-premium-captions\/job$/);
-    return Response.json({ data: { id: "job", status: "completed", parameters: { asset_id: "asset" }, outputs: { track_id: "exact", language_code: "en" } } });
+    return Response.json({ data: { id: "job", status: "completed", parameters: { asset_id: "asset", include_speakers: true }, outputs: { track_id: "exact", language_code: "en" } } });
   }) as any;
   const ctx: any = {
     async runQuery(_ref: any, args: any) { return args.userId ? { asset, metadata: { userId: "owner", custom } } : {}; },
     async runMutation(ref: any, args: any) {
       const name = getFunctionName(ref);
       if (name.endsWith("claimInternal")) {
+        if (!claim && !args.directiveId) return { needsConfiguration: true };
         if (!claim) { claim = { ...args, _id: "claim" }; return { ...claim, acquired: true }; }
         return { ...claim, acquired: false };
       }

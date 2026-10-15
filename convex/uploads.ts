@@ -11,6 +11,7 @@ import { components, internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
 import { selectCaptionDirectiveId } from "./captionDirectivesConfig";
+import { decodeUploadCustom, readUploadLanguageCodes } from "./uploadPassthrough";
 
 function requiredEnv(name: string, value: string | undefined): string {
   if (!value) throw new Error(`Missing env var: ${name}`);
@@ -72,13 +73,9 @@ function parseMetadataPassthrough(passthrough: unknown): {
       description: asString(parsedObj.description),
       tags: asStringArray(parsedObj.tags),
       visibility: asVisibility(parsedObj.visibility),
-      custom: parsedObj.v === 1 ? {
-        ...asRecord(parsedObj.custom),
-        audioTranslationLanguageCodes: normalizeAudioTranslationLanguageCodes(asStringArray(parsedObj.a) ?? []),
-        captionTranslationLanguageCodes: normalizeAudioTranslationLanguageCodes(asStringArray(parsedObj.c) ?? []),
-      } : asRecord(parsedObj.custom),
+      custom: decodeUploadCustom(parsedObj),
       audioTranslationLanguageCodes: normalizeAudioTranslationLanguageCodes(
-        asStringArray(asRecord(parsedObj.custom)?.audioTranslationLanguageCodes) ?? [],
+        readUploadLanguageCodes(decodeUploadCustom(parsedObj)?.audioTranslationLanguageCodes) ?? [],
       ),
     };
   } catch {

@@ -7,6 +7,7 @@ import { v } from "convex/values";
 
 import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-translation-languages";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import { decodeUploadCustom, readUploadLanguageCodes } from "./uploadPassthrough";
 import {
   resolveBackfillPageOutcome,
   resolveBackfillPagePlan,
@@ -81,11 +82,11 @@ function parseMetadataPassthrough(passthrough: unknown): {
     const parsed = JSON.parse(raw);
     const parsedObj = asRecord(parsed);
     if (!parsedObj) return { userId: raw };
-    const custom = asRecord(parsedObj.custom);
-    const audioLanguageCodes = asStringArray(
+    const custom = decodeUploadCustom(parsedObj);
+    const audioLanguageCodes = readUploadLanguageCodes(
       custom?.audioTranslationLanguageCodes,
     );
-    const captionLanguageCodes = asStringArray(
+    const captionLanguageCodes = readUploadLanguageCodes(
       custom?.captionTranslationLanguageCodes,
     );
 
@@ -916,13 +917,13 @@ export const backfillRequestedTranslationTracksForReadyAssets = action({
       const parsedPassthrough = parseMetadataPassthrough(asset.passthrough);
       const requestedAudioLanguageCodes =
         normalizeAudioTranslationLanguageCodes(
-          asStringArray(existingCustom.audioTranslationLanguageCodes) ??
+          readUploadLanguageCodes(existingCustom.audioTranslationLanguageCodes) ??
             parsedPassthrough.audioTranslationLanguageCodes ??
             [],
         );
       const requestedCaptionLanguageCodes =
         normalizeAudioTranslationLanguageCodes(
-          asStringArray(existingCustom.captionTranslationLanguageCodes) ??
+          readUploadLanguageCodes(existingCustom.captionTranslationLanguageCodes) ??
             parsedPassthrough.captionTranslationLanguageCodes ??
             requestedAudioLanguageCodes,
         );

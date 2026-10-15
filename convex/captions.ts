@@ -7,6 +7,7 @@ import { components, internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
 import { selectCaptionDirectiveId } from "./captionDirectivesConfig";
+import { parseCaptionDirectiveRun, parseCaptionDirectiveRunId } from "./captionDirectivesMuxAdapter";
 import {
   buildMuxPremiumCaptionsRequest,
   createMuxPremiumCaptionsJob,
@@ -356,6 +357,7 @@ async function applyPremiumCaptionsJobUpdate(
     aiCaptionsFailedAtMs: Date.now(),
     aiCaptionsLastError: message,
     aiCaptionsUnavailableReason: message,
+    aiCaptionsPollingTimedOut: false,
     aiCaptionsRetryScheduled: false,
   });
   return { ok: false, skipped: false, status: job.status, error: message };
@@ -477,10 +479,12 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
       };
     }
 
-    if (asString(custom.aiCaptionsUnavailableReason)) {
+    if (asString(custom.aiCaptionsUnavailableReason) &&
+        !(typeof custom.includeSpeakers === "boolean" && custom.aiCaptionsPollingTimedOut === true)) {
       return { ok: true, skipped: true, reason: "already_handled" };
     }
 
+    let hasClaimedDirectiveRun = false;
     try {
       const asset = await mux.video.assets.retrieve(args.muxAssetId);
       if (asset.status !== "ready") {
@@ -510,11 +514,15 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
       const directiveMode = typeof custom.includeSpeakers === "boolean";
       let directiveJobId: string | undefined;
       if (directiveMode) {
-        const claim: any = await ctx.runMutation((internal as any).captionDirectives.claimInternal, {
-          muxAssetId: args.muxAssetId, userId: args.userId,
-          includeSpeakers: custom.includeSpeakers,
-          directiveId: selectCaptionDirectiveId(custom.includeSpeakers as boolean, process.env),
-        });
+        const claimArgs = { muxAssetId: args.muxAssetId, userId: args.userId, includeSpeakers: custom.includeSpeakers };
+        // Existing claims pin their configuration, even if env mappings have
+        // since disappeared. Only a new claim requires current configuration.
+        let claim: any = await ctx.runMutation((internal as any).captionDirectives.claimInternal, claimArgs);
+        if (claim?.needsConfiguration) {
+          claim = await ctx.runMutation((internal as any).captionDirectives.claimInternal, {
+            ...claimArgs, directiveId: selectCaptionDirectiveId(custom.includeSpeakers as boolean, process.env),
+          });
+        }
         if (!claim) return { ok: true, skipped: true, reason: "asset_not_owned_or_deleted" };
         const url = `https://api.mux.com/robots/v0/directives/${encodeURIComponent(claim.directiveId)}/runs`;
         let runId = claim.runId;
@@ -525,18 +533,18 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
             body: JSON.stringify({ asset_id: args.muxAssetId }),
           });
           if (!response.ok) throw new MuxPremiumCaptionsHttpError(response.status, `Caption Directive submission: ${await response.text()}. Manual reconciliation required; no automatic resubmission.`);
-          runId = (await response.json()).data?.run_id;
-          if (!runId) throw new Error("Caption Directive returned no run_id; manual reconciliation required.");
+          runId = parseCaptionDirectiveRunId(await response.json());
           await ctx.runMutation((internal as any).captionDirectives.recordRunInternal, { claimId: claim._id, runId });
         }
         if (runId) {
+          hasClaimedDirectiveRun = true;
           const response = await fetch(`${url}/${encodeURIComponent(runId)}`, { signal: AbortSignal.timeout(60_000), headers: { Authorization: createMuxBasicAuthHeader() } });
           if (!response.ok) throw new Error(`Caption Directive polling failed (${response.status}).`);
-          const run = (await response.json()).data;
-          const node = run?.node_states?.find((item: any) => item.reference_id === "premium_captions");
+          const run = parseCaptionDirectiveRun(await response.json());
+          const node = run.node_states.find(item => item.reference_id === "premium_captions");
           if (node?.status === "failed" || ["partial", "errored"].includes(run?.status)) {
             const message = node?.reason || `Caption Directive ${run.status}`;
-            await upsertCaptionMetadataFields(ctx, args, { aiCaptionsUnavailableReason: message, aiCaptionsLastError: message, aiCaptionsRetryScheduled: false });
+            await upsertCaptionMetadataFields(ctx, args, { aiCaptionsUnavailableReason: message, aiCaptionsLastError: message, aiCaptionsRetryScheduled: false, aiCaptionsPollingTimedOut: false });
             return { ok: false, error: message };
           }
           directiveJobId = node?.job_id;
@@ -551,11 +559,18 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
       if (existingPremiumJobId) {
         premiumJob = await getMuxPremiumCaptionsJob(
           fetch,
-          `${PREMIUM_CAPTIONS_API_URL}/${existingPremiumJobId}`,
+          `${PREMIUM_CAPTIONS_API_URL}/${encodeURIComponent(existingPremiumJobId)}`,
           createMuxBasicAuthHeader(),
         );
         if (directiveMode && asCustomRecord(premiumJob.parameters).asset_id !== args.muxAssetId) {
           throw new Error("Caption Directive premium job asset does not match the claimed asset.");
+        }
+        if (directiveMode) {
+          const requested = asCustomRecord(premiumJob.parameters).include_speakers;
+          const includeSpeakers = requested === undefined ? false : requested;
+          if (typeof includeSpeakers !== "boolean" || includeSpeakers !== custom.includeSpeakers) {
+            throw new MuxPremiumCaptionsHttpError(422, "Caption Directive speaker setting does not match the claimed choice.");
+          }
         }
         await applyPremiumCaptionsJobUpdate(ctx, args, premiumJob);
 
@@ -563,7 +578,7 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
           const shouldRetry = nextAttempt < MAX_ATTEMPTS;
           await upsertCaptionMetadataFields(ctx, args, {
             aiCaptionsRetryScheduled: shouldRetry,
-            ...(!shouldRetry ? { aiCaptionsUnavailableReason: "Premium captions polling timed out." } : {}),
+            ...(!shouldRetry ? { aiCaptionsUnavailableReason: "Premium captions polling timed out.", aiCaptionsPollingTimedOut: directiveMode } : {}),
           });
           if (shouldRetry) {
             await ctx.scheduler.runAfter(
@@ -639,6 +654,9 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
           ...(existingPremiumJobId ? { aiCaptionsJobId: existingPremiumJobId } : {}),
           aiCaptionsGeneratedAtMs: Date.now(),
           aiCaptionsTrackId: sourceCaptionsTrack.id,
+          aiCaptionsPollingTimedOut: false,
+          aiCaptionsLastError: null,
+          aiCaptionsFailedAtMs: null,
           aiSourceLanguageCode: detectedLanguageCode,
           aiSourceLanguageLabel: getLanguageDisplayLabel(detectedLanguageCode),
           aiCaptionsSource: existingPremiumJobId
@@ -665,7 +683,7 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
         const shouldRetry = nextAttempt < MAX_ATTEMPTS;
         await upsertCaptionMetadataFields(ctx, args, {
           aiCaptionsRetryScheduled: shouldRetry,
-          ...(!shouldRetry ? { aiCaptionsUnavailableReason: "Premium caption output track readiness timed out." } : {}),
+          ...(!shouldRetry ? { aiCaptionsUnavailableReason: "Premium caption output track readiness timed out.", aiCaptionsPollingTimedOut: directiveMode } : {}),
         });
         if (shouldRetry) {
           await ctx.scheduler.runAfter(
@@ -752,7 +770,7 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
         aiCaptionsLastError: message,
         aiCaptionsAttemptCount: nextAttempt,
         aiCaptionsRetryScheduled: shouldRetry,
-        ...(!shouldRetry ? { aiCaptionsUnavailableReason: message } : {}),
+        ...(!shouldRetry ? { aiCaptionsUnavailableReason: message, aiCaptionsPollingTimedOut: hasClaimedDirectiveRun && retryable } : {}),
       });
 
       if (shouldRetry) {

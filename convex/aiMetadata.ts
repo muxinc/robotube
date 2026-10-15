@@ -7,6 +7,7 @@ import { v } from "convex/values";
 import { components, internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import { decodeUploadCustom } from "./uploadPassthrough";
 import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 const MAX_ATTEMPTS = 10;
@@ -520,7 +521,7 @@ function parseMetadataPassthrough(passthrough: unknown): {
       description: asString(parsedObj.description),
       tags: asStringArray(parsedObj.tags),
       visibility: asVisibility(parsedObj.visibility),
-      custom: asCustomRecord(parsedObj.custom),
+      custom: decodeUploadCustom(parsedObj),
     };
   } catch {
     return { userId: raw };

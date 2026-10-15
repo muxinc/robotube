@@ -7,6 +7,7 @@ import { v } from "convex/values";
 
 import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-translation-languages";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
+import { decodeUploadCustom, readUploadLanguageCodes } from "./uploadPassthrough";
 
 const AUDIO_TRANSLATION_READY_DELAY_MS = 5 * 1000;
 
@@ -57,15 +58,11 @@ function parseMetadataPassthrough(passthrough: unknown): {
     const parsed = JSON.parse(raw);
     const parsedObj = asRecord(parsed);
     if (!parsedObj) return { userId: raw };
-    const custom = parsedObj.v === 1 ? {
-      ...asRecord(parsedObj.custom),
-      audioTranslationLanguageCodes: normalizeAudioTranslationLanguageCodes(asStringArray(parsedObj.a) ?? []),
-      captionTranslationLanguageCodes: normalizeAudioTranslationLanguageCodes(asStringArray(parsedObj.c) ?? []),
-    } : asRecord(parsedObj.custom);
-    const audioLanguageCodes = asStringArray(
+    const custom = decodeUploadCustom(parsedObj);
+    const audioLanguageCodes = readUploadLanguageCodes(
       custom?.audioTranslationLanguageCodes,
     );
-    const captionLanguageCodes = asStringArray(
+    const captionLanguageCodes = readUploadLanguageCodes(
       custom?.captionTranslationLanguageCodes,
     );
 
