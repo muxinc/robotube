@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  findNodeHandle,
   Platform,
   Pressable,
   ScrollView,
@@ -22,6 +23,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/convex/_generated/api";
 import { captionTimestamp, type CaptionTranscript } from "@/lib/captionTranscript";
 import { captionRulesError, captionSpeakerLabels, previewCaptionRules, type CaptionReplacement, type CaptionSpeakerReplacement } from "@/lib/captionRobots";
+import { createCaptionSubmissionGate, mobileCaptionJobText, mobileCaptionReviewError } from "@/components/caption-robots-mobile";
 type EditorState = {
   canEdit: boolean;
   unavailableReason?: string;
@@ -102,10 +104,17 @@ function CaptionEditorForm() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
+  const composerInput = useRef<TextInput>(null);
+  const composerSelection = useRef(0);
+  const submissionGate = useRef(createCaptionSubmissionGate());
+  const cancelConfirmation = useRef<(() => void) | undefined>(undefined);
+  const currentAsset = useRef(muxAssetId);
+  currentAsset.current = muxAssetId;
+  const [draftAsset, setDraftAsset] = useState(muxAssetId);
   const [transcript, setTranscript] = useState<CaptionTranscript | null>(null);
   const [replacements, setReplacements] = useState<CaptionReplacement[]>([]);
   const [speakers, setSpeakers] = useState<CaptionSpeakerReplacement[]>([]);
-  const [composer, setComposer] = useState<{ cueText: string; find: string; replace: string; caseSensitive: boolean } | null>(null);
+  const [composer, setComposer] = useState<{ selection: number; cueText: string; find: string; replace: string; caseSensitive: boolean } | null>(null);
   const [speaker, setSpeaker] = useState("");
   const [speakerName, setSpeakerName] = useState("");
   const [censorMode, setCensorMode] = useState<"blank" | "remove" | "mask">("blank");
@@ -146,7 +155,7 @@ function CaptionEditorForm() {
   const editActive = Boolean(latestStatus && ACTIVE_STATUSES.has(latestStatus));
   const announcedStatus = useRef<string | undefined>(undefined);
   const transcriptCurrent = transcript?.trackId === state?.sourceTrack?.id && transcript?.captionRevision === state?.captionRevision;
-  const formDisabled = isSubmitting || editActive || !state?.canEdit || loadingTranscript || !transcript || !transcriptCurrent;
+  const formDisabled = draftAsset !== muxAssetId || isSubmitting || editActive || !state?.canEdit || loadingTranscript || !transcript || !transcriptCurrent;
   const preview = previewCaptionRules(transcript?.cues ?? [], replacements, speakers);
   const hasRules = replacements.length > 0 || speakers.length > 0 || autoCensor;
   usePreventRemove(hasRules || composer !== null || speakerName.length > 0, ({ data }) => {
@@ -159,10 +168,25 @@ function CaptionEditorForm() {
   const visibleCues = preview.cues.filter((cue) => `${cue.originalText} ${cue.text}`.toLowerCase().includes(search.toLowerCase()));
 
   useEffect(() => {
+    cancelConfirmation.current?.();
+    setDraftAsset(muxAssetId);
+    setReplacements([]);
+    setSpeakers([]);
+    setComposer(null);
+    setSpeaker("");
+    setSpeakerName("");
+    setAutoCensor(false);
+    setCensorMode("blank");
+    setSearch("");
+    setValidationMessage(null);
+    return () => { cancelConfirmation.current?.(); };
+  }, [muxAssetId]);
+
+  useEffect(() => {
     let cancelled = false;
     setTranscript(null);
-    // Preserve queued rules while the source refreshes.
     setTranscriptError(null);
+    setLoadingTranscript(false);
     if (!muxAssetId || !state?.sourceTrack?.id) return;
     setLoadingTranscript(true);
     void loadTranscript({ muxAssetId, trackId: state.sourceTrack.id }).then((document: CaptionTranscript) => {
@@ -214,23 +238,31 @@ function CaptionEditorForm() {
 
   const submit = () => {
     if (!muxAssetId || !transcript || formDisabled) return;
-    const message = composer || speakerName ? "Queue or cancel the unfinished correction first." : captionRulesError(replacements, speakers, autoCensor);
+    const message = composer || speakerName ? "Queue or cancel the unfinished correction first." : captionRulesError(replacements, speakers, autoCensor) ?? mobileCaptionReviewError({
+      speakerLabels: captionSpeakerLabels(transcript.cues), speakers, changedCueCount: preview.changedCueCount, autoCensor,
+    });
     if (message) {
       setValidationMessage(message);
       announce(message);
       return;
     }
 
+    const confirmation = submissionGate.current.open();
+    if (!confirmation) return;
+    cancelConfirmation.current = confirmation.cancel;
+    const gate = submissionGate.current;
     Alert.alert(
       "Replace source captions?",
       `One Mux Robots edit-captions job applies rules to ALL occurrences across the track. Estimated affected cues: ${preview.changedCueCount}. The source is deleted before the edited track is added. Restoration on failure is best effort and may also fail.${autoCensor ? " AI profanity censoring is not previewed and may consume AI usage." : ""}`,
 
       [
-        { text: "Cancel", style: "cancel" },
+        { text: "Cancel", style: "cancel", onPress: confirmation.cancel },
         {
           text: "Apply edits",
           style: "destructive",
           onPress: () => {
+            if (currentAsset.current !== muxAssetId) { confirmation.cancel(); return; }
+            if (!confirmation.accept()) return;
             setIsSubmitting(true);
             setValidationMessage(null);
             announce("Applying caption edits.");
@@ -243,6 +275,7 @@ function CaptionEditorForm() {
               ...(autoCensor ? { autoCensorProfanity: { mode: censorMode } } : {}),
             })
               .then((result: { alreadyActive: boolean }) => {
+                if (currentAsset.current !== muxAssetId) return;
                 if (result.alreadyActive) { setValidationMessage("An existing job is running. Your queued edits were not submitted."); return; }
                 setReplacements([]);
                 setSpeakers([]);
@@ -250,14 +283,16 @@ function CaptionEditorForm() {
                 announce("Caption edit started successfully.");
               })
               .catch((error: unknown) => {
+                if (currentAsset.current !== muxAssetId) return;
                 const message = friendlySubmitError(error);
                 setValidationMessage(message);
                 announce(`Caption editing failed. ${message}`);
               })
-              .finally(() => setIsSubmitting(false));
+              .finally(() => { gate.finish(); setIsSubmitting(false); });
           },
         },
       ],
+      { cancelable: true, onDismiss: confirmation.cancel },
     );
   };
 
@@ -304,7 +339,7 @@ function CaptionEditorForm() {
   const statusCopy = editActive
     ? "Applying edits. You can leave this screen; progress is saved."
     : latestStatus === "completed"
-      ? `Reviewed${typeof state?.latestJob?.totalReplacementCount === "number" ? ` · ${state.latestJob.totalReplacementCount} replacements` : ""}`
+      ? "Caption edits completed."
       : latestStatus === "errored" || latestStatus === "cancelled"
         ? state?.latestJob?.errorMessage || "The last edit could not be applied. Review your captions and try again."
         : "Read the transcript and queue track-wide rules.";
@@ -330,6 +365,11 @@ function CaptionEditorForm() {
         <View style={styles.headerButton} />
       </View>
 
+      {state?.latestJob ? <View accessibilityLiveRegion="polite" style={styles.statusCard}>
+        {editActive ? <ActivityIndicator color="#B83A8D" /> : null}
+        <Text selectable style={styles.statusText}>{mobileCaptionJobText(state.latestJob)}{"\n"}{statusCopy}</Text>
+      </View> : null}
+
       {!muxAssetId ? (
         <StateCard icon="alert-circle" message="This video link is invalid." />
       ) : state === undefined ? (
@@ -351,7 +391,7 @@ function CaptionEditorForm() {
       ) : !state || !state.canEdit || !state.sourceTrack ? (
         <StateCard
           icon="logo-closed-captioning"
-          message={friendlyUnavailable(state?.unavailableReason)}
+          message={editActive ? "Caption edits are being applied. Editing is locked until this job finishes." : friendlyUnavailable(state?.unavailableReason)}
           actionLabel={
             state?.latestJob?.pollingTimedOut || state?.latestJob?.canCheckUploadStatus
               ? "Check Mux status"
@@ -387,11 +427,6 @@ function CaptionEditorForm() {
               </Text>
             </View>
 
-            <View accessibilityLiveRegion="polite" style={[styles.statusCard, editActive && styles.statusActive]}>
-              {editActive ? <ActivityIndicator color="#B83A8D" /> : <Ionicons name={latestStatus === "completed" ? "checkmark-circle" : "information-circle"} size={21} color={latestStatus === "completed" ? "#248A4D" : "#B83A8D"} />}
-              <Text style={styles.statusText}>{`Mux Robots · edit-captions · ${latestStatus ?? "ready"}${state.latestJob?.jobId ? ` · Mux job ${state.latestJob.jobId}` : ""}`} {statusCopy}</Text>
-            </View>
-
             <Text style={styles.sectionTitle}>Transcript</Text>
             <Text style={styles.helper}>Corrections affect ALL matching occurrences across the track, not only this timestamp. Select or copy text, then choose Correct wording. Empty replacement text deletes matches.</Text>
             {loadingTranscript ? <ActivityIndicator accessibilityLabel="Loading transcript" color="#B83A8D" /> : transcriptError ? <View style={styles.censorCard}>
@@ -400,16 +435,18 @@ function CaptionEditorForm() {
             </View> : transcript ? <>
               <Field label="Search transcript" value={search} onChangeText={setSearch} placeholder="Find a caption…" />
               <Text style={styles.helper}>{transcript.cues.length} captions · Estimated {preview.changedCueCount} affected cues · {preview.totalReplacementCount} replacements. Estimate only: Mux matching may differ. AI censoring is not previewed.</Text>
-              {visibleCues.map((cue) => <View key={cue.id} style={styles.cueCard}>
-                <Text style={styles.fieldLabel}>{captionTimestamp(cue.startMs)} – {captionTimestamp(cue.endMs)}</Text>
-                <Text selectable>Original: {cue.originalText}</Text>
-                <Text selectable>Estimated preview: {cue.text || "(empty)"}</Text>
-                <Pressable accessibilityRole="button" accessibilityLabel={`Correct wording at ${captionTimestamp(cue.startMs)}`} disabled={formDisabled} onPress={() => setComposer({ cueText: cue.originalText, find: cue.originalText, replace: "", caseSensitive: false })}><Text style={styles.addButtonText}>Correct wording</Text></Pressable>
-              </View>)}
-              {composer ? <View style={styles.censorCard}>
+              {composer ? <View key={composer.selection} style={styles.censorCard} onLayout={(event) => {
+                scrollRef.current?.scrollTo({ y: event.nativeEvent.layout.y, animated: false });
+                requestAnimationFrame(() => {
+                  composerInput.current?.focus();
+                  const target = findNodeHandle(composerInput.current);
+                  if (target) AccessibilityInfo.setAccessibilityFocus(target);
+                  announce("Track-wide phrase correction opened. Choose a word or phrase from the selected cue.");
+                });
+              }}>
                 <Text style={styles.sectionTitle}>Track-wide phrase correction</Text>
-                <Field label="Find word or phrase from selected cue" editable={!formDisabled} value={composer.find} onChangeText={(find) => setComposer({ ...composer, find })} />
-                <Field label="Replace with (empty deletes matches)" editable={!formDisabled} value={composer.replace} onChangeText={(replace) => setComposer({ ...composer, replace })} />
+                <Field inputRef={composerInput} maxLength={500} label="Find word or phrase from selected cue" editable={!formDisabled} value={composer.find} onChangeText={(find) => setComposer({ ...composer, find })} />
+                <Field maxLength={500} label="Replace with (empty deletes matches)" editable={!formDisabled} value={composer.replace} onChangeText={(replace) => setComposer({ ...composer, replace })} />
                 <Text style={styles.helper}>You may shorten the text to a phrase present in the original cue.</Text>
                 <Text>Case sensitive</Text><Switch accessibilityLabel="Case sensitive correction" disabled={formDisabled} value={composer.caseSensitive} onValueChange={(caseSensitive) => setComposer({ ...composer, caseSensitive })} />
                 <Pressable accessibilityRole="button" disabled={formDisabled} onPress={() => {
@@ -420,6 +457,12 @@ function CaptionEditorForm() {
                 }}><Text style={styles.addButtonText}>Queue correction</Text></Pressable>
                 <Pressable accessibilityRole="button" disabled={formDisabled} onPress={() => setComposer(null)}><Text style={styles.addButtonText}>Cancel correction</Text></Pressable>
               </View> : null}
+              {visibleCues.map((cue) => <View key={cue.id} style={styles.cueCard}>
+                <Text style={styles.fieldLabel}>{captionTimestamp(cue.startMs)} – {captionTimestamp(cue.endMs)}</Text>
+                <Text selectable>Original: {cue.originalText}</Text>
+                <Text selectable>Estimated preview: {cue.text || "(empty)"}</Text>
+                <Pressable accessibilityRole="button" accessibilityLabel={`Correct wording at ${captionTimestamp(cue.startMs)}`} disabled={formDisabled} onPress={() => setComposer({ selection: ++composerSelection.current, cueText: cue.originalText, find: cue.originalText.slice(0, 500), replace: "", caseSensitive: false })}><Text style={styles.addButtonText}>Correct wording</Text></Pressable>
+              </View>)}
               {replacements.map((rule, index) => <View key={index} style={styles.cueCard}>
                 <Text selectable>{rule.find} → {rule.replace || "(delete)"} · {rule.caseSensitive ? "Case sensitive" : "Ignore case"}</Text>
                 <Pressable accessibilityRole="button" accessibilityLabel={`Remove correction ${index + 1}`} disabled={formDisabled} onPress={() => setReplacements(replacements.filter((_, i) => i !== index))}><Text style={styles.addButtonText}>Remove correction</Text></Pressable>
@@ -428,7 +471,7 @@ function CaptionEditorForm() {
               <Text style={styles.helper}>Only leading labels change, not spoken mentions. Enter names without brackets.</Text>
               {captionSpeakerLabels(transcript.cues).map((label) => <Pressable key={label} accessibilityRole="radio" accessibilityState={{ selected: speaker === label }} disabled={formDisabled} onPress={() => setSpeaker(label)}><Text style={styles.addButtonText}>{speaker === label ? "●" : "○"} {label}</Text></Pressable>)}
               {speaker ? <>
-                <Field label={`New name for ${speaker}`} editable={!formDisabled} value={speakerName} onChangeText={setSpeakerName} />
+                <Field maxLength={200} label={`New name for ${speaker}`} editable={!formDisabled} value={speakerName} onChangeText={setSpeakerName} />
                 <Pressable accessibilityRole="button" disabled={formDisabled} onPress={() => {
                   const next = [...speakers.filter((rule) => rule.find !== speaker), { find: speaker, replace: speakerName }];
                   const error = captionRulesError(replacements, next, autoCensor);
@@ -467,12 +510,12 @@ function CaptionEditorForm() {
   );
 }
 
-function Field({ label, helper, ...props }: React.ComponentProps<typeof TextInput> & { label: string; helper?: string }) {
+function Field({ label, helper, inputRef, ...props }: React.ComponentProps<typeof TextInput> & { label: string; helper?: string; inputRef?: React.Ref<TextInput> }) {
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
       {helper ? <Text style={styles.helper}>{helper}</Text> : null}
-      <TextInput accessibilityLabel={label} {...props} autoCorrect={false} placeholderTextColor="#8290A3" style={[styles.input, props.multiline && styles.multiline]} textAlignVertical={props.multiline ? "top" : "center"} />
+      <TextInput ref={inputRef} accessibilityLabel={label} {...props} autoCorrect={false} placeholderTextColor="#8290A3" style={[styles.input, props.multiline && styles.multiline]} textAlignVertical={props.multiline ? "top" : "center"} />
     </View>
   );
 }
@@ -530,13 +573,11 @@ const styles = StyleSheet.create({
   cardTitle: { color: "#FFFFFF", fontSize: 17, fontWeight: "700" },
   meta: { color: "#CDD5E1", fontSize: 13 },
   statusCard: { flexDirection: "row", alignItems: "center", gap: 9, padding: 13, borderRadius: 13, backgroundColor: "#FFF2FA" },
-  statusActive: { backgroundColor: "#FCEAF6" },
   statusText: { flex: 1, color: "#4F5868", fontSize: 13, lineHeight: 18 },
   sectionTitle: { fontSize: 17, fontWeight: "700", color: "#17202E" },
   helper: { fontSize: 12, lineHeight: 17, color: "#677386" },
   addButtonText: { fontSize: 13, fontWeight: "700", color: "#B83A8D" },
   cueCard: { padding: 15, gap: 12, borderRadius: 16, borderWidth: 1, borderColor: "#DCE2EA", backgroundColor: "#FFFFFF" },
-  cueEdited: { borderColor: "#B83A8D", backgroundColor: "#FFF2FA" },
   field: { gap: 5 },
   fieldLabel: { fontSize: 13, fontWeight: "700", color: "#313B4B" },
   input: { height: 46, paddingHorizontal: 12, borderWidth: 1, borderColor: "#C9D1DC", borderRadius: 11, backgroundColor: "#FFFFFF", color: "#11181C", fontSize: 15 },
