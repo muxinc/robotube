@@ -22,7 +22,7 @@ export function captionRulesError(
     if (!rule.find.trim()) return "Choose text to replace from the transcript.";
     if (rule.find.length > 500 || rule.replace.length > 500) return "Text corrections must be 500 characters or fewer.";
     if (/[\r\n\u0000]|-->/.test(rule.find + rule.replace)) return "Text corrections cannot contain line breaks or timestamp delimiters.";
-    if (rule.find === rule.replace) return "A text correction must change the selected text.";
+    if (rule.caseSensitive && rule.find === rule.replace) return "A text correction must change the selected text.";
   }
   const seen = new Set<string>();
   for (const speaker of speakers) {

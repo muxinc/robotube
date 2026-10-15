@@ -17,6 +17,14 @@ test("text corrections preview every matching cue while preserving IDs and timin
   assert.equal(previewCaptionRules(cues, [{ find: "Mucks", replace: "Mux", caseSensitive: true }], []).totalReplacementCount, 2);
 });
 
+test("case-insensitive identical rules normalize other capitalization", () => {
+  const rules = [{ find: "Mux", replace: "Mux", caseSensitive: false }];
+  assert.equal(captionRulesError(rules, [], false), undefined);
+  const result = previewCaptionRules([{ id: "case", startMs: 0, endMs: 1000, text: "MUX mux Mux" }], rules, []);
+  assert.equal(result.cues[0].text, "Mux Mux Mux");
+  assert.equal(result.changedCueCount, 1);
+});
+
 test("speaker renames affect leading labels, not names in dialogue", () => {
   assert.deepEqual(captionSpeakerLabels(cues), ["speaker_0", "speaker_1"]);
   const result = previewCaptionRules(cues, [], [{ find: "speaker_0", replace: "Alice" }]);
@@ -36,7 +44,7 @@ test("rules reject empty jobs, malformed labels, duplicate speakers and invalid 
   assert.ok(captionRulesError([], [], false));
   assert.equal(captionRulesError([], [], true), undefined);
   assert.ok(captionRulesError([{ find: "", replace: "x" }], [], false));
-  assert.ok(captionRulesError([{ find: "x", replace: "x" }], [], false));
+  assert.ok(captionRulesError([{ find: "x", replace: "x", caseSensitive: true }], [], false));
   assert.ok(captionRulesError([{ find: "x", replace: "bad\n\ntext" }], [], false));
   assert.ok(captionRulesError([], [{ find: "speaker_0", replace: "[Alice]" }], false));
   assert.ok(captionRulesError([], [{ find: "speaker_0", replace: "Alice" }, { find: "speaker_0", replace: "Bob" }], false));
