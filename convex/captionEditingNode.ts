@@ -15,6 +15,7 @@ import { parsePassthroughUserId } from "./feedContracts";
 import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 import { isLaravelOrchestrationEnabled } from "./laravelFlag";
 import { parseCaptionVtt, replaceCaptionCueText } from "./captionVtt";
+import { captionRulesError } from "../lib/captionRobots";
 import { canRecoverCaptionCensor, censorRequest, deleteReplacedSource } from "./captionEditingWorkflow";
 
 const API = "https://api.mux.com/robots/v0/jobs/edit-captions";
@@ -384,7 +385,8 @@ export const enforceDeletedAssetTombstoneInternal = internalAction({
 
 export const editCaptionsForAsset = action({
   args: {
-    muxAssetId: v.string(), trackId: v.string(),
+    muxAssetId: v.string(), trackId: v.string(), captionRevision: v.optional(v.number()),
+    speakerReplacements: v.optional(v.array(v.object({ find: v.string(), replace: v.string() }))),
     autoCensorProfanity: v.optional(v.object({
       mode: v.optional(v.union(v.literal("blank"), v.literal("remove"), v.literal("mask"))),
       alwaysCensor: v.optional(v.array(v.string())), neverCensor: v.optional(v.array(v.string())),
@@ -401,12 +403,12 @@ export const editCaptionsForAsset = action({
     const muxAssetId = args.muxAssetId.trim(); const trackId = args.trackId.trim();
     if (!muxAssetId || !trackId) throw new Error("A video and ready caption track are required.");
     if (args.deleteOriginalTrack === false) throw new Error("Caption cleanup replaces the original caption track.");
+    const speakers = args.speakerReplacements ?? [];
+    const rulesError = captionRulesError(args.replacements ?? [], speakers, Boolean(args.autoCensorProfanity));
+    if (rulesError) throw new Error(rulesError);
     const replacements = (args.replacements ?? []).map((item) => ({
-      find: item.find.trim(), replace: item.replace.trim(), case_sensitive: item.caseSensitive ?? false,
-    })).filter((item) => item.find.length > 0);
-    if (replacements.length !== (args.replacements ?? []).length) throw new Error("Every caption replacement must include text to find.");
-    if (replacements.length > 100) throw new Error("Use no more than 100 replacement rules at once.");
-    if (replacements.some((item) => item.find.length > 500 || item.replace.length > 500)) throw new Error("Caption replacement text must be 500 characters or fewer.");
+      find: item.find, replace: item.replace, case_sensitive: item.caseSensitive ?? false,
+    }));
     const terms = (values?: string[]) => {
       const normalized = [...new Set((values ?? []).map((value) => value.trim()).filter(Boolean))];
       if (normalized.length > 100) throw new Error("Use no more than 100 profanity terms per list.");
@@ -418,7 +420,7 @@ export const editCaptionsForAsset = action({
       mode: args.autoCensorProfanity.mode ?? "blank",
       ...(always.length ? { always_censor: always } : {}), ...(never.length ? { never_censor: never } : {}),
     } : undefined;
-    if (!replacements.length && !censor) throw new Error("Add a replacement or enable profanity censoring.");
+    if (args.captionRevision !== undefined && (!Number.isSafeInteger(args.captionRevision) || args.captionRevision < 0)) throw new Error("Invalid caption revision.");
 
     const componentVideo: any = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, { muxAssetId, userId });
     if (!componentVideo?.asset) throw new Error("Video not found.");
@@ -444,8 +446,9 @@ export const editCaptionsForAsset = action({
       )
     ) throw new Error("Wait for caption translations to finish before editing the source captions.");
     const revision = numberValue(custom.aiCaptionsRevision) ?? 0;
+    if (args.captionRevision !== undefined && args.captionRevision !== revision) throw new Error("Caption document is stale. Refresh and try again.");
     const created: any = await ctx.runMutation((internal as any).captionEditing.createRequestedEditInternal, {
-      muxAssetId, userId, sourceTrackId: trackId,
+      muxAssetId, userId, sourceTrackId: trackId, operation: "robots",
       sourceLanguageCode: stringValue(selected.language_code ?? selected.languageCode ?? selected.language), revision: revision + 1,
     });
     if (!created.created) {
@@ -462,7 +465,8 @@ export const editCaptionsForAsset = action({
         parameters: {
           asset_id: muxAssetId, track_id: trackId,
           ...(replacements.length ? { replacements } : {}), ...(censor ? { auto_censor_profanity: censor } : {}),
-          upload_to_mux: true, delete_original_track: true, track_name_suffix: "reviewed",
+          ...(speakers.length ? { speaker_replacements: speakers } : {}),
+          upload_to_mux: true, replace_existing_tracks: "replace",
         },
       });
       const fields = jobFields(job);
@@ -478,7 +482,7 @@ export const editCaptionsForAsset = action({
       return { localJobId: requestId, jobId: fields.jobId, status: fields.status, alreadyActive: false };
     } catch (error) {
       const definitiveFailure =
-        (error instanceof MuxCaptionEditingHttpError && error.status < 500) ||
+        (error instanceof MuxCaptionEditingHttpError && error.status >= 400 && error.status < 500 && error.status !== 408) ||
         (error instanceof Error && /Missing env var/.test(error.message));
       const message = definitiveFailure
         ? safeError(error)
