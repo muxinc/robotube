@@ -17,7 +17,8 @@ import {
 } from "react";
 
 import { api } from "../lib/convex";
-import { captionTextError, captionTimestamp, captionTranscriptEdits, type CaptionTranscript } from "../../../lib/captionTranscript";
+import { captionTimestamp, type CaptionTranscript } from "../../../lib/captionTranscript";
+import { captionRulesError, captionSpeakerLabels, previewCaptionRules, type CaptionReplacement, type CaptionSpeakerReplacement } from "../../../lib/captionRobots";
 
 const convexApi = api as any;
 
@@ -130,7 +131,7 @@ export function captionStatusCopy(state: CaptionEditorState | null | undefined) 
     const detail = friendlyUnavailableReason(state.unavailableReason);
     return { label: detail.toLowerCase().includes("prepar") ? "Preparing captions" : "Unavailable", detail, tone: "unavailable" };
   }
-  return { label: "Ready to review", detail: "Read the transcript and edit individual captions before publishing.", tone: "ready" };
+  return { label: "Ready to review", detail: "Choose transcript wording to correct across the entire caption track.", tone: "ready" };
 }
 
 export function CaptionReviewCard({ muxAssetId, onOpen }: { muxAssetId: string; onOpen: () => void }) {
@@ -159,7 +160,7 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
   const descriptionId = useId();
   const { state, isAuthenticated, isAuthLoading } = useOwnCaptionEditorState(muxAssetId);
   const loadTranscript = useAction(convexApi.captionEditingNode.loadOwnCaptionDocument);
-  const saveTranscript = useAction(convexApi.captionEditingNode.replaceOwnCaptionTrack);
+  const editCaptions = useAction(convexApi.captionEditingNode.editCaptionsForAsset);
   const retryReconciliation = useAction(
     convexApi.captionEditingNode.retryCaptionReconciliationForAsset,
   );
@@ -168,7 +169,16 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
   );
   const recoverCensoring = useAction(convexApi.captionEditingNode.recoverOwnCaptionCensoring);
   const [transcript, setTranscript] = useState<CaptionTranscript | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [replacements, setReplacements] = useState<CaptionReplacement[]>([]);
+  const [speakers, setSpeakers] = useState<CaptionSpeakerReplacement[]>([]);
+  const [find, setFind] = useState("");
+  const [replacement, setReplacement] = useState("");
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [speaker, setSpeaker] = useState("");
+  const [speakerName, setSpeakerName] = useState("");
+  const [censorMode, setCensorMode] = useState<"blank" | "remove" | "mask">("blank");
+  const wordingRef = useRef<HTMLInputElement>(null);
+  const submitLock = useRef(false);
   const [loadingTranscript, setLoadingTranscript] = useState(false);
   const [transcriptError, setTranscriptError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
@@ -190,7 +200,7 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
       setConfirmManual(false);
       setMessage(result.restarted ? (useManualTrack ? "Finishing with your manually edited captions." : "Censoring restarted. Progress is saved.") : "Caption status changed. Review the latest status before trying again.");
     } catch {
-      setMessage("Could not start caption recovery. Your original captions are retained. Please try again.");
+      setMessage("Could not start caption recovery. Review the latest track status before trying again.");
     } finally { setRepairing(false); }
   };
 
@@ -202,6 +212,12 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
 
   useEffect(() => {
     setAutoCensor(false);
+    setReplacements([]);
+    setSpeakers([]);
+    setFind("");
+    setReplacement("");
+    setSpeaker("");
+    setSpeakerName("");
     setSearch("");
     setErrors({});
     setSubmitting(false);
@@ -212,6 +228,7 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
 
   useEffect(() => {
     if (confirming) confirmRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    return () => { if (confirming) wordingRef.current?.focus(); };
   }, [confirming]);
 
   useEffect(() => {
@@ -235,9 +252,42 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
   const active = isCaptionEditActive(state);
   const status = captionStatusCopy(state);
   const transcriptCurrent = transcript?.trackId === state?.sourceTrack?.id && transcript?.captionRevision === state?.captionRevision;
-  const formDisabled = submitting || active || !state?.canEdit || loadingTranscript || !transcript || !transcriptCurrent;
-  const edits = transcript ? captionTranscriptEdits(transcript, drafts) : [];
-  const visibleCues = transcript?.cues.filter((cue) => `${cue.text}\n${drafts[cue.id] ?? cue.text}`.toLowerCase().includes(search.toLowerCase())) ?? [];
+  const formDisabled = submitting || active || Boolean(state?.latestJob?.submissionUncertain) || !state?.canEdit || loadingTranscript || !transcript || !transcriptCurrent;
+  const preview = previewCaptionRules(transcript?.cues ?? [], replacements, speakers);
+  const labels = captionSpeakerLabels(transcript?.cues ?? []);
+  const visibleCues = preview.cues.filter((cue) => `${cue.originalText}\n${cue.text}`.toLowerCase().includes(search.toLowerCase()));
+  const dirty = Boolean(replacements.length || speakers.length || autoCensor || find || replacement || speakerName);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+  const rulesError = captionRulesError(replacements, speakers, autoCensor);
+  const noEffect = !autoCensor && preview.changedCueCount === 0;
+  const chooseWording = (text: string) => {
+    setFind(text);
+    setReplacement("");
+    setConfirming(false);
+    wordingRef.current?.focus();
+  };
+  const queueCorrection = () => {
+    const rule = { find, replace: replacement, caseSensitive };
+    const error = captionRulesError([...replacements, rule], speakers, autoCensor);
+    if (error) { setErrors({ form: error }); return; }
+    setReplacements((current) => [...current, rule]);
+    setFind("");
+    setReplacement("");
+    setErrors({});
+  };
+  const queueSpeaker = () => {
+    const rule = { find: speaker, replace: speakerName };
+    const error = captionRulesError(replacements, [...speakers, rule], autoCensor);
+    if (error || !labels.includes(speaker)) { setErrors({ form: error || "Choose a speaker from the transcript." }); return; }
+    setSpeakers((current) => [...current, rule]);
+    setSpeakerName("");
+    setErrors({});
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -245,7 +295,6 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
     setLoadingTranscript(true);
     setTranscriptError(null);
     setTranscript(null);
-    setDrafts({});
     setConfirming(false);
     void loadTranscript({ muxAssetId, trackId: state.sourceTrack.id }).then((document: CaptionTranscript) => {
       if (!cancelled) setTranscript(document);
@@ -298,15 +347,9 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
   };
 
   const validate = () => {
-    const nextErrors: Record<string, string> = {};
-    for (const edit of edits) {
-      const error = captionTextError(edit.text);
-      if (error) nextErrors[edit.id] = error;
-    }
-    if (Object.keys(nextErrors).length) nextErrors.form = "Check the highlighted captions. Clear your search to see all captions.";
-    if (!edits.length && !autoCensor) nextErrors.form = "Edit a caption or turn on auto-censor first.";
-    setErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
+    const error = rulesError || (speakers.some((rule) => !labels.includes(rule.find)) ? "A queued speaker is no longer in this transcript. Remove that rename before submitting." : undefined) || (noEffect ? "These rules have no estimated effect. Adjust them before submitting." : undefined) || (find || replacement || speakerName ? "Queue or clear your unfinished correction first." : undefined);
+    setErrors(error ? { form: error } : {});
+    return !error;
   };
 
   const requestConfirmation = (event: FormEvent) => {
@@ -316,33 +359,44 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
   };
 
   const submit = async () => {
-    if (!muxAssetId || !transcript || formDisabled) return;
+    if (!muxAssetId || !transcript || formDisabled || submitLock.current || !validate()) return;
+    submitLock.current = true;
     setSubmitting(true);
     setMessage(null);
     setErrors({});
     try {
-      await saveTranscript({
+      const result = await editCaptions({
         muxAssetId,
         trackId: transcript.trackId,
         captionRevision: transcript.captionRevision,
-        edits,
-        autoCensorProfanity: autoCensor,
+        replacements,
+        speakerReplacements: speakers,
+        ...(autoCensor ? { autoCensorProfanity: { mode: censorMode } } : {}),
       });
-      setAutoCensor(false);
-      setDrafts({});
+      if (result.alreadyActive) {
+        setMessage(`An existing edit-captions job is active (${result.jobId}, ${result.status}). Your draft was not submitted.`);
+      } else {
+        setAutoCensor(false);
+        setReplacements([]);
+        setSpeakers([]);
+        setFind("");
+        setReplacement("");
+        setSpeakerName("");
+        setMessage(`edit-captions job ${result.jobId}: ${result.status}. This status will update automatically.`);
+      }
       setConfirming(false);
-      setMessage("Caption cleanup started. This status will update automatically.");
     } catch (cause) {
       setConfirming(false);
       setMessage(friendlySubmitError(cause));
     } finally {
+      submitLock.current = false;
       setSubmitting(false);
     }
   };
 
   const close = () => {
     if (submitting) return;
-    if (edits.length && !active && !window.confirm("Discard your unsaved caption edits?")) return;
+    if (dirty && !window.confirm("Close with unsaved caption corrections? Your draft will not be submitted.")) return;
     setConfirming(false);
     onClose();
   };
@@ -355,7 +409,7 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
     <dialog ref={dialogRef} className="caption-dialog" aria-labelledby={headingId} aria-describedby={descriptionId} onCancel={(event) => { event.preventDefault(); close(); }} onClose={() => { if (open) onClose(); }} onKeyDown={handleDialogKeyDown}>
       <div className="caption-dialog__shell">
         <header className="caption-dialog__header" aria-hidden={confirming} inert={confirming ? true : undefined}>
-          <div><span className="eyebrow">Uploader tools</span><h2 id={headingId}>Edit captions</h2><p id={descriptionId}>{title ? `Review captions for ${title}.` : "Read the transcript and edit captions in place."}</p></div>
+          <div><span className="eyebrow">Uploader tools</span><h2 id={headingId}>Edit captions</h2><p id={descriptionId}>{title ? `Review captions for ${title}.` : "Choose transcript wording, then review track-wide Robots corrections."}</p></div>
           <button className="caption-dialog__close" type="button" onClick={close} disabled={submitting} aria-label="Close caption cleanup"><X size={20} /></button>
         </header>
 
@@ -364,7 +418,7 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
             <>
               <section className={`caption-job-state caption-job-state--${status.tone}`} aria-live="polite">
                 {status.tone === "active" || status.tone === "loading" ? <LoaderCircle className="spin" size={19} /> : status.tone === "complete" ? <Check size={19} /> : status.tone === "error" ? <CircleAlert size={19} /> : <Captions size={19} />}
-                <div><strong>{status.label}</strong><p>{status.detail}</p>{state.latestJob?.reconciliationStatus === "errored" ? <p>Captions changed, but some caption-based features could not refresh yet.</p> : null}</div>
+                <div><strong>{status.label}</strong><p>{status.detail}</p>{state.latestJob ? <p>Workflow: edit-captions · Mux job: {state.latestJob.jobId || "Awaiting ID"} · Status: {state.latestJob.status}{state.latestJob.totalReplacementCount !== undefined ? ` · Actual replacements: ${state.latestJob.totalReplacementCount}` : ""}</p> : null}{state.latestJob?.reconciliationStatus === "errored" ? <p>Captions changed, but some caption-based features could not refresh yet.</p> : null}</div>
               </section>
 
               {state.latestJob?.canRecoverCensoring ? <section className="caption-section" aria-label="Recover caption censoring">
@@ -390,19 +444,23 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
                 <form id="caption-cleanup-form" onSubmit={requestConfirmation} noValidate>
                   <section className="caption-section" aria-label="Caption transcript">
                     <h3>Transcript</h3>
-                    <p>Edit any caption below. Timings stay unchanged, and only the lines you edit are updated.</p>
+                    <p>Select a word or phrase in the transcript to correct it, or use a caption’s Correct wording button and narrow the phrase. Every text correction applies everywhere in the track, not just at one timestamp.</p>
+                    {transcript && !transcriptCurrent && !loadingTranscript ? <p role="alert">This transcript is stale. Reload before submitting. Your queued rules are retained. <button type="button" onClick={() => setReload((value) => value + 1)}>Reload transcript</button></p> : null}
                     {loadingTranscript ? <p role="status"><LoaderCircle className="spin" size={17} /> Loading transcript…</p> : transcriptError ? <div role="alert"><p>{transcriptError}</p><button className="button button--outline" type="button" onClick={() => setReload((value) => value + 1)}>Retry loading transcript</button></div> : transcript ? <>
                       <label className="caption-transcript-search"><span>Search transcript</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a caption…" /></label>
-                      <p role="status">{transcript.cues.length} captions · {edits.length} edited</p>
+                      <p role="status">{transcript.cues.length} captions · Estimated: {preview.changedCueCount} affected cues, {preview.totalReplacementCount} replacements</p>
+                      <p>Local preview is an estimate, not Mux’s authoritative result. AI profanity results are unknown until the job completes.</p>
                       <div className="caption-transcript">
                         {visibleCues.map((cue) => {
-                          const text = drafts[cue.id] ?? cue.text;
-                          const changed = text !== cue.text;
+                          const changed = cue.text !== cue.originalText;
                           return <div className={`caption-cue${changed ? " caption-cue--edited" : ""}`} key={cue.id}>
-                            <div className="caption-cue__heading"><label htmlFor={`caption-${cue.id}`}>{captionTimestamp(cue.startMs)} – {captionTimestamp(cue.endMs)}</label>{changed ? <button type="button" disabled={formDisabled} onClick={() => { setDrafts((current) => ({ ...current, [cue.id]: cue.text })); setErrors({}); }}>Undo edit</button> : null}</div>
-                            <textarea id={`caption-${cue.id}`} rows={2} maxLength={10_000} disabled={formDisabled} value={text} onChange={(event) => { setDrafts((current) => ({ ...current, [cue.id]: event.target.value })); setErrors({}); }} aria-invalid={Boolean(errors[cue.id])} aria-describedby={errors[cue.id] ? `error-${cue.id}` : undefined} />
-                            {changed ? <p className="caption-cue__original">Original: {cue.text}</p> : null}
-                            {errors[cue.id] ? <p className="caption-field-error" id={`error-${cue.id}`}>{errors[cue.id]}</p> : null}
+                            <div className="caption-cue__heading"><span>{captionTimestamp(cue.startMs)} – {captionTimestamp(cue.endMs)}</span><button type="button" disabled={formDisabled} aria-label={`Correct wording at ${captionTimestamp(cue.startMs)}`} onClick={() => chooseWording(cue.originalText)}>Correct wording</button></div>
+                            <p className="caption-cue__text" onMouseUp={(event) => {
+                              if (formDisabled) return;
+                              const selection = window.getSelection();
+                              if (selection && event.currentTarget.contains(selection.anchorNode) && event.currentTarget.contains(selection.focusNode) && selection.toString().trim()) chooseWording(selection.toString().trim());
+                            }}>{cue.originalText}</p>
+                            {changed ? <p className="caption-cue__preview"><strong>Estimated preview:</strong> {cue.text || "(empty cue)"}</p> : null}
                           </div>;
                         })}
                         {!visibleCues.length ? <p>No captions match your search.</p> : null}
@@ -410,9 +468,30 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
                     </> : null}
                   </section>
 
+                  <fieldset className="caption-section caption-rules" disabled={formDisabled}>
+                    <legend>Correct selected transcript wording</legend>
+                    <p>All occurrences in every cue will be replaced. Leave replacement empty to delete the selected text.</p>
+                    <label>Selected word or phrase<input ref={wordingRef} value={find} onChange={(event) => setFind(event.target.value)} maxLength={500} /></label>
+                    <label>Replace everywhere with<input value={replacement} onChange={(event) => setReplacement(event.target.value)} maxLength={500} /></label>
+                    <label><input type="checkbox" checked={caseSensitive} onChange={(event) => setCaseSensitive(event.target.checked)} /> Match case</label>
+                    <button className="button button--outline" type="button" onClick={queueCorrection} disabled={!find}>Queue correction</button>
+                    <button className="button button--outline" type="button" onClick={() => { setFind(""); setReplacement(""); }}>Clear wording</button>
+                    <ul>{replacements.map((rule, index) => <li key={index}>“{rule.find}” → {rule.replace ? `“${rule.replace}”` : "(delete)"} · {rule.caseSensitive ? "case-sensitive" : "any case"} <button type="button" aria-label={`Remove correction ${index + 1}`} onClick={() => setReplacements((current) => current.filter((_, i) => i !== index))}>Remove</button></li>)}</ul>
+                  </fieldset>
+                  <fieldset className="caption-section caption-rules" disabled={formDisabled}>
+                    <legend>Rename leading bracketed speakers</legend>
+                    <p>Only labels at the start of cues are renamed; spoken mentions are unchanged. Enter names without brackets.</p>
+                    {!labels.length ? <p>No leading bracketed speaker labels found.</p> : null}
+                    <label>Transcript speaker<select value={speaker} onChange={(event) => setSpeaker(event.target.value)}><option value="">Choose speaker</option>{labels.map((label) => <option key={label} value={label}>{label}</option>)}</select></label>
+                    <label>New speaker name<input value={speakerName} onChange={(event) => setSpeakerName(event.target.value)} maxLength={200} /></label>
+                    <button className="button button--outline" type="button" onClick={queueSpeaker}>Queue speaker rename</button>
+                    <button className="button button--outline" type="button" onClick={() => setSpeakerName("")}>Clear name</button>
+                    <ul>{speakers.map((rule, index) => <li key={rule.find}>{rule.find} → {rule.replace} <button type="button" aria-label={`Remove rename for ${rule.find}`} onClick={() => setSpeakers((current) => current.filter((_, i) => i !== index))}>Remove</button></li>)}</ul>
+                  </fieldset>
                   <fieldset className="caption-section" disabled={formDisabled}>
                     <legend>Optional AI cleanup</legend>
-                    <label className="caption-switch"><span><strong>Auto-censor profanity with Mux Robots</strong><small>After saving your edits, censor profanity across the caption track. Uses the blank style; spoken audio is unchanged.</small></span><input type="checkbox" role="switch" checked={autoCensor} onChange={(event) => setAutoCensor(event.target.checked)} /><i aria-hidden="true" /></label>
+                    <label className="caption-switch"><span><strong>Auto-censor profanity with Mux Robots</strong><small>Censor profanity across the track in the same Robots job. Spoken audio is unchanged. AI results cannot be previewed.</small></span><input type="checkbox" role="switch" checked={autoCensor} onChange={(event) => setAutoCensor(event.target.checked)} /><i aria-hidden="true" /></label>
+                    {autoCensor ? <label>Profanity mode<select value={censorMode} onChange={(event) => { const mode = event.target.value; if (mode === "blank" || mode === "remove" || mode === "mask") setCensorMode(mode); }}><option value="blank">Blank — bracketed underscores</option><option value="remove">Remove — delete profanity</option><option value="mask">Mask — question marks</option></select></label> : null}
                   </fieldset>
                   {errors.form ? <p className="caption-form-message caption-form-message--error" role="alert">{errors.form}</p> : null}
                 </form>
@@ -434,7 +513,7 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
               {repairing ? <><LoaderCircle className="spin" size={17} /> Checking…</> : "Check Mux status"}
             </button>
           ) : null}
-          {state?.canEdit && !active ? <button className="button button--pink" type="submit" form="caption-cleanup-form" disabled={formDisabled || (!edits.length && !autoCensor)}>{submitting ? <><LoaderCircle className="spin" size={17} /> Starting…</> : "Apply caption edits"}</button> : null}
+          {state?.canEdit && !active ? <button className="button button--pink" type="submit" form="caption-cleanup-form" disabled={formDisabled || Boolean(rulesError) || noEffect}>{submitting ? <><LoaderCircle className="spin" size={17} /> Starting…</> : "Apply caption edits"}</button> : null}
         </footer>
 
         {confirming ? <section ref={confirmRef} className="caption-confirm" role="alertdialog" aria-modal="true" aria-labelledby="caption-confirm-title" aria-describedby="caption-confirm-copy" onKeyDown={(event) => {
@@ -446,7 +525,7 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
           if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
           else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
         }}>
-          <div><span><AlertTriangle size={22} /></span><h3 id="caption-confirm-title">Replace the original caption track?</h3><p id="caption-confirm-copy">After the edited track uploads successfully, the original source track will be permanently deleted. RoboTube does not keep caption revision history, and this cannot be undone.</p><p>{edits.length} caption{edits.length === 1 ? "" : "s"} edited. Timing stays unchanged.{autoCensor ? " Mux Robots will then censor profanity across the track and may consume AI usage." : " No Robots cleanup requested."}</p><div className="caption-confirm__actions"><button className="button button--outline" type="button" disabled={submitting} onClick={() => setConfirming(false)} autoFocus>Go back</button><button className="button button--danger" type="button" disabled={formDisabled} onClick={() => void submit()}>{submitting ? "Saving…" : "Replace and apply edits"}</button></div></div>
+          <div><span><AlertTriangle size={22} /></span><h3 id="caption-confirm-title">Replace the original caption track?</h3><p id="caption-confirm-copy">One Mux Robots edit-captions job will replace the source track and may consume usage. Mux deletes the source before adding the edited track. If adding fails, restoration is best effort and can also fail. RoboTube keeps no caption revision history.</p><p>Estimated: {preview.changedCueCount} affected cues and {preview.totalReplacementCount} replacements. Every text correction applies across the entire track.{autoCensor ? " AI censoring is also requested; its effects are unknown until completion." : " No AI profanity censoring requested."}</p><div className="caption-confirm__actions"><button className="button button--outline" type="button" disabled={submitting} onClick={() => setConfirming(false)} autoFocus>Go back</button><button className="button button--danger" type="button" disabled={formDisabled} onClick={() => void submit()}>{submitting ? "Saving…" : "Replace and apply edits"}</button></div></div>
         </section> : null}
       </div>
     </dialog>

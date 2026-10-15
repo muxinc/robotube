@@ -397,9 +397,20 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
 .caption-cue { padding: 12px; border: 1px solid #e0e5ed; border-radius: 14px; background: #fbfcfe; }
 .caption-cue--edited { border-color: var(--pink); background: var(--pink-soft); }
 .caption-cue__heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-.caption-cue__heading label { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.caption-cue__heading span { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .caption-cue__heading button { border: 0; padding: 5px; background: transparent; color: var(--pink-deep); cursor: pointer; font-weight: 700; }
-.caption-cue textarea { display: block; resize: vertical; min-height: 76px; line-height: 1.5; }
+.caption-cue__text, .caption-cue__preview { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+.caption-cue__text { user-select: text; cursor: text; }
+.caption-cue__preview { padding: 10px; border-left: 3px solid var(--pink); background: #fff; }
+.caption-rules { min-width: 0; }
+.caption-rules > label { display: block; margin: 12px 0; font-weight: 600; }
+.caption-rules input:not([type="checkbox"]), .caption-section select { display: block; width: 100%; min-width: 0; margin-top: 6px; padding: 11px; border: 1px solid #d5dde8; border-radius: 10px; background: #fff; color: var(--ink); font: inherit; }
+.caption-rules input:focus-visible, .caption-section select:focus-visible, .caption-rules button:focus-visible, .caption-cue button:focus-visible { outline: 2px solid var(--pink); outline-offset: 3px; }
+.caption-rules > .button { margin: 4px 8px 4px 0; }
+.caption-rules ul { padding-left: 20px; }
+.caption-rules li { margin: 10px 0; overflow-wrap: anywhere; }
+.caption-rules li button { margin-left: 8px; }
+@media (max-width: 600px) { .caption-rules > .button { width: 100%; margin-right: 0; } }
 .caption-cue textarea[aria-invalid="true"] { border-color: #c33b58; }
 .caption-cue__original { margin: 8px 0 0; font-size: 12px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 .caption-replacements { display: flex; flex-direction: column; gap: 9px; }
