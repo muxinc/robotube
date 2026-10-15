@@ -6,6 +6,12 @@ The transcript provides context for choosing corrections. A selected word or phr
 
 These operations follow the [Mux caption-editing guide](https://www.mux.com/docs/guides/robots-edit-captions).
 
+## Speaker labels at upload
+
+Uploaders can request speaker labels before uploading. Two generation-only Directives select `include_speakers: true` or `false`; execution still waits for moderation. Speaker names are assigned later through this editor, not automatically during upload. See [Configure upload caption Directives](configure-caption-directives.md) for setup and rollout checks.
+
+The web modal places **Speaker names** before the transcript, after **Optional AI cleanup**. Both clients show guidance when the actual caption track has no speaker labels.
+
 ## Preview and submission
 
 Both clients use `lib/captionRobots.ts` to display an estimated preview and affected-cue count. Mux owns the actual matching behavior and operation order. AI profanity changes cannot be previewed locally. The completed job's replacement count is authoritative.
@@ -49,7 +55,7 @@ It requires a Vite development server and a dedicated Chrome remote-debugging in
 
 ```sh
 node scripts/check-caption-robots-browser.mjs
-node --experimental-strip-types --test tests/*.test.ts
+node --experimental-strip-types --test tests/*.test.ts tests/*.test.mjs
 ./node_modules/.bin/tsc --noEmit
 npm --prefix web run typecheck
 npm --prefix web run build

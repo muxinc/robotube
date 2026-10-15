@@ -15,6 +15,9 @@ import type * as audioTranslations from "../audioTranslations.js";
 import type * as audioTranslationsNode from "../audioTranslationsNode.js";
 import type * as auth from "../auth.js";
 import type * as backfillPaging from "../backfillPaging.js";
+import type * as captionDirectives from "../captionDirectives.js";
+import type * as captionDirectivesConfig from "../captionDirectivesConfig.js";
+import type * as captionDirectivesMuxAdapter from "../captionDirectivesMuxAdapter.js";
 import type * as captionEditing from "../captionEditing.js";
 import type * as captionEditingMuxAdapter from "../captionEditingMuxAdapter.js";
 import type * as captionEditingNode from "../captionEditingNode.js";
@@ -47,6 +50,7 @@ import type * as premiumCaptionsMuxAdapter from "../premiumCaptionsMuxAdapter.js
 import type * as search from "../search.js";
 import type * as searchFast from "../searchFast.js";
 import type * as uploadMetadata from "../uploadMetadata.js";
+import type * as uploadPassthrough from "../uploadPassthrough.js";
 import type * as uploadStatus from "../uploadStatus.js";
 import type * as uploads from "../uploads.js";
 import type * as users from "../users.js";
@@ -71,6 +75,9 @@ declare const fullApi: ApiFromModules<{
   audioTranslationsNode: typeof audioTranslationsNode;
   auth: typeof auth;
   backfillPaging: typeof backfillPaging;
+  captionDirectives: typeof captionDirectives;
+  captionDirectivesConfig: typeof captionDirectivesConfig;
+  captionDirectivesMuxAdapter: typeof captionDirectivesMuxAdapter;
   captionEditing: typeof captionEditing;
   captionEditingMuxAdapter: typeof captionEditingMuxAdapter;
   captionEditingNode: typeof captionEditingNode;
@@ -103,6 +110,7 @@ declare const fullApi: ApiFromModules<{
   search: typeof search;
   searchFast: typeof searchFast;
   uploadMetadata: typeof uploadMetadata;
+  uploadPassthrough: typeof uploadPassthrough;
   uploadStatus: typeof uploadStatus;
   uploads: typeof uploads;
   users: typeof users;

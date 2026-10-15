@@ -83,9 +83,10 @@ for (const viewport of [{width:1280,height:800,mobile:false},{width:390,height:8
  await evaluate('document.querySelector("input[role=switch]").click()');await pause(50);
 }
 await send('Emulation.setDeviceMetricsOverride',{width:1280,height:800,deviceScaleFactor:1,mobile:false});await pause(100);
+assert.equal(await evaluate(`(()=>{const heading=[...document.querySelectorAll('legend')].find(e=>e.textContent==='Speaker names');return !!heading && heading.getBoundingClientRect().top<document.querySelector('[aria-label="Caption transcript"]').getBoundingClientRect().top;})()`),true,'Speaker names is discoverable before the transcript');
 await evaluate(`(()=>{const p=document.querySelector('.caption-cue__text');const text=p.firstChild;const index=text.textContent.indexOf('Mucks');const range=document.createRange();range.setStart(text,index);range.setEnd(text,index+5);const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);p.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));})()`);
 await pause(50);
-assert.equal(await evaluate('document.querySelector(".caption-rules input").value'),'Mucks');
+assert.equal(await evaluate('[...document.querySelectorAll("label")].find(label => label.textContent.includes("Selected word or phrase")).querySelector("input").value'),'Mucks');
 async function input(label, value) {
  await evaluate(`(()=>{const label=[...document.querySelectorAll('label')].find(e=>e.textContent.includes(${JSON.stringify(label)}));const input=label.querySelector('input,select');const proto=input.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,'value').set.call(input,${JSON.stringify(value)});input.dispatchEvent(new Event(input.tagName==='SELECT'?'change':'input',{bubbles:true}));})()`);await pause(40);
 }
@@ -117,6 +118,9 @@ assert.equal(await evaluate('document.body.textContent.includes("Actual replacem
 await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});await pause(100);
 assert.equal(await evaluate('document.querySelector("dialog").getBoundingClientRect().width <= innerWidth'),true);
 if (process.env.ROBOTUBE_SCREENSHOT_PATH) await writeFile(process.env.ROBOTUBE_SCREENSHOT_PATH,Buffer.from((await send('Page.captureScreenshot',{format:'png'})).result.data,'base64'));
+await evaluate(`(()=>{const s=window.__captionTest;s.document={...s.document,trackId:'track-unlabeled',captionRevision:4,cues:s.document.cues.map(c=>({...c,text:c.text.replace(/^\\[[^\\]]+\\]\\s*/, '')}))};s.update({state:{...s.state,captionRevision:4,sourceTrack:{...s.state.sourceTrack,id:'track-unlabeled'},latestJob:undefined}});})()`);await pause(150);
+assert.equal(await evaluate('document.body.textContent.includes("current caption track has no speaker labels")'),true);
+assert.equal(await evaluate('[...document.querySelectorAll("button")].find(button=>button.textContent==="Queue speaker rename").disabled'),true);
 assert.deepEqual(exceptions,[]);
 console.log('PASS actual web component in Chrome: transcript selection, global preview, speaker rename, profanity, failure/draft retention, already-active response, double-submit guard, exact action payload, progress, refreshed transcript, narrow viewport. Backend actions mocked; no live Mux write.');
 await send('Fetch.disable');ws.close();
