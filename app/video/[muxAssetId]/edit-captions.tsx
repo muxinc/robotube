@@ -23,7 +23,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/convex/_generated/api";
 import { captionTimestamp, type CaptionTranscript } from "@/lib/captionTranscript";
 import { captionRulesError, captionSpeakerLabels, previewCaptionRules, type CaptionReplacement, type CaptionSpeakerReplacement } from "@/lib/captionRobots";
-import { createCaptionSubmissionGate, mobileCaptionJobText, mobileCaptionReviewError } from "@/components/caption-robots-mobile";
+import { createCaptionSubmissionGate, mobileCaptionJobText, mobileCaptionReviewError } from "@/lib/captionRobotsMobile";
 type EditorState = {
   canEdit: boolean;
   unavailableReason?: string;
@@ -34,6 +34,7 @@ type EditorState = {
     status: string;
   };
   latestJob?: {
+    operation?: "manual" | "robots";
     jobId?: string;
     pipelineStage?: string;
     canRecoverCensoring?: boolean;
@@ -62,7 +63,7 @@ function friendlyUnavailable(reason?: string) {
   if (normalized.includes("prepar") || normalized.includes("not ready")) {
     return "Captions are still preparing. Return here when the source track is ready.";
   }
-  if (normalized.includes("related video features") || normalized.includes("refresh")) {
+  if (normalized.includes("related video features") || normalized.includes("refresh") || normalized.includes("recovery")) {
     return reason;
   }
   if (normalized.includes("track") || normalized.includes("caption")) {
@@ -469,7 +470,7 @@ function CaptionEditorForm() {
               </View>)}
               <Text style={styles.sectionTitle}>Rename leading bracketed speakers</Text>
               <Text style={styles.helper}>Only leading labels change, not spoken mentions. Enter names without brackets.</Text>
-              {captionSpeakerLabels(transcript.cues).map((label) => <Pressable key={label} accessibilityRole="radio" accessibilityState={{ selected: speaker === label }} disabled={formDisabled} onPress={() => setSpeaker(label)}><Text style={styles.addButtonText}>{speaker === label ? "●" : "○"} {label}</Text></Pressable>)}
+              {captionSpeakerLabels(transcript.cues).map((label) => <Pressable key={label} accessibilityRole="radio" accessibilityState={{ checked: speaker === label }} disabled={formDisabled} onPress={() => setSpeaker(label)}><Text style={styles.addButtonText}>{speaker === label ? "●" : "○"} {label}</Text></Pressable>)}
               {speaker ? <>
                 <Field maxLength={200} label={`New name for ${speaker}`} editable={!formDisabled} value={speakerName} onChangeText={setSpeakerName} />
                 <Pressable accessibilityRole="button" disabled={formDisabled} onPress={() => {
@@ -493,7 +494,7 @@ function CaptionEditorForm() {
                 <Switch accessibilityLabel="Auto-censor profanity with Mux Robots" disabled={formDisabled} onValueChange={setAutoCensor} value={autoCensor} />
               </View>
             </View>
-            {autoCensor ? <View style={styles.censorCard}>{(["blank", "remove", "mask"] as const).map((mode) => <Pressable key={mode} accessibilityRole="radio" accessibilityLabel={`Censor mode ${mode}`} accessibilityState={{ selected: censorMode === mode }} disabled={formDisabled} onPress={() => setCensorMode(mode)}><Text style={styles.addButtonText}>{censorMode === mode ? "●" : "○"} {mode}</Text></Pressable>)}</View> : null}
+            {autoCensor ? <View style={styles.censorCard}>{(["blank", "remove", "mask"] as const).map((mode) => <Pressable key={mode} accessibilityRole="radio" accessibilityLabel={`Censor mode ${mode}`} accessibilityState={{ checked: censorMode === mode }} disabled={formDisabled} onPress={() => setCensorMode(mode)}><Text style={styles.addButtonText}>{censorMode === mode ? "●" : "○"} {mode}</Text></Pressable>)}</View> : null}
             <View style={{ height: 12 }} />
           </ScrollView>
 

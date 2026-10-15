@@ -2,12 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { URL } from "node:url";
-import ts from "typescript";
 import { captionRulesError, captionSpeakerLabels, previewCaptionRules } from "../lib/captionRobots.ts";
-
-const helpersSource = readFileSync(new URL("../components/caption-robots-mobile.tsx", import.meta.url), "utf8");
-const compiled = ts.transpileModule(helpersSource, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
-const helpers = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`) as typeof import("../components/caption-robots-mobile");
+import * as helpers from "../lib/captionRobotsMobile.ts";
 
 const screen = readFileSync(new URL("../app/video/[muxAssetId]/edit-captions.tsx", import.meta.url), "utf8");
 
@@ -82,6 +78,8 @@ test("zero net effect is rejected without censoring; stale speakers are always r
 test("job display survives edit lockout and retains Mux identity/count", () => {
   const text = helpers.mobileCaptionJobText({ status: "processing", jobId: "robot-1", totalReplacementCount: 3 });
   assert.match(text, /processing.*robot-1.*3 replacements/);
+  assert.doesNotMatch(helpers.mobileCaptionJobText({ status: "completed", operation: "manual" }), /Mux Robots/);
+  assert.match(helpers.mobileCaptionJobText({ status: "completed", operation: "manual", jobId: "censor-1" }), /Mux Robots/);
   assert.ok(screen.indexOf("mobileCaptionJobText(state.latestJob)") < screen.indexOf("!state.canEdit"));
   assert.match(screen, /message=\{editActive \? "Caption edits are being applied/);
 });

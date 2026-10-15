@@ -40,6 +40,7 @@ export type CaptionEditorState = {
     status: string;
   };
   latestJob?: {
+    operation?: "manual" | "robots";
     pipelineStage?: string;
     canRecoverCensoring?: boolean;
     canCheckUploadStatus?: boolean;
@@ -418,7 +419,7 @@ export function CaptionCleanup({ muxAssetId, open, onClose, title }: CaptionClea
             <>
               <section className={`caption-job-state caption-job-state--${status.tone}`} aria-live="polite">
                 {status.tone === "active" || status.tone === "loading" ? <LoaderCircle className="spin" size={19} /> : status.tone === "complete" ? <Check size={19} /> : status.tone === "error" ? <CircleAlert size={19} /> : <Captions size={19} />}
-                <div><strong>{status.label}</strong><p>{status.detail}</p>{state.latestJob ? <p>Workflow: edit-captions · Mux job: {state.latestJob.jobId || "Awaiting ID"} · Status: {state.latestJob.status}{state.latestJob.totalReplacementCount !== undefined ? ` · Actual replacements: ${state.latestJob.totalReplacementCount}` : ""}</p> : null}{state.latestJob?.reconciliationStatus === "errored" ? <p>Captions changed, but some caption-based features could not refresh yet.</p> : null}</div>
+                <div><strong>{status.label}</strong><p>{status.detail}</p>{state.latestJob ? <p>Workflow: {state.latestJob.operation === "manual" && !state.latestJob.jobId ? "Legacy caption-track update" : `edit-captions · Mux job: ${state.latestJob.jobId || "Awaiting ID"}`} · Status: {state.latestJob.status}{state.latestJob.totalReplacementCount !== undefined ? ` · Actual replacements: ${state.latestJob.totalReplacementCount}` : ""}</p> : null}{state.latestJob?.reconciliationStatus === "errored" ? <p>Captions changed, but some caption-based features could not refresh yet.</p> : null}</div>
               </section>
 
               {state.latestJob?.canRecoverCensoring ? <section className="caption-section" aria-label="Recover caption censoring">

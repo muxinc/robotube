@@ -35,6 +35,7 @@ export function createCaptionSubmissionGate() {
   };
 }
 
-export function mobileCaptionJobText(job: { status: string; jobId?: string; totalReplacementCount?: number }) {
-  return `Mux Robots · edit-captions · ${job.status}${job.jobId ? ` · Mux job ${job.jobId}` : ""}${typeof job.totalReplacementCount === "number" ? ` · ${job.totalReplacementCount} replacements` : ""}`;
+export function mobileCaptionJobText(job: { status: string; jobId?: string; totalReplacementCount?: number; operation?: "manual" | "robots" }) {
+  const workflow = job.operation === "manual" && !job.jobId ? "Legacy caption-track update" : "Mux Robots · edit-captions";
+  return `${workflow} · ${job.status}${job.jobId ? ` · Mux job ${job.jobId}` : ""}${typeof job.totalReplacementCount === "number" ? ` · ${job.totalReplacementCount} replacements` : ""}`;
 }
