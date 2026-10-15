@@ -20,7 +20,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { api } from "@/convex/_generated/api";
-import { captionTextError, captionTimestamp, captionTranscriptEdits, type CaptionTranscript } from "@/lib/captionTranscript";
+import { captionTimestamp, type CaptionTranscript } from "@/lib/captionTranscript";
+import { captionRulesError, captionSpeakerLabels, previewCaptionRules, type CaptionReplacement, type CaptionSpeakerReplacement } from "@/lib/captionRobots";
 type EditorState = {
   canEdit: boolean;
   unavailableReason?: string;
@@ -31,6 +32,7 @@ type EditorState = {
     status: string;
   };
   latestJob?: {
+    jobId?: string;
     pipelineStage?: string;
     canRecoverCensoring?: boolean;
     canCheckUploadStatus?: boolean;
@@ -101,7 +103,12 @@ function CaptionEditorForm() {
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
   const [transcript, setTranscript] = useState<CaptionTranscript | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [replacements, setReplacements] = useState<CaptionReplacement[]>([]);
+  const [speakers, setSpeakers] = useState<CaptionSpeakerReplacement[]>([]);
+  const [composer, setComposer] = useState<{ cueText: string; find: string; replace: string; caseSensitive: boolean } | null>(null);
+  const [speaker, setSpeaker] = useState("");
+  const [speakerName, setSpeakerName] = useState("");
+  const [censorMode, setCensorMode] = useState<"blank" | "remove" | "mask">("blank");
   const [loadingTranscript, setLoadingTranscript] = useState(false);
   const [transcriptError, setTranscriptError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
@@ -115,7 +122,7 @@ function CaptionEditorForm() {
     muxAssetId ? { muxAssetId } : "skip",
   ) as EditorState | null | undefined;
   const loadTranscript = useAction((api as any).captionEditingNode.loadOwnCaptionDocument);
-  const saveTranscript = useAction((api as any).captionEditingNode.replaceOwnCaptionTrack);
+  const saveTranscript = useAction((api as any).captionEditingNode.editCaptionsForAsset);
   const retryReconciliation = useAction(
     (api as any).captionEditingNode.retryCaptionReconciliationForAsset,
   );
@@ -131,7 +138,7 @@ function CaptionEditorForm() {
       const result = await recoverCensoring({ muxAssetId, useManualTrack });
       void AccessibilityInfo.announceForAccessibility(result.restarted ? "Caption recovery started." : "Caption status changed. Review the latest status.");
     } catch {
-      setValidationMessage("Could not start caption recovery. Your original captions are retained. Please try again.");
+      setValidationMessage("Could not start caption recovery. Check the latest track status. Please try again.");
     } finally { setIsRepairing(false); }
   };
   const latestStatus = state?.latestJob?.status;
@@ -140,20 +147,21 @@ function CaptionEditorForm() {
   const announcedStatus = useRef<string | undefined>(undefined);
   const transcriptCurrent = transcript?.trackId === state?.sourceTrack?.id && transcript?.captionRevision === state?.captionRevision;
   const formDisabled = isSubmitting || editActive || !state?.canEdit || loadingTranscript || !transcript || !transcriptCurrent;
-  const edits = transcript ? captionTranscriptEdits(transcript, drafts) : [];
-  usePreventRemove(edits.length > 0 && !editActive, ({ data }) => {
+  const preview = previewCaptionRules(transcript?.cues ?? [], replacements, speakers);
+  const hasRules = replacements.length > 0 || speakers.length > 0 || autoCensor;
+  usePreventRemove(hasRules || composer !== null || speakerName.length > 0, ({ data }) => {
     if (isSubmitting) return;
     Alert.alert("Discard unsaved caption edits?", "Your changes have not been saved.", [
       { text: "Keep editing", style: "cancel" },
       { text: "Discard", style: "destructive", onPress: () => navigation.dispatch(data.action) },
     ]);
   });
-  const visibleCues = transcript?.cues.filter((cue) => `${cue.text}\n${drafts[cue.id] ?? cue.text}`.toLowerCase().includes(search.toLowerCase())) ?? [];
+  const visibleCues = preview.cues.filter((cue) => `${cue.originalText} ${cue.text}`.toLowerCase().includes(search.toLowerCase()));
 
   useEffect(() => {
     let cancelled = false;
     setTranscript(null);
-    setDrafts({});
+    // Preserve queued rules while the source refreshes.
     setTranscriptError(null);
     if (!muxAssetId || !state?.sourceTrack?.id) return;
     setLoadingTranscript(true);
@@ -206,10 +214,7 @@ function CaptionEditorForm() {
 
   const submit = () => {
     if (!muxAssetId || !transcript || formDisabled) return;
-    const invalidEdit = edits.find((edit) => captionTextError(edit.text));
-    const message = invalidEdit
-      ? `${captionTimestamp(transcript.cues.find((cue) => cue.id === invalidEdit.id)!.startMs)}: ${captionTextError(invalidEdit.text)}`
-      : !edits.length && !autoCensor ? "Edit a caption or turn on auto-censor first." : null;
+    const message = composer || speakerName ? "Queue or cancel the unfinished correction first." : captionRulesError(replacements, speakers, autoCensor);
     if (message) {
       setValidationMessage(message);
       announce(message);
@@ -218,7 +223,8 @@ function CaptionEditorForm() {
 
     Alert.alert(
       "Replace source captions?",
-      `${edits.length} caption${edits.length === 1 ? "" : "s"} edited. Timings stay unchanged. After the updated track is ready, the original is permanently deleted. This cannot be undone.${autoCensor ? " Mux Robots will censor profanity across the track and may consume AI usage." : ""}`,
+      `One Mux Robots edit-captions job applies rules to ALL occurrences across the track. Estimated affected cues: ${preview.changedCueCount}. The source is deleted before the edited track is added. Restoration on failure is best effort and may also fail.${autoCensor ? " AI profanity censoring is not previewed and may consume AI usage." : ""}`,
+
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -232,11 +238,14 @@ function CaptionEditorForm() {
               muxAssetId,
               trackId: transcript.trackId,
               captionRevision: transcript.captionRevision,
-              edits,
-              autoCensorProfanity: autoCensor,
+              replacements,
+              speakerReplacements: speakers,
+              ...(autoCensor ? { autoCensorProfanity: { mode: censorMode } } : {}),
             })
-              .then(() => {
-                setDrafts({});
+              .then((result: { alreadyActive: boolean }) => {
+                if (result.alreadyActive) { setValidationMessage("An existing job is running. Your queued edits were not submitted."); return; }
+                setReplacements([]);
+                setSpeakers([]);
                 setAutoCensor(false);
                 announce("Caption edit started successfully.");
               })
@@ -298,7 +307,7 @@ function CaptionEditorForm() {
       ? `Reviewed${typeof state?.latestJob?.totalReplacementCount === "number" ? ` · ${state.latestJob.totalReplacementCount} replacements` : ""}`
       : latestStatus === "errored" || latestStatus === "cancelled"
         ? state?.latestJob?.errorMessage || "The last edit could not be applied. Review your captions and try again."
-        : "Read the transcript and edit captions in place.";
+        : "Read the transcript and queue track-wide rules.";
 
   return (
     <View style={styles.screen}>
@@ -328,7 +337,7 @@ function CaptionEditorForm() {
       ) : state?.latestJob?.canRecoverCensoring ? (
         <View style={styles.stateWrap} accessibilityLiveRegion="polite">
           <Text style={styles.sectionTitle}>Censoring needs attention</Text>
-          <Text style={styles.stateText}>Your original and manually edited captions are retained. Retry censoring, or finish using the manual captions without censoring.</Text>
+          <Text style={styles.stateText}>This legacy manual-caption job needs recovery. Retry censoring, or finish using the manual captions without censoring.</Text>
           <Text style={styles.helper}>Retrying may consume AI usage.</Text>
           <Pressable accessibilityRole="button" disabled={isRepairing} style={styles.stateAction} onPress={() => void recover(false)}>
             {isRepairing ? <ActivityIndicator color="#FFFFFF" /> : null}<Text style={styles.submitText}>Retry censoring</Text>
@@ -380,32 +389,55 @@ function CaptionEditorForm() {
 
             <View accessibilityLiveRegion="polite" style={[styles.statusCard, editActive && styles.statusActive]}>
               {editActive ? <ActivityIndicator color="#B83A8D" /> : <Ionicons name={latestStatus === "completed" ? "checkmark-circle" : "information-circle"} size={21} color={latestStatus === "completed" ? "#248A4D" : "#B83A8D"} />}
-              <Text style={styles.statusText}>{statusCopy}</Text>
+              <Text style={styles.statusText}>{`Mux Robots · edit-captions · ${latestStatus ?? "ready"}${state.latestJob?.jobId ? ` · Mux job ${state.latestJob.jobId}` : ""}`} {statusCopy}</Text>
             </View>
 
             <Text style={styles.sectionTitle}>Transcript</Text>
-            <Text style={styles.helper}>Edit individual captions below. Timings stay unchanged; repeated dialogue elsewhere is not affected.</Text>
+            <Text style={styles.helper}>Corrections affect ALL matching occurrences across the track, not only this timestamp. Select or copy text, then choose Correct wording. Empty replacement text deletes matches.</Text>
             {loadingTranscript ? <ActivityIndicator accessibilityLabel="Loading transcript" color="#B83A8D" /> : transcriptError ? <View style={styles.censorCard}>
               <Text accessibilityLiveRegion="assertive" style={styles.errorText}>{transcriptError}</Text>
               <Pressable accessibilityRole="button" onPress={() => setReload((value) => value + 1)}><Text style={styles.addButtonText}>Retry loading transcript</Text></Pressable>
             </View> : transcript ? <>
               <Field label="Search transcript" value={search} onChangeText={setSearch} placeholder="Find a caption…" />
-              <Text style={styles.helper}>{transcript.cues.length} captions · {edits.length} edited</Text>
-              {visibleCues.map((cue) => {
-                const text = drafts[cue.id] ?? cue.text;
-                const changed = text !== cue.text;
-                return <View key={cue.id} style={[styles.cueCard, changed && styles.cueEdited]}>
-                  <Field label={`${captionTimestamp(cue.startMs)} – ${captionTimestamp(cue.endMs)}`} multiline editable={!formDisabled} maxLength={10_000} value={text} onChangeText={(value) => {
-                    setDrafts((current) => ({ ...current, [cue.id]: value }));
-                    setValidationMessage(null);
-                  }} />
-                  {changed ? <>
-                    <Text style={styles.helper}>Original: {cue.text}</Text>
-                    {captionTextError(text) ? <Text style={styles.errorText}>{captionTextError(text)}</Text> : null}
-                    <Pressable accessibilityRole="button" accessibilityLabel={`Undo caption edit at ${captionTimestamp(cue.startMs)}`} disabled={formDisabled} onPress={() => { setDrafts((current) => ({ ...current, [cue.id]: cue.text })); setValidationMessage(null); }}><Text style={styles.addButtonText}>Undo edit</Text></Pressable>
-                  </> : null}
-                </View>;
-              })}
+              <Text style={styles.helper}>{transcript.cues.length} captions · Estimated {preview.changedCueCount} affected cues · {preview.totalReplacementCount} replacements. Estimate only: Mux matching may differ. AI censoring is not previewed.</Text>
+              {visibleCues.map((cue) => <View key={cue.id} style={styles.cueCard}>
+                <Text style={styles.fieldLabel}>{captionTimestamp(cue.startMs)} – {captionTimestamp(cue.endMs)}</Text>
+                <Text selectable>Original: {cue.originalText}</Text>
+                <Text selectable>Estimated preview: {cue.text || "(empty)"}</Text>
+                <Pressable accessibilityRole="button" accessibilityLabel={`Correct wording at ${captionTimestamp(cue.startMs)}`} disabled={formDisabled} onPress={() => setComposer({ cueText: cue.originalText, find: cue.originalText, replace: "", caseSensitive: false })}><Text style={styles.addButtonText}>Correct wording</Text></Pressable>
+              </View>)}
+              {composer ? <View style={styles.censorCard}>
+                <Text style={styles.sectionTitle}>Track-wide phrase correction</Text>
+                <Field label="Find word or phrase from selected cue" editable={!formDisabled} value={composer.find} onChangeText={(find) => setComposer({ ...composer, find })} />
+                <Field label="Replace with (empty deletes matches)" editable={!formDisabled} value={composer.replace} onChangeText={(replace) => setComposer({ ...composer, replace })} />
+                <Text style={styles.helper}>You may shorten the text to a phrase present in the original cue.</Text>
+                <Text>Case sensitive</Text><Switch accessibilityLabel="Case sensitive correction" disabled={formDisabled} value={composer.caseSensitive} onValueChange={(caseSensitive) => setComposer({ ...composer, caseSensitive })} />
+                <Pressable accessibilityRole="button" disabled={formDisabled} onPress={() => {
+                  const rule = { find: composer.find, replace: composer.replace, caseSensitive: composer.caseSensitive };
+                  const error = !composer.cueText.includes(composer.find) ? "Choose text present in the selected cue." : captionRulesError([...replacements, rule], speakers, autoCensor);
+                  if (error) { setValidationMessage(error); return; }
+                  setReplacements([...replacements, rule]); setComposer(null); setValidationMessage(null);
+                }}><Text style={styles.addButtonText}>Queue correction</Text></Pressable>
+                <Pressable accessibilityRole="button" disabled={formDisabled} onPress={() => setComposer(null)}><Text style={styles.addButtonText}>Cancel correction</Text></Pressable>
+              </View> : null}
+              {replacements.map((rule, index) => <View key={index} style={styles.cueCard}>
+                <Text selectable>{rule.find} → {rule.replace || "(delete)"} · {rule.caseSensitive ? "Case sensitive" : "Ignore case"}</Text>
+                <Pressable accessibilityRole="button" accessibilityLabel={`Remove correction ${index + 1}`} disabled={formDisabled} onPress={() => setReplacements(replacements.filter((_, i) => i !== index))}><Text style={styles.addButtonText}>Remove correction</Text></Pressable>
+              </View>)}
+              <Text style={styles.sectionTitle}>Rename leading bracketed speakers</Text>
+              <Text style={styles.helper}>Only leading labels change, not spoken mentions. Enter names without brackets.</Text>
+              {captionSpeakerLabels(transcript.cues).map((label) => <Pressable key={label} accessibilityRole="radio" accessibilityState={{ selected: speaker === label }} disabled={formDisabled} onPress={() => setSpeaker(label)}><Text style={styles.addButtonText}>{speaker === label ? "●" : "○"} {label}</Text></Pressable>)}
+              {speaker ? <>
+                <Field label={`New name for ${speaker}`} editable={!formDisabled} value={speakerName} onChangeText={setSpeakerName} />
+                <Pressable accessibilityRole="button" disabled={formDisabled} onPress={() => {
+                  const next = [...speakers.filter((rule) => rule.find !== speaker), { find: speaker, replace: speakerName }];
+                  const error = captionRulesError(replacements, next, autoCensor);
+                  if (error) { setValidationMessage(error); return; }
+                  setSpeakers(next); setSpeakerName(""); setSpeaker(""); setValidationMessage(null);
+                }}><Text style={styles.addButtonText}>Queue speaker rename</Text></Pressable>
+                <Pressable accessibilityRole="button" disabled={formDisabled} onPress={() => { setSpeaker(""); setSpeakerName(""); }}><Text style={styles.addButtonText}>Cancel rename</Text></Pressable>
+              </> : null}
+              {speakers.map((rule) => <View key={rule.find} style={styles.cueCard}><Text>{rule.find} → {rule.replace}</Text><Pressable accessibilityRole="button" accessibilityLabel={`Remove rename for ${rule.find}`} disabled={formDisabled} onPress={() => setSpeakers(speakers.filter((item) => item.find !== rule.find))}><Text style={styles.addButtonText}>Remove rename</Text></Pressable></View>)}
               {!visibleCues.length ? <Text style={styles.helper}>No captions match your search.</Text> : null}
             </> : null}
 
@@ -413,17 +445,18 @@ function CaptionEditorForm() {
               <View style={styles.switchRow}>
                 <View style={styles.flex}>
                   <Text style={styles.sectionTitle}>Auto-censor profanity</Text>
-                  <Text style={styles.helper}>Mux Robots censors the edited track using the blank style. Spoken audio is unchanged.</Text>
+                  <Text style={styles.helper}>AI detects profanity across the track; results are not previewed. Spoken audio is unchanged.</Text>
                 </View>
                 <Switch accessibilityLabel="Auto-censor profanity with Mux Robots" disabled={formDisabled} onValueChange={setAutoCensor} value={autoCensor} />
               </View>
             </View>
+            {autoCensor ? <View style={styles.censorCard}>{(["blank", "remove", "mask"] as const).map((mode) => <Pressable key={mode} accessibilityRole="radio" accessibilityLabel={`Censor mode ${mode}`} accessibilityState={{ selected: censorMode === mode }} disabled={formDisabled} onPress={() => setCensorMode(mode)}><Text style={styles.addButtonText}>{censorMode === mode ? "●" : "○"} {mode}</Text></Pressable>)}</View> : null}
             <View style={{ height: 12 }} />
           </ScrollView>
 
           <View style={[styles.submitArea, { paddingBottom: Math.max(insets.bottom, 12) }]}>
             {validationMessage ? <Text accessibilityLiveRegion="assertive" style={styles.errorText}>{validationMessage}</Text> : null}
-            <Pressable accessibilityRole="button" accessibilityState={{ disabled: formDisabled || (!edits.length && !autoCensor) }} disabled={formDisabled || (!edits.length && !autoCensor)} onPress={submit} style={({ pressed }) => [styles.submitButton, (formDisabled || (!edits.length && !autoCensor)) && styles.submitDisabled, pressed && styles.pressed]}>
+            <Pressable accessibilityRole="button" accessibilityState={{ disabled: formDisabled || !hasRules }} disabled={formDisabled || !hasRules} onPress={submit} style={({ pressed }) => [styles.submitButton, (formDisabled || !hasRules) && styles.submitDisabled, pressed && styles.pressed]}>
               {isSubmitting || editActive ? <ActivityIndicator color="#FFFFFF" /> : <Ionicons name="sparkles" size={19} color="#FFFFFF" />}
               <Text style={styles.submitText}>{editActive ? "Applying caption edits…" : "Apply caption edits"}</Text>
             </Pressable>
