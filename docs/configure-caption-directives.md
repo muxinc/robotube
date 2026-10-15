@@ -1,6 +1,6 @@
 # Configure upload caption Directives
 
-Use this procedure to enable the upload-time **Include speaker labels** option. RoboTube needs two Mux Directive IDs in its Convex environment before it accepts new uploads through this implementation.
+Use this procedure to enable the upload-time **Include speaker labels** option. Configure both Mux Directive IDs in Convex to support both upload choices. An upload fails before creation if its selected variant is unconfigured.
 
 ## Inspect the definitions without contacting Mux
 

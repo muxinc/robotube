@@ -6,7 +6,7 @@ import { captionDirectivePlan, provisionCaptionDirectives } from "../scripts/pro
 function fixture() {
   const rows = [], calls = [], output = [];
   let failed = false;
-  const state = { failSecond: false, loseFirstResponse: false };
+  const state = { failSecond: false, loseFirstResponse: false, malformedFirstResponse: false };
   const options = {
     create: true,
     env: { MUX_TOKEN_ID: "test", MUX_TOKEN_SECRET: "test" },
@@ -23,6 +23,7 @@ function fixture() {
         const row = { ...JSON.parse(init.body), id: `drv_test${rows.length + 1}` };
         rows.push(row);
         if (state.loseFirstResponse && rows.length === 1) throw new Error("Connection lost after acceptance");
+        if (state.malformedFirstResponse && rows.length === 1) return new Response("{", { status: 201 });
         return Response.json({ data: row }, { status: 201 });
       }
       if (new URL(url).search) return Response.json({ data: rows });
@@ -73,12 +74,14 @@ test("partial provisioning preserves the first ID and reuses it on operator retr
   assert.equal(f.calls.filter((call) => call.method === "POST" && call.body.name === f.rows[0].name).length, 1);
 });
 
-test("an accepted request with a lost response is not automatically repeated", async () => {
-  const f = fixture(); f.state.loseFirstResponse = true;
-  await assert.rejects(provisionCaptionDirectives(f.options), /Connection lost/);
-  assert.equal(f.calls.filter((call) => call.method === "POST").length, 1);
-  assert.equal(f.rows.length, 1);
-});
+for (const failure of ["loseFirstResponse", "malformedFirstResponse"]) {
+  test(`an accepted request with ${failure} warns before any retry`, async () => {
+    const f = fixture(); f.state[failure] = true;
+    await assert.rejects(provisionCaptionDirectives(f.options), /creation may have succeeded.*inspect.*before retrying/i);
+    assert.equal(f.calls.filter((call) => call.method === "POST").length, 1);
+    assert.equal(f.rows.length, 1);
+  });
+}
 
 test("immutable configurations cannot be silently repurposed", async () => {
   const f = fixture();

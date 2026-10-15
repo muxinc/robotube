@@ -42,14 +42,21 @@ export async function provisionCaptionDirectives({ create = false, env = process
   const authorization = `Basic ${Buffer.from(`${env.MUX_TOKEN_ID}:${env.MUX_TOKEN_SECRET}`).toString("base64")}`;
   async function request(path, body) {
     const method = body === undefined ? "GET" : "POST";
-    const response = await fetchImpl(API + path, {
-      method,
-      headers: { Authorization: authorization, "Content-Type": "application/json" },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(15_000),
-    });
+    const unconfirmed = () => new Error(`Mux ${method} directives${path} could not be confirmed. ${method === "POST" ? "Creation may have succeeded" : "Earlier creations may have succeeded"}; inspect the Dashboard before retrying.`);
+    let response;
+    try {
+      response = await fetchImpl(API + path, {
+        method,
+        headers: { Authorization: authorization, "Content-Type": "application/json" },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch {
+      throw unconfirmed();
+    }
     if (!response.ok) throw new Error(`Mux ${method} directives${path} failed (${response.status}). Inspect the Dashboard before retrying; earlier creations may have succeeded.`);
-    const payload = await response.json();
+    let payload;
+    try { payload = await response.json(); } catch { throw unconfirmed(); }
     if (!payload || !Object.hasOwn(payload, "data")) throw new Error("Mux response has no data. Inspect the Dashboard before retrying.");
     return payload.data;
   }
