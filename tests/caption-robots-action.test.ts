@@ -88,10 +88,11 @@ test("invalid rules, revisions, ownership, tracks and active translations never 
   }
 });
 test("confirmed failed Robots restoration rebinds only unique sources without changing revision", async () => {
-  for (const scenario of ["restored", "ambiguous", "missing", "newer", "newest", "owner", "timeout"]) {
+  for (const scenario of ["restored", "unbound", "ambiguous", "missing", "newer", "newest", "owner", "timeout"]) {
     const f = fixture(); await f.submit();
     f.state.asset.tracks = [{ id: "restored", name: "English", language_code: "en", type: "text", status: "ready" }];
     if (scenario === "ambiguous") f.state.asset.tracks.push({ ...f.state.asset.tracks[0], id: "other" });
+    if (scenario === "unbound") f.state.source = undefined;
     if (scenario === "newer") f.state.revision = 3;
     if (scenario === "newest") f.state.newest = { _id: "new-job", status: "pending", operation: "robots" };
     if (scenario === "owner") f.state.owner = "other";
@@ -100,7 +101,7 @@ test("confirmed failed Robots restoration rebinds only unique sources without ch
     assert.ok(f.state.scheduled.some((entry: any) => entry.name.endsWith(":reconcileFailedRobotsSourceInternal")));
     if (scenario === "timeout") f.state.row.pollingTimedOutAtMs = Date.now();
     await (actions.reconcileFailedRobotsSourceInternal as any)._handler(f.ctx, { requestId: "edit-1" });
-    if (scenario === "restored") {
+    if (scenario === "restored" || scenario === "unbound") {
       assert.equal(f.state.source, "restored"); assert.equal(f.state.revision, 2);
       const doc = await (actions.loadOwnCaptionDocument as any)._handler(f.ctx, { muxAssetId: "asset" });
       assert.equal(doc.trackId, "restored"); assert.equal(doc.captionRevision, 2);
@@ -111,6 +112,19 @@ test("confirmed failed Robots restoration rebinds only unique sources without ch
       if (scenario === "ambiguous" || scenario === "missing") { assert.match(f.state.unavailable, /manual recovery/); await assert.rejects((actions.loadOwnCaptionDocument as any)._handler(f.ctx, { muxAssetId: "asset" })); }
     }
   }
+});
+
+test("failed-job restoration retries while the restored track is still preparing", async () => {
+  const f = fixture(); await f.submit();
+  f.state.asset.tracks = [{ id: "restored", name: "English", language_code: "en", type: "text", status: "preparing" }];
+  await (actions.syncCaptionEditJobInternal as any)._handler(f.ctx, { job: { id: "robot-1", status: "errored" }, requestId: "edit-1" });
+  const result = await (actions.reconcileFailedRobotsSourceInternal as any)._handler(f.ctx, { requestId: "edit-1" });
+  assert.equal(result.retryScheduled, true);
+  assert.ok(f.state.scheduled.some((entry: any) => entry.name.endsWith(":reconcileFailedRobotsSourceInternal") && entry.args.attempt === 1));
+  f.state.asset.tracks[0].status = "ready";
+  await (actions.reconcileFailedRobotsSourceInternal as any)._handler(f.ctx, { requestId: "edit-1", attempt: 1 });
+  assert.equal(f.state.source, "restored");
+  assert.equal(f.state.revision, 2);
 });
 
 test("confirmed failures release reservation; ambiguous creation remains reserved without repost", async () => {

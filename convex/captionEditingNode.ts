@@ -499,12 +499,25 @@ export const editCaptionsForAsset = action({
 });
 
 export const reconcileFailedRobotsSourceInternal = internalAction({
-  args: { requestId: v.id("captionEditingJobs") },
+  args: { requestId: v.id("captionEditingJobs"), attempt: v.optional(v.number()) },
   handler: async (ctx, args): Promise<any> => {
-    const row: any = await ctx.runQuery((internal as any).captionEditing.getEditJobInternal, args);
+    const row: any = await ctx.runQuery((internal as any).captionEditing.getEditJobInternal, { requestId: args.requestId });
     if (!row || row.operation !== "robots" || row.pollingTimedOutAtMs || !["errored", "cancelled"].includes(row.status)) return { skipped: true };
-    const asset = await muxClient().video.assets.retrieve(row.muxAssetId);
-    return ctx.runMutation((internal as any).captionEditing.rebindFailedRobotsSourceInternal, { requestId: row._id, asset });
+    const attempt = args.attempt ?? 0;
+    let result: { restored?: boolean; skipped?: boolean; error?: string };
+    try {
+      const asset = await muxClient().video.assets.retrieve(row.muxAssetId);
+      result = await ctx.runMutation((internal as any).captionEditing.rebindFailedRobotsSourceInternal, { requestId: row._id, asset });
+    } catch (error) {
+      if (httpStatus(error) === 404) return { skipped: true };
+      result = { error: "Could not check the restored caption source." };
+    }
+    const retryScheduled = !result.restored && !result.skipped && attempt < 6;
+    if (retryScheduled) {
+      await ctx.scheduler.runAfter(TRACK_WAIT_MS, (internal as any).captionEditingNode.reconcileFailedRobotsSourceInternal,
+        { requestId: row._id, attempt: attempt + 1 });
+    }
+    return { ...result, retryScheduled };
   },
 });
 

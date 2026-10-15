@@ -104,8 +104,8 @@ export const getOwnCaptionEditorState = query({
         row.status === "processing",
     );
     const failedRobotsSource = latest?.operation === "robots" && ["errored", "cancelled"].includes(latest.status);
-    const source = failedRobotsSource && preferredId
-      ? readyTextTracks.find((track) => track.id === preferredId)
+    const source = failedRobotsSource
+      ? readyTextTracks.find((track) => track.id === (preferredId ?? latest.sourceTrackId))
       : readyTextTracks.find((track) => track.id === preferredId) ??
       readyTextTracks.find((track) => track.id === latest?.uploadedTrackId) ??
       (latest?.reconciliationStatus === "completed" && latest.uploadedTrackId
@@ -534,7 +534,8 @@ export const rebindFailedRobotsSourceInternal = internalMutation({
     const owner = metadata.userId ?? parsePassthroughUserId(record(video?.asset).passthrough);
     const custom = record(metadata.custom);
     if (!video?.asset || owner !== row.userId || (custom.aiCaptionsRevision ?? 0) !== row.revision - 1 ||
-        custom.aiCaptionsTrackId !== row.sourceTrackId || args.asset.id !== row.muxAssetId) return { skipped: true };
+        (custom.aiCaptionsTrackId !== undefined && custom.aiCaptionsTrackId !== row.sourceTrackId) ||
+        args.asset.id !== row.muxAssetId) return { skipped: true };
     const tracks = Array.isArray(args.asset.tracks) ? args.asset.tracks : [];
     const original = tracks.find((track: any) => track.id === row.sourceTrackId);
     if (original?.type === "text" && original.status === "ready") return { skipped: true };
