@@ -503,7 +503,7 @@ export const syncEditJobInternal = internalMutation({
     await ctx.db.patch(row._id, patch);
     if (row.operation === "robots" && !args.pollingTimedOut &&
         (args.status === "errored" || args.status === "cancelled") &&
-        (row.status !== args.status || row.pollingTimedOutAtMs)) {
+        (row.status !== args.status || row.pollingTimedOutAtMs || !row.jobId)) {
       await ctx.scheduler.runAfter(0, (internal as any).captionEditingNode.reconcileFailedRobotsSourceInternal, { requestId: row._id });
     }
     if (args.status === "completed" && row.status !== "completed") {

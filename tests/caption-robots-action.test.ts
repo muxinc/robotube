@@ -114,6 +114,24 @@ test("confirmed failed Robots restoration rebinds only unique sources without ch
   }
 });
 
+test("late confirmed failure recovers an expired ambiguous submission exactly once", async () => {
+  const f = fixture(); f.state.networkError = true;
+  await assert.rejects(f.submit());
+  await (mutations.expireUnattachedEditInternal as any)._handler(f.ctx, { requestId: "edit-1" });
+  assert.equal(f.state.row.status, "errored");
+  assert.ok(f.state.row.submissionUncertainAtMs);
+  f.state.asset.tracks = [{ id: "restored", name: "English", language_code: "en", type: "text", status: "ready" }];
+  const event = { job: { id: "robot-1", status: "errored" }, requestId: "edit-1" };
+  await (actions.syncCaptionEditJobInternal as any)._handler(f.ctx, event);
+  assert.equal(f.state.row.submissionUncertainAtMs, undefined);
+  assert.equal(f.state.scheduled.filter((entry: any) => entry.name.endsWith(":reconcileFailedRobotsSourceInternal")).length, 1);
+  await (actions.syncCaptionEditJobInternal as any)._handler(f.ctx, event);
+  assert.equal(f.state.scheduled.filter((entry: any) => entry.name.endsWith(":reconcileFailedRobotsSourceInternal")).length, 1);
+  await (actions.reconcileFailedRobotsSourceInternal as any)._handler(f.ctx, { requestId: "edit-1" });
+  assert.equal(f.state.source, "restored");
+  assert.equal(f.state.bodies.length, 1);
+});
+
 test("failed-job restoration retries while the restored track is still preparing", async () => {
   const f = fixture(); await f.submit();
   f.state.asset.tracks = [{ id: "restored", name: "English", language_code: "en", type: "text", status: "preparing" }];
