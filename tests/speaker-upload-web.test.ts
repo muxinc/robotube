@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { test } from "node:test";
+import { URL } from "node:url";
 
 const app = readFileSync(new URL("../web/src/App.tsx", import.meta.url), "utf8");
 const editor = readFileSync(new URL("../web/src/components/CaptionCleanup.tsx", import.meta.url), "utf8");
