@@ -36,11 +36,11 @@ function fixture() {
 test("default provisioning plan needs no credentials or network", async () => {
   const result = await provisionCaptionDirectives({ env: {}, fetchImpl: () => assert.fail("Dry run must not contact Mux") });
   assert.equal(result.mode, "dry-run");
-  assert.deepEqual(result.directives.map((entry) => entry.definition.workflows[0].params.include_speakers), [false, true]);
+  assert.deepEqual(result.directives.map((entry) => entry.definition.bindings[0].parameters.include_speakers), [false, true]);
   for (const { definition } of result.directives) {
-    assert.equal(definition.workflows.length, 1);
-    assert.equal(definition.workflows[0].workflow, "generate-premium-captions");
-    assert.equal(definition.workflows[0].params.replace_existing_tracks, "fail");
+    assert.equal(definition.bindings.length, 1);
+    assert.equal(definition.bindings[0].workflow, "generate-premium-captions");
+    assert.equal(definition.bindings[0].parameters.replace_existing_tracks, "fail");
   }
 });
 
@@ -86,7 +86,7 @@ for (const failure of ["loseFirstResponse", "malformedFirstResponse"]) {
 test("immutable configurations cannot be silently repurposed", async () => {
   const f = fixture();
   const wrong = captionDirectivePlan()[0].definition;
-  wrong.workflows[0].params.include_speakers = true;
+  wrong.bindings[0].parameters.include_speakers = true;
   f.rows.push({ ...wrong, id: "drv_wrong" });
   await assert.rejects(provisionCaptionDirectives(f.options), /does not match/);
   assert.equal(f.calls.some((call) => call.method === "POST"), false);

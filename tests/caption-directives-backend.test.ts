@@ -5,6 +5,7 @@ import { URL } from "node:url";
 import { getFunctionName } from "convex/server";
 import { after, test } from "node:test";
 import { buildCaptionDirectiveDefinition, selectCaptionDirectiveId } from "../convex/captionDirectivesConfig.ts";
+import { parseCaptionDirectiveRunId } from "../convex/captionDirectivesMuxAdapter.ts";
 
 const hooks = registerHooks({ resolve(specifier, context, next) {
   if (specifier === "@mux/mux-node") return { url: 'data:text/javascript,export default class Mux { video = { assets: { retrieve: async () => globalThis.__directiveTestAsset }, uploads: { create: async (args) => { globalThis.__directiveTestUpload = args; return { id: "upload", url: "https://example.test/upload", status: "waiting" }; } } }; }', shortCircuit: true };
@@ -68,10 +69,10 @@ for (const includeSpeakers of [false, true]) {
   test(`immutable captions-only definition: speakers=${includeSpeakers}`, () => {
     const definition = buildCaptionDirectiveDefinition({ includeSpeakers });
     assert.deepEqual(definition.resources, []);
-    assert.equal(definition.workflows.length, 1);
-    assert.equal(definition.workflows[0].workflow, "generate-premium-captions");
-    assert.equal(definition.workflows[0].params.include_speakers, includeSpeakers);
-    assert.equal(definition.workflows[0].params.replace_existing_tracks, "fail");
+    assert.equal(definition.bindings.length, 1);
+    assert.equal(definition.bindings[0].workflow, "generate-premium-captions");
+    assert.equal(definition.bindings[0].parameters.include_speakers, includeSpeakers);
+    assert.equal(definition.bindings[0].parameters.replace_existing_tracks, "fail");
     assert.equal(selectCaptionDirectiveId(includeSpeakers, { MUX_CAPTION_DIRECTIVE_WITH_SPEAKERS_ID: "speakers", MUX_CAPTION_DIRECTIVE_WITHOUT_SPEAKERS_ID: "plain" }), includeSpeakers ? "speakers" : "plain");
     assert.throws(() => selectCaptionDirectiveId(includeSpeakers, {}), /Missing env var/);
   });
@@ -103,7 +104,6 @@ for (const custom of [{}, { moderationCheckedAtMs: 1, moderationPassed: false }]
 
 test("real gateway polls run then premium job then exact ready track, never edits or rePOSTs", async () => {
   process.env.MUX_CAPTION_DIRECTIVE_WITH_SPEAKERS_ID = "speakers";
-  process.env.USE_LARAVEL_ORCHESTRATION = "false";
   const custom: any = { includeSpeakers: true, moderationCheckedAtMs: 1, moderationPassed: true };
   const asset: any = { status: "ready", tracks: [{ id: "unrelated", type: "text", status: "ready", language_code: "en" }] };
   (globalThis as any).__directiveTestAsset = asset;
@@ -113,7 +113,7 @@ test("real gateway polls run then premium job then exact ready track, never edit
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: string, options: any) => {
     requests.push(`${options?.method ?? "GET"} ${url}`);
-    if (options?.method === "POST") { postCount++; assert.deepEqual(JSON.parse(options.body), { asset_id: "asset" }); return Response.json({ data: { run_id: "run" } }); }
+    if (options?.method === "POST") { postCount++; assert.deepEqual(JSON.parse(options.body), { asset_id: "asset" }); return Response.json({ data: { id: "run" } }); }
     if (url.endsWith("/runs/run")) return Response.json({ data: { status: "completed", node_states: [{ reference_id: "premium_captions", status: "dispatched", job_id: "job" }] } });
     assert.match(url, /jobs\/generate-premium-captions\/job$/);
     return Response.json({ data: { id: "job", status: "completed", parameters: { asset_id: "asset", include_speakers: true }, outputs: { track_id: "exact", language_code: "en" } } });
@@ -159,5 +159,52 @@ test("real gateway polls run then premium job then exact ready track, never edit
     globalThis.fetch = (async () => Response.json({ data: { status: "errored", node_states: [{ reference_id: "premium_captions", status: "failed", reason: "Existing English track conflict" }] } })) as any;
     await (ensureGeneratedCaptionsTrackInternal as any)._handler(ctx, { muxAssetId: "asset", userId: "owner", attempt: 0 });
     assert.equal(custom.aiCaptionsUnavailableReason, "Existing English track conflict");
+  } finally { globalThis.fetch = originalFetch; delete (globalThis as any).__directiveTestAsset; }
+});
+
+test("Directive run ids parse from the v1 id and the v0 run_id", () => {
+  assert.equal(parseCaptionDirectiveRunId({ data: { id: "drvrun_v1" } }), "drvrun_v1");
+  assert.equal(parseCaptionDirectiveRunId({ data: { run_id: "drvrun_v0" } }), "drvrun_v0");
+});
+
+test("a v0 Directive is started, polled and its job read through v0 routes after v1 404s", async () => {
+  process.env.MUX_CAPTION_DIRECTIVE_WITHOUT_SPEAKERS_ID = "drv_beta";
+  const custom: any = { includeSpeakers: false, moderationCheckedAtMs: 1, moderationPassed: true };
+  const asset: any = { status: "ready", tracks: [{ id: "exact", type: "text", status: "ready", language_code: "en" }] };
+  (globalThis as any).__directiveTestAsset = asset;
+  let claim: any;
+  const requests: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string, options: any) => {
+    requests.push(`${options?.method ?? "GET"} ${url}`);
+    if (url.includes("/robots/v1/")) return Response.json({ error: { type: "not_found", messages: ["Not found"] } }, { status: 404 });
+    if (options?.method === "POST") return Response.json({ data: { run_id: "run" } });
+    if (url.endsWith("/runs/run")) return Response.json({ data: { status: "completed", node_states: [{ reference_id: "premium_captions", status: "dispatched", job_id: "job" }] } });
+    return Response.json({ data: { id: "job", status: "completed", parameters: { asset_id: "asset", include_speakers: false }, outputs: { uploaded_track_id: "exact", language_code: "en" } } });
+  }) as any;
+  const ctx: any = {
+    async runQuery(_ref: any, args: any) { return args.userId ? { asset, metadata: { userId: "owner", custom } } : {}; },
+    async runMutation(ref: any, args: any) {
+      const name = getFunctionName(ref);
+      if (name.endsWith("claimInternal")) {
+        if (!claim && !args.directiveId) return { needsConfiguration: true };
+        if (!claim) { claim = { ...args, _id: "claim" }; return { ...claim, acquired: true }; }
+        return { ...claim, acquired: false };
+      }
+      if (name.endsWith("recordRunInternal")) { claim.runId = args.runId; return; }
+      if (name.endsWith("updateMetadataInternal")) { Object.assign(custom, args.fields); return custom; }
+      assert.fail(`Unexpected mutation ${name}`);
+    },
+    scheduler: { async runAfter() {} },
+  };
+  try {
+    await (ensureGeneratedCaptionsTrackInternal as any)._handler(ctx, { muxAssetId: "asset", userId: "owner", attempt: 0 });
+    assert.equal(claim.runId, "run");
+    assert.equal(custom.aiCaptionsDirectiveRunId, "run");
+    assert.deepEqual(requests.filter((request) => request.includes("/robots/v0/")), [
+      "POST https://api.mux.com/robots/v0/directives/drv_beta/runs",
+      "GET https://api.mux.com/robots/v0/directives/drv_beta/runs/run",
+      "GET https://api.mux.com/robots/v0/jobs/generate-premium-captions/job",
+    ]);
   } finally { globalThis.fetch = originalFetch; delete (globalThis as any).__directiveTestAsset; }
 });

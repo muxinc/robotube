@@ -68,7 +68,7 @@ function fixture() {
 test("action sends one current Robots request, preserves spaces, and serializes duplicates", async () => {
   const f = fixture();
   assert.equal((await f.submit({ speakerReplacements: [{ find: "speaker_0", replace: "Alice" }] })).alreadyActive, false);
-  assert.deepEqual(f.state.bodies[0].parameters, { asset_id: "asset", track_id: "track", replacements: [{ find: " word ", replace: " corrected ", case_sensitive: false }], speaker_replacements: [{ find: "speaker_0", replace: "Alice" }], upload_to_mux: true, replace_existing_tracks: "replace" });
+  assert.deepEqual(f.state.bodies[0].parameters, { asset_id: "asset", track_id: "track", replacements: [{ find: " word ", replace: " corrected ", case_sensitive: false }], speaker_replacements: [{ find: "speaker_0", replace: "Alice" }], upload_to_mux: true, replace_existing_tracks: "replace", track_name: "English (reviewed)" });
   assert.equal(f.state.row.operation, "robots");
   assert.equal((await f.submit()).alreadyActive, true);
   assert.equal(f.state.bodies.length, 1);

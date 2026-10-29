@@ -6,9 +6,8 @@ import { v } from "convex/values";
 import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-translation-languages";
 import { components, internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
-import { isLaravelOrchestrationEnabled } from "./laravelFlag";
 
-const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v0";
+const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v1";
 const TRANSLATE_CAPTIONS_SOURCE_WAIT_INTERVAL_MS = 15 * 1000;
 const TRANSLATE_CAPTIONS_FALLBACK_POLL_INTERVAL_MS = 2 * 60 * 1000;
 const TRANSLATE_CAPTIONS_MAX_SOURCE_WAIT_ATTEMPTS = 40;
@@ -19,6 +18,8 @@ type TranslateCaptionsJob = {
   passthrough?: unknown;
   status: "pending" | "processing" | "completed" | "errored" | "cancelled";
   outputs?: {
+    track_id?: string;
+    // v0 (Beta) name for track_id, still sent by jobs created before the v1 migration.
     uploaded_track_id?: string;
     temporary_vtt_url?: string;
   };
@@ -90,7 +91,6 @@ type EnsureCaptionTranslationsResult =
   | { ok: true; skipped: true; reason: "moderation_pending" | "moderation_rejected" }
   | { ok: true; skipped: true; reason: "source_captions_unavailable" }
   | { ok: true; skipped: true; reason: "polling_disabled" }
-  | { ok: true; skipped: true; reason: "laravel_orchestration" }
   | { ok: true; skipped: false; created: number }
   | {
       ok: false;
@@ -214,9 +214,6 @@ function findSourceCaptionsTrack(asset: any) {
   return textTracks[0] ?? null;
 }
 
-function getSourceCaptionsLanguageCode(asset: any) {
-  return getTrackLanguageCode(findSourceCaptionsTrack(asset));
-}
 
 function findExistingTranslatedCaptionsTrack(asset: any, languageCode: string) {
   const normalizedLanguageCode = normalizeLanguageCode(languageCode);
@@ -268,7 +265,7 @@ async function applyCaptionTranslationJobUpdate(
     jobId,
     passthrough: normalizePassthrough(job.passthrough),
     errorMessage,
-    uploadedTrackId: job.outputs?.uploaded_track_id,
+    uploadedTrackId: job.outputs?.track_id ?? job.outputs?.uploaded_track_id,
     temporaryVttUrl: job.outputs?.temporary_vtt_url,
   });
 
@@ -287,7 +284,7 @@ function formatTranslateCaptionsErrors(errors: TranslateCaptionsJob["errors"]) {
 
 async function createTranslateCaptionsJob(args: {
   assetId: string;
-  fromLanguageCode: string;
+  sourceTrackId: string;
   toLanguageCode: string;
   passthrough?: string;
 }): Promise<TranslateCaptionsJob> {
@@ -301,8 +298,8 @@ async function createTranslateCaptionsJob(args: {
       passthrough: args.passthrough,
       parameters: {
         asset_id: args.assetId,
-        from_language_code: args.fromLanguageCode,
-        to_language_code: args.toLanguageCode,
+        track_id: args.sourceTrackId,
+        output_language_code: args.toLanguageCode,
         upload_to_mux: true,
       },
     }),
@@ -352,16 +349,10 @@ export const ensureCaptionTranslationsForAssetInternal = internalAction({
     languageCodes: v.array(v.string()),
     title: v.optional(v.string()),
     attempt: v.optional(v.number()),
+    // Set by caption edits: regenerate even when DISABLE_MUX_ROBOTS_POLLING is on.
     forceConvexOwnership: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<EnsureCaptionTranslationsResult> => {
-    // Laravel owns caption/audio translation Robots jobs when the flag is on.
-    // No-op so Convex creates zero caption-translation Robots jobs (covers all
-    // callers: moderation, migrations, self-reschedule).
-    if (isLaravelOrchestrationEnabled() && !args.forceConvexOwnership) {
-      return { ok: true, skipped: true, reason: "laravel_orchestration" };
-    }
-
     const attempt = Math.max(0, Math.floor(args.attempt ?? 0));
     const requestedLanguageCodes = normalizeAudioTranslationLanguageCodes(args.languageCodes);
 
@@ -390,7 +381,10 @@ export const ensureCaptionTranslationsForAssetInternal = internalAction({
 
     const mux = createMuxClient();
     const asset = await mux.video.assets.retrieve(args.muxAssetId);
-    const sourceLanguageCode = getSourceCaptionsLanguageCode(asset);
+    const sourceCaptionsTrack = findSourceCaptionsTrack(asset);
+    const sourceLanguageCode = getTrackLanguageCode(sourceCaptionsTrack);
+    const sourceTrackId =
+      typeof sourceCaptionsTrack?.id === "string" ? sourceCaptionsTrack.id : "";
     const languageCodes = requestedLanguageCodes.filter(
       (languageCode) => languageCode !== sourceLanguageCode,
     );
@@ -399,7 +393,7 @@ export const ensureCaptionTranslationsForAssetInternal = internalAction({
       return { ok: true, skipped: true, reason: "no_requested_languages" };
     }
 
-    if (asset.status !== "ready" || !sourceLanguageCode) {
+    if (asset.status !== "ready" || !sourceLanguageCode || !sourceTrackId) {
       const nextAttempt = attempt + 1;
       const shouldRetry = nextAttempt < TRANSLATE_CAPTIONS_MAX_SOURCE_WAIT_ATTEMPTS;
 
@@ -488,7 +482,7 @@ export const ensureCaptionTranslationsForAssetInternal = internalAction({
         });
         const job = await createTranslateCaptionsJob({
           assetId: args.muxAssetId,
-          fromLanguageCode: sourceLanguageCode,
+          sourceTrackId,
           toLanguageCode: item.languageCode,
           passthrough,
         });
@@ -504,7 +498,7 @@ export const ensureCaptionTranslationsForAssetInternal = internalAction({
           jobId,
           passthrough: normalizePassthrough(job.passthrough) ?? passthrough,
           errorMessage,
-          uploadedTrackId: job.outputs?.uploaded_track_id,
+          uploadedTrackId: job.outputs?.track_id ?? job.outputs?.uploaded_track_id,
           temporaryVttUrl: job.outputs?.temporary_vtt_url,
         });
 

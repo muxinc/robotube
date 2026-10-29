@@ -13,12 +13,11 @@ import {
 } from "./captionEditingMuxAdapter";
 import { parsePassthroughUserId } from "./feedContracts";
 import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
-import { isLaravelOrchestrationEnabled } from "./laravelFlag";
 import { parseCaptionVtt, replaceCaptionCueText } from "./captionVtt";
 import { captionRulesError } from "../lib/captionRobots";
 import { canRecoverCaptionCensor, censorRequest, deleteReplacedSource } from "./captionEditingWorkflow";
 
-const API = "https://api.mux.com/robots/v0/jobs/edit-captions";
+const API = "https://api.mux.com/robots/v1/jobs/edit-captions";
 const POLL_MS = 15_000;
 const MAX_POLL_ATTEMPTS = 80;
 const TRACK_WAIT_MS = 10_000;
@@ -40,6 +39,11 @@ function record(value: unknown): Record<string, any> {
 function metadataRecord(value: unknown) { return Array.isArray(value) ? record(value[0]) : record(value); }
 function stringValue(value: unknown) { return typeof value === "string" && value.trim() ? value.trim() : undefined; }
 function numberValue(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? value : undefined; }
+// The edited track replaces the source; keep "reviewed" in its name so the web player prefers it.
+function reviewedTrackName(sourceName: unknown) {
+  const base = stringValue(sourceName) ?? "Captions";
+  return /reviewed/i.test(base) ? base : `${base.slice(0, 100)} (reviewed)`;
+}
 function isFailedDependentStatus(value: unknown) {
   return value === "errored" || value === "cancelled";
 }
@@ -325,7 +329,7 @@ function jobFields(job: Record<string, any>) {
       passthrough.muxAssetId ??
       passthrough.mux_asset_id,
     ),
-    uploadedTrackId: stringValue(outputs.uploaded_track_id ?? outputs.uploadedTrackId),
+    uploadedTrackId: stringValue(outputs.track_id ?? outputs.uploaded_track_id ?? outputs.uploadedTrackId),
     totalReplacementCount: numberValue(outputs.total_replacement_count ?? outputs.totalReplacementCount),
     errorMessage: job.status === "errored" ? "Mux could not apply these caption edits." : undefined,
   };
@@ -467,7 +471,7 @@ export const editCaptionsForAsset = action({
           asset_id: muxAssetId, track_id: trackId,
           ...(replacements.length ? { replacements } : {}), ...(censor ? { auto_censor_profanity: censor } : {}),
           ...(speakers.length ? { speaker_replacements: speakers } : {}),
-          upload_to_mux: true, replace_existing_tracks: "replace",
+          upload_to_mux: true, replace_existing_tracks: "replace", track_name: reviewedTrackName(selected.name),
         },
       });
       const fields = jobFields(job);
@@ -722,7 +726,6 @@ export const reconcileCompletedCaptionEditInternal = internalAction({
       const video: any = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, { muxAssetId: row.muxAssetId, userId: row.userId });
       if (!video?.asset) throw new Error("Video was deleted before caption reconciliation.");
       const metadata = metadataRecord(video.metadata); const custom = record(metadata.custom);
-      const laravelOwnsDependents = isLaravelOrchestrationEnabled();
       const currentRevision = numberValue(custom.aiCaptionsRevision) ?? 0;
       if (currentRevision > row.revision) {
         await ctx.runMutation((internal as any).captionEditing.finishReconciliationInternal, {
@@ -734,9 +737,7 @@ export const reconcileCompletedCaptionEditInternal = internalAction({
 
       const sourceMetadataCurrent =
         currentRevision === row.revision &&
-        stringValue(custom.aiCaptionsTrackId) === row.uploadedTrackId &&
-        (!laravelOwnsDependents ||
-          numberValue(custom.captionRevisionOwnedByConvex) === row.revision);
+        stringValue(custom.aiCaptionsTrackId) === row.uploadedTrackId;
       if (row.sourceAppliedAtMs && !sourceMetadataCurrent) {
         throw new CaptionDependentRefreshError(
           "Caption revision metadata changed while related features were refreshing. Repair is required.",
@@ -758,7 +759,6 @@ export const reconcileCompletedCaptionEditInternal = internalAction({
             aiKeyMomentsUnavailableReason: undefined, aiMetadataFailedAtMs: undefined,
             aiMetadataLastError: undefined, aiMetadataRetryScheduled: undefined,
             embeddingsAttemptCount: undefined,
-            captionRevisionOwnedByConvex: laravelOwnsDependents ? row.revision : undefined,
           }});
         }
         await ctx.runMutation((internal as any).captionEditing.markReconciliationStageInternal, {

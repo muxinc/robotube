@@ -119,7 +119,7 @@ test("manual track must be ready before storage cleanup and censor submission", 
   await f.advance();
   assert.equal(f.state.row.pipelineStage, "censoring");
   assert.equal(f.state.robotsBodies[0].parameters.track_id, "manual");
-  assert.equal(f.state.robotsBodies[0].parameters.delete_original_track, true);
+  assert.equal(f.state.robotsBodies[0].parameters.replace_existing_tracks, "replace");
   assert.ok(f.state.scheduled.some((job: any) => job.name.includes("pollCaptionEdit")));
   assert.ok(f.state.asset.tracks.some((track: any) => track.id === "original"));
 });

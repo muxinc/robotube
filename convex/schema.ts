@@ -222,6 +222,12 @@ export default defineSchema({
     startedAtMs: v.number(),
     expiresAtMs: v.number(),
   }).index("by_asset", ["muxAssetId"]),
+  thumbnailSelectionLocks: defineTable({
+    muxAssetId: v.string(),
+    userId: v.string(),
+    startedAtMs: v.number(),
+    expiresAtMs: v.number(),
+  }).index("by_asset", ["muxAssetId"]),
   liveStreams: defineTable({
     userId: v.id("users"),
     title: v.string(),

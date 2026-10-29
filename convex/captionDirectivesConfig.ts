@@ -2,8 +2,8 @@ export function buildCaptionDirectiveDefinition({ includeSpeakers }: { includeSp
   return {
     name: includeSpeakers ? "robotube-captions-speakers-v1" : "robotube-captions-plain-v1",
     subject: { type: "video.asset" }, resources: [],
-    workflows: [{ reference_id: "premium_captions", workflow: "generate-premium-captions",
-      params: { language_code: "en", include_speakers: includeSpeakers, upload_to_mux: true,
+    bindings: [{ reference_id: "premium_captions", workflow: "generate-premium-captions",
+      parameters: { language_code: "en", include_speakers: includeSpeakers, include_words: false, upload_to_mux: true,
         track_name: "English (Premium)", replace_existing_tracks: "fail" } }],
   };
 }

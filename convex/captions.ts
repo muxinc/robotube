@@ -5,7 +5,6 @@ import { v } from "convex/values";
 
 import { components, internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
-import { isLaravelOrchestrationEnabled } from "./laravelFlag";
 import { selectCaptionDirectiveId } from "./captionDirectivesConfig";
 import { parseCaptionDirectiveRun, parseCaptionDirectiveRunId } from "./captionDirectivesMuxAdapter";
 import {
@@ -21,7 +20,9 @@ import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 const MAX_ATTEMPTS = 10;
 const LEGACY_GENERATED_CAPTIONS_PASSTHROUGH = "robotube:auto-generated";
 const PREMIUM_CAPTIONS_API_URL =
-  "https://api.mux.com/robots/v0/jobs/generate-premium-captions";
+  "https://api.mux.com/robots/v1/jobs/generate-premium-captions";
+const ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v1";
+const ROBOTS_BETA_API_BASE_URL = "https://api.mux.com/robots/v0";
 
 function requiredEnv(name: string, value: string | undefined): string {
   if (!value) throw new Error(`Missing env var: ${name}`);
@@ -167,6 +168,26 @@ function createMuxBasicAuthHeader() {
   const tokenId = requiredEnv("MUX_TOKEN_ID", process.env.MUX_TOKEN_ID);
   const tokenSecret = requiredEnv("MUX_TOKEN_SECRET", process.env.MUX_TOKEN_SECRET);
   return `Basic ${Buffer.from(`${tokenId}:${tokenSecret}`).toString("base64")}`;
+}
+
+// Directives, and the jobs they dispatch, keep the API version that created
+// them and 404 on the other version's routes. Directives provisioned before the
+// Robots v1 migration are v0, so retry on v0 only after a v1 404.
+async function fetchDirectiveRoute(path: string, init: () => RequestInit) {
+  const response = await fetch(`${ROBOTS_API_BASE_URL}${path}`, init());
+  return response.status === 404
+    ? await fetch(`${ROBOTS_BETA_API_BASE_URL}${path}`, init())
+    : response;
+}
+
+async function getPremiumCaptionsJobAnyVersion(jobId: string) {
+  const path = `/jobs/generate-premium-captions/${encodeURIComponent(jobId)}`;
+  try {
+    return await getMuxPremiumCaptionsJob(fetch, `${ROBOTS_API_BASE_URL}${path}`, createMuxBasicAuthHeader());
+  } catch (error) {
+    if (!(error instanceof MuxPremiumCaptionsHttpError) || error.status !== 404) throw error;
+    return await getMuxPremiumCaptionsJob(fetch, `${ROBOTS_BETA_API_BASE_URL}${path}`, createMuxBasicAuthHeader());
+  }
 }
 
 async function updateAssetTrack(args: {
@@ -399,17 +420,6 @@ async function maybeScheduleAiMetadataForReadyCaptions(
   args: { muxAssetId: string; userId: string },
   custom: Record<string, unknown>,
 ) {
-  // Captions/STT generation stays Convex-owned, but the AI-metadata Robots
-  // kickoff it chains into is owned by Laravel when the flag is on. Skip the
-  // schedule entirely so we do not create duplicate summarize/chapters/
-  // key-moments jobs (this was the double-processing path found in Loop 18).
-  if (isLaravelOrchestrationEnabled()) {
-    console.log(
-      `[captions] AI-metadata kickoff skipped for ${args.muxAssetId}: USE_LARAVEL_ORCHESTRATION on`,
-    );
-    return false;
-  }
-
   const missingSummary =
     asNumber(custom.aiGeneratedAtMs) === undefined &&
     !isActiveMuxRobotsJobStatus(custom.aiSummaryJobStatus);
@@ -530,21 +540,22 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
           });
         }
         if (!claim) return { ok: true, skipped: true, reason: "asset_not_owned_or_deleted" };
-        const url = `https://api.mux.com/robots/v0/directives/${encodeURIComponent(claim.directiveId)}/runs`;
+        const runsPath = `/directives/${encodeURIComponent(claim.directiveId)}/runs`;
         let runId = claim.runId;
         if (claim.acquired) {
           // The claim is permanent: an ambiguous POST must never be reposted.
-          const response = await fetch(url, {
+          // A 404 is not ambiguous: no run was started on that API version.
+          const response = await fetchDirectiveRoute(runsPath, () => ({
             method: "POST", signal: AbortSignal.timeout(60_000), headers: { Authorization: createMuxBasicAuthHeader(), "Content-Type": "application/json" },
             body: JSON.stringify({ asset_id: args.muxAssetId }),
-          });
+          }));
           if (!response.ok) throw new MuxPremiumCaptionsHttpError(response.status, `Caption Directive submission: ${await response.text()}. Manual reconciliation required; no automatic resubmission.`);
           runId = parseCaptionDirectiveRunId(await response.json());
           await ctx.runMutation((internal as any).captionDirectives.recordRunInternal, { claimId: claim._id, runId });
         }
         if (runId) {
           hasClaimedDirectiveRun = true;
-          const response = await fetch(`${url}/${encodeURIComponent(runId)}`, { signal: AbortSignal.timeout(60_000), headers: { Authorization: createMuxBasicAuthHeader() } });
+          const response = await fetchDirectiveRoute(`${runsPath}/${encodeURIComponent(runId)}`, () => ({ signal: AbortSignal.timeout(60_000), headers: { Authorization: createMuxBasicAuthHeader() } }));
           if (!response.ok) throw new Error(`Caption Directive polling failed (${response.status}).`);
           const run = parseCaptionDirectiveRun(await response.json());
           const node = run.node_states.find(item => item.reference_id === "premium_captions");
@@ -563,11 +574,7 @@ export const ensureGeneratedCaptionsTrackInternal = internalAction({
       }
       const existingPremiumJobId = directiveJobId ?? asString(custom.aiCaptionsJobId);
       if (existingPremiumJobId) {
-        premiumJob = await getMuxPremiumCaptionsJob(
-          fetch,
-          `${PREMIUM_CAPTIONS_API_URL}/${encodeURIComponent(existingPremiumJobId)}`,
-          createMuxBasicAuthHeader(),
-        );
+        premiumJob = await getPremiumCaptionsJobAnyVersion(existingPremiumJobId);
         if (directiveMode && asCustomRecord(premiumJob.parameters).asset_id !== args.muxAssetId) {
           throw new Error("Caption Directive premium job asset does not match the claimed asset.");
         }

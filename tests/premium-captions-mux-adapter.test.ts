@@ -10,7 +10,7 @@ import {
   type MuxPremiumCaptionsStatus,
 } from "../convex/premiumCaptionsMuxAdapter.ts";
 
-const API = "https://api.mux.com/robots/v0/jobs/generate-premium-captions";
+const API = "https://api.mux.com/robots/v1/jobs/generate-premium-captions";
 
 function jsonResponse(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -60,7 +60,7 @@ test("creates English Premium Captions and uploads the track to Mux", async () =
     asset_id: "asset-1",
     language_code: "en",
     track_name: "English (Premium)",
-    replace_existing: false,
+    replace_existing_tracks: "fail",
     upload_to_mux: true,
   });
 });

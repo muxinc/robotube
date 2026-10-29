@@ -7,7 +7,9 @@ function identifier(value: unknown, field: string): string {
   return value;
 }
 export function parseCaptionDirectiveRunId(payload: unknown): string {
-  return identifier(record(record(payload).data).run_id, "run_id");
+  // v1 returns the run identifier as `id`; v0 Directives returned `run_id`.
+  const run = record(record(payload).data);
+  return identifier(run.id ?? run.run_id, "run_id");
 }
 
 type DirectiveNode = { reference_id: string; status: string; job_id?: string; reason?: string };
@@ -22,7 +24,7 @@ export function parseCaptionDirectiveRun(payload: unknown): { status: string; no
     const reference_id = identifier(node.reference_id, "reference_id");
     if (seen.has(reference_id)) throw new Error("Invalid duplicate Caption Directive reference_id.");
     seen.add(reference_id);
-    if (typeof node.status !== "string" || !["dispatched", "failed", "waiting_for_resources", "waiting_for_source_workflow"].includes(node.status)) throw new Error("Invalid Caption Directive node status.");
+    if (typeof node.status !== "string" || !["dispatched", "failed", "waiting_for_resources", "waiting_for_source_bindings", "waiting_for_source_workflow"].includes(node.status)) throw new Error("Invalid Caption Directive node status.");
     const result: DirectiveNode = { reference_id, status: node.status };
     if (node.status === "dispatched") result.job_id = identifier(node.job_id, "job_id");
     if (node.status === "failed") result.reason = identifier(node.reason, "failure reason");

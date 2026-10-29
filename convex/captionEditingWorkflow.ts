@@ -17,7 +17,7 @@ export function censorRequest(row: any) {
       editRequestId: String(row._id), censorAttempt: row.censorAttempt }),
     parameters: { asset_id: row.muxAssetId, track_id: row.intermediateTrackId,
       auto_censor_profanity: { mode: "blank" }, upload_to_mux: true,
-      delete_original_track: true, track_name_suffix: `censored-${row.censorAttempt}` },
+      replace_existing_tracks: "replace" },
   };
 }
 

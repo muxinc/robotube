@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { buildCaptionDirectiveDefinition } from "../convex/captionDirectivesConfig.ts";
 
-const API = "https://api.mux.com/robots/v0/directives";
+const API = "https://api.mux.com/robots/v1/directives";
 const variants = [
   { envKey: "MUX_CAPTION_DIRECTIVE_WITHOUT_SPEAKERS_ID", includeSpeakers: false },
   { envKey: "MUX_CAPTION_DIRECTIVE_WITH_SPEAKERS_ID", includeSpeakers: true },
@@ -71,7 +71,9 @@ export async function provisionCaptionDirectives({ create = false, env = process
   }
   const resolved = [];
   for (const { envKey, definition } of plan) {
-    const matches = existing.filter((entry) => entry?.name === definition.name);
+    // The v1 list also returns v0 Directives, which only resolve on v0 routes.
+    const matches = existing.filter((entry) =>
+      entry?.name === definition.name && !String(entry?._links?.self?.href ?? "").includes("/robots/v0/"));
     if (matches.length > 1) throw new Error(`Multiple Directives named ${definition.name}. Resolve the ambiguity in the Dashboard.`);
     let data;
     if (matches.length) {

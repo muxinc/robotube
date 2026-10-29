@@ -334,7 +334,6 @@ for (const actual of [false, undefined, "true"]) {
 }
 
 test("AI metadata handler independently recovers compact language choices", async () => {
-  process.env.USE_LARAVEL_ORCHESTRATION = "false";
   let saved: any = {};
   const asset = { status: "ready", passthrough: JSON.stringify({ userId: "owner", v: 1, a: ["es"], c: [] }) };
   const ctx: any = {
@@ -353,7 +352,6 @@ for (const selection of [
   { custom: { audioTranslationLanguageCodes: ["es"] }, expectedAudio: ["es"], expectedCaptions: ["es"] },
 ]) {
   test(`all recovery readers expand compact languages and preserve empty/legacy selections: ${JSON.stringify(selection)}`, async () => {
-    process.env.USE_LARAVEL_ORCHESTRATION = "false";
     process.env.MUX_TOKEN_ID = "test";
     process.env.MUX_TOKEN_SECRET = "test";
     const asset = { id: "asset", status: "ready", passthrough: JSON.stringify({ userId: "owner", ...selection }) };

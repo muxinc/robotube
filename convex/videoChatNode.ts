@@ -18,7 +18,7 @@ type VideoContext = {
   channelName: string;
 };
 
-const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v0";
+const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v1";
 const ASK_QUESTIONS_MAX_POLL_ATTEMPTS = 30;
 const ASK_QUESTIONS_POLL_INTERVAL_MS = 1000;
 
@@ -110,8 +110,7 @@ async function createAskQuestionsJob(args: {
       passthrough: args.passthrough,
       parameters: {
         asset_id: args.assetId,
-        questions: [{ question: args.question }],
-        answer_options: args.answerOptions,
+        questions: [{ question: args.question, answer_options: args.answerOptions }],
       },
     }),
   });

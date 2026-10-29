@@ -5,11 +5,10 @@ import { v } from "convex/values";
 import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-translation-languages";
 import { components, internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
-import { isLaravelOrchestrationEnabled } from "./laravelFlag";
 import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
 const MAX_ATTEMPTS = 8;
-const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v0";
+const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v1";
 const MODERATE_FALLBACK_POLL_INTERVAL_MS = 2 * 60 * 1000;
 const MODERATE_MAX_FALLBACK_POLLS = 10;
 const MODERATION_THRESHOLDS = {
@@ -34,6 +33,7 @@ type ModerateJob = {
   outputs?: {
     thumbnail_scores?: Array<{
       url?: string;
+      time?: number;
       sexual?: number;
       violence?: number;
     }>;
@@ -370,6 +370,12 @@ async function scheduleApprovedAssetJobs(ctx: any, args: { muxAssetId: string; u
     muxAssetId: args.muxAssetId,
     defaultUserId: args.userId,
   });
+
+  await ctx.scheduler.runAfter(
+    0,
+    (internal as any).thumbnailSelection.ensureThumbnailSelectionForAssetInternal,
+    { muxAssetId: args.muxAssetId, userId: args.userId, attempt: 0 },
+  );
 }
 
 async function scheduleModerationFallbackPoll(
@@ -541,16 +547,6 @@ export const moderateAssetInternal = internalAction({
     attempt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    // Laravel owns the moderate Robots job when the flag is on. No-op so Convex
-    // creates zero moderation Robots jobs regardless of caller (uploads route
-    // away already; this also covers self-retries and migration backfills).
-    if (isLaravelOrchestrationEnabled()) {
-      console.log(
-        `[moderation] moderateAssetInternal skipped for ${args.muxAssetId}: USE_LARAVEL_ORCHESTRATION on`,
-      );
-      return { ok: true, skipped: true, reason: "laravel_orchestration" as const };
-    }
-
     const lock = (await ctx.runMutation((internal as any).moderationLocks.claimModerationLockInternal, {
       muxAssetId: args.muxAssetId,
       userId: args.userId,

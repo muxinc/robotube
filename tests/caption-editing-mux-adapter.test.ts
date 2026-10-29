@@ -8,7 +8,7 @@ import {
   type MuxCaptionEditingStatus,
 } from "../convex/captionEditingMuxAdapter.ts";
 
-const API = "https://api.mux.com/robots/v0/jobs/edit-captions";
+const API = "https://api.mux.com/robots/v1/jobs/edit-captions";
 
 function jsonResponse(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -43,7 +43,7 @@ test("creates a job with server authorization and the supplied request body", as
       asset_id: "asset-1",
       track_id: "track-1",
       upload_to_mux: true,
-      delete_original_track: true,
+      replace_existing_tracks: "replace",
     },
   };
   const job = await createMuxCaptionEditingJob(

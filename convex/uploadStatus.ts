@@ -7,7 +7,6 @@ import {
 } from "../constants/audio-translation-languages";
 import { components } from "./_generated/api";
 import { query } from "./_generated/server";
-import { isLaravelOrchestrationEnabled } from "./laravelFlag";
 import { getCachedMuxAssetById } from "./muxAssetCache";
 import { selectFeedPlaybackId } from "./feedContracts";
 
@@ -249,10 +248,6 @@ function computePipelineProgress(jobs: PipelineJob[]) {
  * chapters / key moments, and the per-language audio + caption translations)
  * so the upload screen can show pipeline progress until everything finishes.
  *
- * Works on both orchestration paths: the native Convex pipeline and the
- * Laravel-owned pipeline mirror the SAME videoMetadata.custom keys and typed
- * translation tables (see convex/laravelSync.ts).
- *
  * The optional language-code args are client-side hints so the checklist can
  * render the requested translations before the asset metadata (which carries
  * the authoritative lists) has been synced.
@@ -478,7 +473,7 @@ export const getUploadPipelineStatus = query({
       };
     }
 
-    if (isMuxRobotsPollingDisabled() && !isLaravelOrchestrationEnabled()) {
+    if (isMuxRobotsPollingDisabled()) {
       return {
         stage: "moderation_disabled",
         done: true,
@@ -505,9 +500,7 @@ export const getUploadPipelineStatus = query({
       keyMoments:
         unavailableStatus(custom.aiKeyMomentsUnavailableReason) ??
         toPipelineJobStatus(asString(custom.aiKeyMomentsJobStatus), aiFallback),
-      thumbnails: isLaravelOrchestrationEnabled()
-        ? toPipelineJobStatus(asString(custom.aiThumbnailJobStatus), aiFallback)
-        : "skipped" as const,
+      thumbnails: toPipelineJobStatus(asString(custom.aiThumbnailJobStatus), aiFallback),
     };
 
     const [audioRows, captionRows] = await Promise.all([

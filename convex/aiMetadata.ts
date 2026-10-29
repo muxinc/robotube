@@ -6,7 +6,6 @@ import { v } from "convex/values";
 
 import { components, internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
-import { isLaravelOrchestrationEnabled } from "./laravelFlag";
 import { decodeUploadCustom } from "./uploadPassthrough";
 import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 
@@ -14,7 +13,7 @@ const MAX_ATTEMPTS = 10;
 const AI_METADATA_READY_DELAY_MS = 5 * 1000;
 const AI_METADATA_SOURCE_CAPTIONS_RETRY_DELAY_MS = 30 * 1000;
 const AI_METADATA_FALLBACK_POLL_DELAY_MS = 2 * 60 * 1000;
-const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v0";
+const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v1";
 const SUMMARIZE_TONE = "neutral";
 const SUMMARIZE_TITLE_LENGTH = 80;
 const SUMMARIZE_DESCRIPTION_LENGTH = 320;
@@ -49,10 +48,14 @@ function isMuxRobotsPollingDisabled() {
   return process.env.DISABLE_MUX_ROBOTS_POLLING === "true";
 }
 
+// Robots v1 reports media times in seconds (start_time/end_time). Jobs created
+// through the v0 Beta API report milliseconds (start_ms/end_ms).
 type MuxKeyMomentCue = {
-  start_ms: number;
-  end_ms: number;
-  text: string;
+  start_time?: number;
+  end_time?: number;
+  start_ms?: number;
+  end_ms?: number;
+  text?: string;
 };
 
 type MuxKeyMomentVisualConcept = {
@@ -62,6 +65,8 @@ type MuxKeyMomentVisualConcept = {
 };
 
 type MuxKeyMoment = {
+  start_time?: number;
+  end_time?: number;
   start_ms?: number;
   end_ms?: number;
   cues?: MuxKeyMomentCue[];
@@ -322,6 +327,18 @@ function getSourceCaptionsLanguageCodeFromAsset(asset: any, preferredLanguageCod
   return getTrackLanguageCode(textTracks[0]) || undefined;
 }
 
+// Robots v1 matches an explicit caption language_code exactly (en does not
+// select en-US), so send the matching track's own code, not the normalized one.
+function getCaptionsTrackLanguageCode(asset: any, languageCode: string) {
+  const track = (asset?.tracks ?? []).find(
+    (track: any) =>
+      track?.type === "text" &&
+      track?.status === "ready" &&
+      getTrackLanguageCode(track) === normalizeLanguageCode(languageCode),
+  );
+  return asString(track?.language_code ?? track?.languageCode ?? track?.language) ?? languageCode;
+}
+
 function getMetadataRecord(value: unknown): Record<string, unknown> {
   if (Array.isArray(value)) return asCustomRecord(value[0]);
   return asCustomRecord(value);
@@ -551,6 +568,16 @@ function normalizeChapters(value: Array<{ title: string; startTime: number }>) {
     .sort((a, b) => a.startTime - b.startTime);
 }
 
+function getMediaTimeMs(seconds: unknown, milliseconds: unknown) {
+  if (typeof seconds === "number" && Number.isFinite(seconds)) {
+    return Math.max(0, Math.round(seconds * 1000));
+  }
+  if (typeof milliseconds === "number" && Number.isFinite(milliseconds)) {
+    return Math.max(0, milliseconds);
+  }
+  return undefined;
+}
+
 function normalizeKeyMoments(value: MuxKeyMoment[] | undefined): StoredKeyMoment[] {
   if (!Array.isArray(value)) {
     return [];
@@ -558,31 +585,23 @@ function normalizeKeyMoments(value: MuxKeyMoment[] | undefined): StoredKeyMoment
 
   return value
     .map((moment) => {
-      if (
-        typeof moment?.start_ms !== "number" ||
-        !Number.isFinite(moment.start_ms) ||
-        typeof moment?.end_ms !== "number" ||
-        !Number.isFinite(moment.end_ms)
-      ) {
+      const startMs = getMediaTimeMs(moment?.start_time, moment?.start_ms);
+      const endMs = getMediaTimeMs(moment?.end_time, moment?.end_ms);
+      if (startMs === undefined || endMs === undefined) {
         return null;
       }
 
       const cues = Array.isArray(moment.cues)
         ? moment.cues
-            .filter(
-              (cue) =>
-                typeof cue?.start_ms === "number" &&
-                Number.isFinite(cue.start_ms) &&
-                typeof cue?.end_ms === "number" &&
-                Number.isFinite(cue.end_ms) &&
-                typeof cue?.text === "string" &&
-                cue.text.trim().length > 0,
-            )
             .map((cue) => ({
-              startMs: Math.max(0, cue.start_ms),
-              endMs: Math.max(0, cue.end_ms),
-              text: cue.text.trim(),
+              startMs: getMediaTimeMs(cue?.start_time, cue?.start_ms),
+              endMs: getMediaTimeMs(cue?.end_time, cue?.end_ms),
+              text: typeof cue?.text === "string" ? cue.text.trim() : "",
             }))
+            .filter(
+              (cue): cue is { startMs: number; endMs: number; text: string } =>
+                cue.startMs !== undefined && cue.endMs !== undefined && cue.text.length > 0,
+            )
         : [];
 
       const notableVisualConcepts = Array.isArray(moment.notable_visual_concepts)
@@ -603,8 +622,8 @@ function normalizeKeyMoments(value: MuxKeyMoment[] | undefined): StoredKeyMoment
         : [];
 
       return {
-        startMs: Math.max(0, moment.start_ms),
-        endMs: Math.max(0, moment.end_ms),
+        startMs,
+        endMs,
         cues,
         overallScore:
           typeof moment.overall_score === "number" && Number.isFinite(moment.overall_score)
@@ -942,7 +961,6 @@ type EnsureAiMetadataResult =
   | { ok: false; skipped: false; error: string }
   | { ok: false; skipped: true; reason: "asset_not_found" }
   | { ok: false; skipped: true; reason: "asset_not_ready"; userId: string }
-  | { ok: true; skipped: true; reason: "laravel_orchestration" }
   | {
       ok: true;
       skipped: boolean;
@@ -962,7 +980,6 @@ type GenerateSummaryAndTagsResult =
   | { ok: true; skipped: true; reason: "already_generated" }
   | { ok: true; skipped: true; reason: "moderation_pending" | "moderation_rejected" }
   | { ok: true; skipped: true; reason: "polling_disabled" }
-  | { ok: true; skipped: true; reason: "laravel_orchestration" }
   | { ok: false; skipped: true; reason: "asset_not_found" }
   | { ok: boolean; skipped: false; retryScheduled: boolean; nextAttempt: number; errors: string[] };
 
@@ -970,16 +987,6 @@ async function ensureAiMetadataForAssetImpl(
   ctx: any,
   args: EnsureAiMetadataArgs,
 ): Promise<EnsureAiMetadataResult> {
-  // Laravel owns the summarize/chapters/key-moments Robots jobs when the flag
-  // is on. No-op so Convex never creates duplicate AI-metadata jobs (covers the
-  // internal + public ensure* entry points and any lazy "ensure on view" call).
-  if (isLaravelOrchestrationEnabled()) {
-    console.log(
-      `[aiMetadata] ensureAiMetadataForAssetImpl skipped for ${args.muxAssetId}: USE_LARAVEL_ORCHESTRATION on`,
-    );
-    return { ok: true, skipped: true, reason: "laravel_orchestration" };
-  }
-
   let video = await ctx.runQuery(components.mux.videos.getVideoByMuxAssetId, {
     muxAssetId: args.muxAssetId,
   });
@@ -1350,11 +1357,6 @@ async function applyAiMetadataJobUpdate(
           aiChapters: normalizedChapters,
           aiChaptersGeneratedAtMs: Date.now(),
           aiChaptersProvider: "mux",
-          // A regenerated chapter job replaces this Laravel run's old output.
-          // Replaying that run must not undo the regeneration.
-          ...(asFiniteNumber(existingCustom.laravelRunId) !== undefined
-            ? { aiChaptersSupersededLaravelRunId: existingCustom.laravelRunId }
-            : {}),
           aiChaptersAttemptCount:
             currentJobId === chaptersJob.id && currentJobStatus === chaptersJob.status
               ? (asFiniteNumber(existingCustom.aiChaptersAttemptCount) ?? 1)
@@ -1558,10 +1560,7 @@ export const regenerateOwnMetadataDraft = action({
       );
     } else {
       // Regeneration is initiated while the uploader is actively waiting on
-      // the review screen. Start the watcher immediately. This is especially
-      // important when Laravel owns Robots webhooks: those events describe a
-      // Laravel run, while this one-off job is created directly by Convex and
-      // therefore relies on polling to persist its replacement suggestions.
+      // the review screen. Start the watcher immediately.
       await ctx.scheduler.runAfter(0, (internal as any).aiMetadata.pollAiMetadataJobStatusInternal, {
         muxAssetId: args.muxAssetId,
         userId: authUserId,
@@ -1580,21 +1579,10 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
     muxAssetId: v.string(),
     userId: v.string(),
     attempt: v.optional(v.number()),
+    // Set by caption edits: regenerate even when DISABLE_MUX_ROBOTS_POLLING is on.
     forceConvexOwnership: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<GenerateSummaryAndTagsResult> => {
-    // Laravel owns the summarize/chapters/key-moments Robots jobs when the flag
-    // is on. This is the sink where all three /jobs/* POSTs originate, so the
-    // no-op here guarantees Convex creates zero AI-metadata Robots jobs
-    // regardless of caller (captions chain, ensure* impl, retries, job-update
-    // reschedules, migrations).
-    if (isLaravelOrchestrationEnabled() && !args.forceConvexOwnership) {
-      console.log(
-        `[aiMetadata] generateSummaryAndTagsForAssetInternal skipped for ${args.muxAssetId}: USE_LARAVEL_ORCHESTRATION on`,
-      );
-      return { ok: true, skipped: true, reason: "laravel_orchestration" };
-    }
-
     const lock = (await ctx.runMutation((internal as any).aiMetadataLocks.claimAiMetadataLockInternal, {
       muxAssetId: args.muxAssetId,
       userId: args.userId,
@@ -1749,7 +1737,7 @@ export const generateSummaryAndTagsForAssetInternal = internalAction({
           if (shouldCreateChaptersJob) {
             const createdJob = await createGenerateChaptersJob({
               assetId: args.muxAssetId,
-              fromLanguageCode: sourceCaptionsLanguageCode,
+              fromLanguageCode: getCaptionsTrackLanguageCode(video.asset, sourceCaptionsLanguageCode),
               passthrough: JSON.stringify({
                 muxAssetId: args.muxAssetId,
                 userId: args.userId,

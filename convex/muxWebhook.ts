@@ -6,7 +6,6 @@ import { components, internal } from "./_generated/api";
 import { v } from "convex/values";
 
 import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-translation-languages";
-import { isLaravelOrchestrationEnabled } from "./laravelFlag";
 import { decodeUploadCustom, readUploadLanguageCodes } from "./uploadPassthrough";
 
 const AUDIO_TRANSLATION_READY_DELAY_MS = 5 * 1000;
@@ -113,12 +112,13 @@ function getRobotsWorkflow(eventType: string, data: Record<string, unknown>) {
     return workflow.replace(/_/g, "-");
   }
 
-  const parts = eventType.split(".");
-  if (parts.length < 4) {
-    return undefined;
-  }
+  // v1: robots.v1.job.{workflow}.{status}; v0 (Beta): robots.job.{workflow}.{status}
+  const match = /^robots\.(?:v1\.)?job\.([^.]+)\.[^.]+$/.exec(eventType);
+  return match?.[1]?.replace(/_/g, "-");
+}
 
-  return parts[2]?.replace(/_/g, "-");
+function isRobotsJobEvent(eventType: string) {
+  return eventType.startsWith("robots.v1.job.") || eventType.startsWith("robots.job.");
 }
 
 function getRobotsAssetId(args: {
@@ -207,24 +207,12 @@ export const ingestMuxWebhook = internalAction({
       return { skipped: true, reason: "missing_data" };
     }
 
-    if (eventType.startsWith("robots.job.")) {
+    if (isRobotsJobEvent(eventType)) {
+      // Jobs created through Robots v1 send robots.v1.job.*; jobs still in
+      // flight from the v0 Beta API keep sending robots.job.*. The sync handlers
+      // below accept both payload shapes.
       // The event has already been persisted via recordWebhookEventPublic above.
-      // When Laravel owns Robots orchestration it receives the same robots.job.*
-      // webhooks from Mux directly, so Convex must NOT run its native
-      // moderation/AI/translation sync handlers (that would double-process
-      // Robots job state). We store/log only. Non-Robots events
-      // (video.asset.*, track, live-stream, upload) stay Convex-owned below.
       const workflow = getRobotsWorkflow(eventType, data);
-      // Caption cleanup and initial Premium Captions are Convex-owned in every
-      // deployment mode, even when Laravel owns the rest of the automatic
-      // Robots ingest pipeline.
-      if (
-        isLaravelOrchestrationEnabled() &&
-        workflow !== "edit-captions" &&
-        workflow !== "generate-premium-captions"
-      ) {
-        return { skipped: true, reason: "laravel_orchestration_owns_robots" };
-      }
 
       const passthrough = parseRobotsPassthrough(data.passthrough);
       const parameters = asRecord(data.parameters) ?? {};
@@ -239,6 +227,7 @@ export const ingestMuxWebhook = internalAction({
       const languageCode =
         asString(passthrough.languageCode) ??
         asString(passthrough.language_code) ??
+        asString(parameters.output_language_code) ??
         asString(parameters.to_language_code) ??
         asString(parameters.language_code);
 
@@ -302,6 +291,19 @@ export const ingestMuxWebhook = internalAction({
           job: data,
         });
         return { skipped: false, reason: "robots_ai_metadata_event" };
+      }
+
+      if (workflow === "find-best-thumbnails") {
+        if (!muxAssetId || !userId) {
+          return { skipped: true, reason: "missing_robot_job_context" };
+        }
+
+        await ctx.scheduler.runAfter(
+          0,
+          (internal as any).thumbnailSelection.syncThumbnailSelectionJobInternal,
+          { muxAssetId, userId, job: data },
+        );
+        return { skipped: false, reason: "robots_thumbnail_selection_event" };
       }
 
       if (workflow === "translate-captions") {
@@ -477,13 +479,6 @@ export const ingestMuxWebhook = internalAction({
             custom: metadata.custom,
           })
         );
-
-        if (eventType === "video.asset.ready" && isLaravelOrchestrationEnabled()) {
-          await ctx.runMutation(
-            (internal as any).laravelKickoff.enqueueForReadyAssetInternal,
-            { muxAssetId: objectId, userId },
-          );
-        }
       }
       return { skipped: false };
     }

@@ -6,9 +6,8 @@ import { v } from "convex/values";
 import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-translation-languages";
 import { components, internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
-import { isLaravelOrchestrationEnabled } from "./laravelFlag";
 
-const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v0";
+const MUX_ROBOTS_API_BASE_URL = "https://api.mux.com/robots/v1";
 const TRANSLATE_AUDIO_ASSET_WAIT_INTERVAL_MS = 15 * 1000;
 const TRANSLATE_AUDIO_FALLBACK_POLL_INTERVAL_MS = 2 * 60 * 1000;
 const TRANSLATE_AUDIO_MAX_ASSET_WAIT_ATTEMPTS = 40;
@@ -21,6 +20,8 @@ type TranslateAudioJob = {
   status: "pending" | "processing" | "completed" | "errored" | "cancelled";
   outputs?: {
     dubbing_id?: string;
+    track_id?: string;
+    // v0 (Beta) name for track_id, still sent by jobs created before the v1 migration.
     uploaded_track_id?: string;
     temporary_vtt_url?: string;
   };
@@ -99,7 +100,6 @@ type EnsureAudioTranslationsResult =
   | { ok: true; skipped: true; reason: "moderation_pending" | "moderation_rejected" }
   | { ok: true; skipped: true; reason: "no_audio_track" }
   | { ok: true; skipped: true; reason: "polling_disabled" }
-  | { ok: true; skipped: true; reason: "laravel_orchestration" }
   | { ok: true; skipped: false; created: number };
 type EnsureAudioTranslationsRetryResult = {
   ok: false;
@@ -486,7 +486,7 @@ async function applyAudioTranslationJobUpdate(
     jobId,
     passthrough: normalizePassthrough(job.passthrough),
     errorMessage,
-    uploadedTrackId: job.outputs?.uploaded_track_id,
+    uploadedTrackId: job.outputs?.track_id ?? job.outputs?.uploaded_track_id,
     temporaryVttUrl: job.outputs?.temporary_vtt_url,
     dubbingId: job.outputs?.dubbing_id,
   });
@@ -503,7 +503,6 @@ async function applyAudioTranslationJobUpdate(
 async function createTranslateAudioJob(args: {
   assetId: string;
   languageCode: string;
-  fromLanguageCode?: string;
   passthrough?: string;
 }): Promise<TranslateAudioJob> {
   const response = await fetch(`${MUX_ROBOTS_API_BASE_URL}/jobs/translate-audio`, {
@@ -516,12 +515,7 @@ async function createTranslateAudioJob(args: {
       passthrough: args.passthrough,
       parameters: {
         asset_id: args.assetId,
-        ...(args.fromLanguageCode
-          ? {
-              from_language_code: args.fromLanguageCode,
-            }
-          : {}),
-        to_language_code: args.languageCode,
+        output_language_code: args.languageCode,
         upload_to_mux: true,
       },
     }),
@@ -577,13 +571,6 @@ export const ensureAudioTranslationsForAssetInternal = internalAction({
     ctx,
     args,
   ): Promise<EnsureAudioTranslationsResult | EnsureAudioTranslationsRetryResult> => {
-    // Laravel owns caption/audio translation Robots jobs when the flag is on.
-    // No-op so Convex creates zero audio-translation Robots jobs (covers all
-    // callers: static_rendition webhook, moderation, migrations, self-reschedule).
-    if (isLaravelOrchestrationEnabled()) {
-      return { ok: true, skipped: true, reason: "laravel_orchestration" };
-    }
-
     const attempt = Math.max(0, Math.floor(args.attempt ?? 0));
     const languageCodes = normalizeAudioTranslationLanguageCodes(args.languageCodes);
     const forceCreate = args.forceCreate === true;
@@ -907,7 +894,6 @@ export const ensureAudioTranslationsForAssetInternal = internalAction({
       
       const job = await createTranslateAudioJob({
         assetId: args.muxAssetId,
-        fromLanguageCode: sourceLanguageCode || undefined,
         languageCode: nextItem.languageCode,
         passthrough,
       });
@@ -924,7 +910,7 @@ export const ensureAudioTranslationsForAssetInternal = internalAction({
         jobId,
         passthrough: normalizePassthrough(job.passthrough) ?? passthrough,
         errorMessage,
-        uploadedTrackId: job.outputs?.uploaded_track_id,
+        uploadedTrackId: job.outputs?.track_id ?? job.outputs?.uploaded_track_id,
         temporaryVttUrl: job.outputs?.temporary_vtt_url,
         dubbingId: job.outputs?.dubbing_id,
       });

@@ -12,6 +12,8 @@ export type MuxPremiumCaptionsJob = {
     track_id?: string;
     language_code?: string;
     temporary_srt_url?: string;
+    detected_language_code?: string;
+    replaced_track_ids?: string[];
   };
   errors?: { message?: string; type?: string }[];
   [key: string]: unknown;
@@ -32,7 +34,7 @@ export function buildMuxPremiumCaptionsRequest(args: {
       asset_id: args.muxAssetId,
       language_code: "en",
       track_name: "English (Premium)",
-      replace_existing: false,
+      replace_existing_tracks: "fail",
       upload_to_mux: true,
     },
   };

@@ -9,7 +9,6 @@ import { v } from "convex/values";
 import { normalizeAudioTranslationLanguageCodes } from "../constants/audio-translation-languages";
 import { components, internal } from "./_generated/api";
 import { action, internalAction } from "./_generated/server";
-import { isLaravelOrchestrationEnabled } from "./laravelFlag";
 import { selectCaptionDirectiveId } from "./captionDirectivesConfig";
 import { decodeUploadCustom, readUploadLanguageCodes } from "./uploadPassthrough";
 
@@ -325,19 +324,7 @@ export const syncUploadAssetAndMetadataInternal = internalAction({
         };
       }
 
-      if (isLaravelOrchestrationEnabled()) {
-        // Laravel is the ONLY Robots runner. Hand off to the Laravel
-        // orchestration backend instead of kicking off the Convex-native
-        // moderation -> AI-metadata pipeline (which would create duplicate
-        // Robots jobs). Convex creates zero Robots jobs on this path.
-        await ctx.runMutation(
-          (internal as any).laravelKickoff.enqueueForReadyAssetInternal,
-          {
-            muxAssetId,
-            userId: metadataArgs.userId,
-          },
-        );
-      } else if (!isMuxRobotsPollingDisabled()) {
+      if (!isMuxRobotsPollingDisabled()) {
         await ctx.scheduler.runAfter(
           0,
           (internal as any).moderation.moderateAssetInternal,
