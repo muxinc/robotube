@@ -14,7 +14,7 @@ import {
 import { parsePassthroughUserId } from "./feedContracts";
 import { upsertVideoMetadataAndSyncFeedReadModel } from "./feedReadModelSync";
 import { parseCaptionVtt, replaceCaptionCueText } from "./captionVtt";
-import { captionRulesError } from "../lib/captionRobots";
+import { captionRulesError } from "../lib/shared/captionRobots";
 import { canRecoverCaptionCensor, censorRequest, deleteReplacedSource } from "./captionEditingWorkflow";
 
 const API = "https://api.mux.com/robots/v1/jobs/edit-captions";

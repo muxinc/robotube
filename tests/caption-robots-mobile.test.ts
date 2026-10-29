@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { URL } from "node:url";
-import { captionRulesError, captionSpeakerLabels, previewCaptionRules } from "../lib/captionRobots.ts";
+import { captionRulesError, captionSpeakerLabels, previewCaptionRules } from "../lib/shared/captionRobots.ts";
 import * as helpers from "../lib/captionRobotsMobile.ts";
 
 const screen = readFileSync(new URL("../app/video/[muxAssetId]/edit-captions.tsx", import.meta.url), "utf8");

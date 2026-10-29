@@ -17,8 +17,8 @@ import {
 } from "react";
 
 import { api } from "../lib/convex";
-import { captionTimestamp, type CaptionTranscript } from "../../../lib/captionTranscript";
-import { captionRulesError, captionSpeakerLabels, previewCaptionRules, type CaptionReplacement, type CaptionSpeakerReplacement } from "../../../lib/captionRobots";
+import { captionTimestamp, type CaptionTranscript } from "../../../lib/shared/captionTranscript";
+import { captionRulesError, captionSpeakerLabels, previewCaptionRules, type CaptionReplacement, type CaptionSpeakerReplacement } from "../../../lib/shared/captionRobots";
 
 const convexApi = api as any;
 

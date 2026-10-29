@@ -14,7 +14,7 @@ The web modal places **Speaker names** before the transcript, after **Optional A
 
 ## Preview and submission
 
-Both clients use `lib/captionRobots.ts` to display an estimated preview and affected-cue count. Mux owns the actual matching behavior and operation order. AI profanity changes cannot be previewed locally. The completed job's replacement count is authoritative.
+Both clients use `lib/shared/captionRobots.ts` to display an estimated preview and affected-cue count. Mux owns the actual matching behavior and operation order. AI profanity changes cannot be previewed locally. The completed job's replacement count is authoritative.
 
 `captionEditingNode.loadOwnCaptionDocument` returns timestamped cues, the source track ID, and the caption revision. The clients pass that track ID and revision to `captionEditingNode.editCaptionsForAsset` with:
 
@@ -44,7 +44,7 @@ The existing completion workflow refreshes the caption track and dependent data 
 
 - Web UI: `web/src/components/CaptionCleanup.tsx`
 - Mobile UI: `app/video/[muxAssetId]/edit-captions.tsx`
-- Shared rules and previews: `lib/captionRobots.ts`
+- Shared rules and previews: `lib/shared/captionRobots.ts`
 - Mobile confirmation lifecycle: `lib/captionRobotsMobile.ts`
 - Server actions and job state: `convex/captionEditingNode.ts` and `convex/captionEditing.ts`
 - Rules, requests, restoration, and client regressions: `tests/caption-robots-*.test.ts`

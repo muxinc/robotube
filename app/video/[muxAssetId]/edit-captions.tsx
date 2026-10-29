@@ -21,8 +21,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { api } from "@/convex/_generated/api";
-import { captionTimestamp, type CaptionTranscript } from "@/lib/captionTranscript";
-import { captionRulesError, captionSpeakerLabels, previewCaptionRules, type CaptionReplacement, type CaptionSpeakerReplacement } from "@/lib/captionRobots";
+import { captionTimestamp, type CaptionTranscript } from "@/lib/shared/captionTranscript";
+import { captionRulesError, captionSpeakerLabels, previewCaptionRules, type CaptionReplacement, type CaptionSpeakerReplacement } from "@/lib/shared/captionRobots";
 import { createCaptionSubmissionGate, mobileCaptionJobText, mobileCaptionReviewError } from "@/lib/captionRobotsMobile";
 type EditorState = {
   canEdit: boolean;

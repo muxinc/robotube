@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { captionTextError, captionTimestamp, captionTranscriptEdits } from "../lib/captionTranscript.ts";
+import { captionTextError, captionTimestamp, captionTranscriptEdits } from "../lib/shared/captionTranscript.ts";
 import { parseCaptionVtt, replaceCaptionCueText } from "../convex/captionVtt.ts";
 
 const source = `WEBVTT

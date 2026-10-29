@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { captionRulesError, captionSpeakerLabels, previewCaptionRules } from "../lib/captionRobots.ts";
+import { captionRulesError, captionSpeakerLabels, previewCaptionRules } from "../lib/shared/captionRobots.ts";
 
 const cues = [
   { id: "a", startMs: 0, endMs: 1000, text: "[speaker_0] Mucks and Mucks." },

@@ -1,0 +1,14 @@
+{
+  // Shared by the Expo app and the Vite web app. Deliberately not extending
+  // expo/tsconfig.base: the web build (Vercel) installs only web/ dependencies,
+  // and Vite reads the nearest tsconfig of every file it transforms.
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  }
+}

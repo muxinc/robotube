@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { URL } from "node:url";
 import { test } from "node:test";
-import { captionSpeakerLabels, previewCaptionRules } from "../lib/captionRobots.ts";
+import { captionSpeakerLabels, previewCaptionRules } from "../lib/shared/captionRobots.ts";
 
 const source = readFileSync(new URL("../web/src/components/CaptionCleanup.tsx", import.meta.url), "utf8");
 
