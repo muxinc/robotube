@@ -993,7 +993,10 @@ function ChatThread({ threadId }: { threadId: string }) {
   const [error, setError] = useState<string | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight }), [results.length]);
+  // Block body on purpose: an effect's return value is treated as its cleanup, and scrollTo may not return undefined.
+  useEffect(() => {
+    messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight });
+  }, [results.length]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
