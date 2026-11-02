@@ -8,7 +8,6 @@ import {
 } from "convex/react";
 import {
   ArrowLeft,
-  ArrowUp,
   Bot,
   Camera,
   Captions,
@@ -192,7 +191,7 @@ function AppShell({ children }: { children: ReactNode }) {
               aria-label="Search RoboTube"
             />
             <button type="submit" aria-label="Submit search">
-              <ArrowUp size={17} />
+              <Search size={17} />
             </button>
           </form>
 
