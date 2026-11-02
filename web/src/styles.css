@@ -113,6 +113,13 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
   @container main (min-width: 1360px) {
     .video-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   }
+  /* Home uses YouTube-sized thumbnails: 3 per row on typical desktops, 4 only on very wide screens. */
+  @container main (min-width: 1000px) {
+    .page--home .video-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+  @container main (min-width: 2000px) {
+    .page--home .video-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  }
 }
 .video-card { min-width: 0; }
 .video-card__link { display: block; }
@@ -136,7 +143,19 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
 .shorts-shelf { margin: 44px 0; }
 .shorts-shelf__heading { display: flex; align-items: center; gap: 8px; }
 .shorts-shelf__heading svg { color: var(--pink-deep); }
-.shorts-row { display: grid; grid-auto-flow: column; grid-auto-columns: clamp(400px, 23vw, 360px); gap: 20px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: thin; }
+.shorts-row { display: grid; grid-auto-flow: column; grid-auto-columns: calc((100% - 2 * 16px) / 3); gap: 16px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: thin; }
+/* Like YouTube, the Shorts shelf fits two more cards per row than the video grid. */
+@media (min-width: 781px) {
+  @container main (min-width: 640px) {
+    .shorts-row { grid-auto-columns: calc((100% - 3 * 16px) / 4); }
+  }
+  @container main (min-width: 1000px) {
+    .shorts-row { grid-auto-columns: calc((100% - 4 * 16px) / 5); }
+  }
+  @container main (min-width: 2000px) {
+    .shorts-row { grid-auto-columns: calc((100% - 5 * 16px) / 6); }
+  }
+}
 .shorts-card { min-width: 0; }
 .shorts-card__link { display: block; }
 .shorts-card__media { position: relative; overflow: hidden; aspect-ratio: 9/16; border-radius: 14px; background: #16171b; }
