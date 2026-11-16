@@ -35,6 +35,8 @@ for (const origin of [
   "http://localhost:5177",
   "http://[::1]:5173",
   "https://robotube.vercel.app",
+  "https://www.robotube.video",
+  "https://robotube.video",
   "https://robotube-web.workspace-245068.chatgpt.site",
 ]) {
   test(`allows a return to ${origin} while preserving path and query`, async () => {
@@ -48,6 +50,8 @@ for (const redirectTo of [
   "http://localhost.evil.example:5175/",
   "http://localhost:5175@evil.example/",
   "https://evil.example/",
+  "http://www.robotube.video/",
+  "https://www.robotube.video.evil.example/",
 ]) {
   test(`rejects unapproved redirect ${redirectTo}`, async () => {
     await assert.rejects(redirect({ redirectTo }), /Authentication redirect URL is not allowed/);

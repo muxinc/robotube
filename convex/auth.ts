@@ -4,6 +4,8 @@ import { convexAuth } from "@convex-dev/auth/server";
 const ALLOWED_WEB_REDIRECT_ORIGINS = new Set([
   "https://robotube-web.workspace-245068.chatgpt.site",
   "https://robotube.vercel.app",
+  "https://www.robotube.video",
+  "https://robotube.video",
 ]);
 
 // Local web dev servers land on whichever port is free (5173, 5175, 5177, ...),
