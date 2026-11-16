@@ -31,6 +31,9 @@ for (const origin of [
   "http://127.0.0.1:5173",
   "http://localhost:5175",
   "http://127.0.0.1:5175",
+  "http://localhost:5174",
+  "http://localhost:5177",
+  "http://[::1]:5173",
   "https://robotube.vercel.app",
   "https://robotube-web.workspace-245068.chatgpt.site",
 ]) {
@@ -41,7 +44,7 @@ for (const origin of [
 }
 
 for (const redirectTo of [
-  "http://localhost:5174/watch/asset-1",
+  "https://localhost:5173/",
   "http://localhost.evil.example:5175/",
   "http://localhost:5175@evil.example/",
   "https://evil.example/",

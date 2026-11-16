@@ -4,11 +4,16 @@ import { convexAuth } from "@convex-dev/auth/server";
 const ALLOWED_WEB_REDIRECT_ORIGINS = new Set([
   "https://robotube-web.workspace-245068.chatgpt.site",
   "https://robotube.vercel.app",
-  "http://localhost:5173",
-  "http://127.0.0.1:5173",
-  "http://localhost:5175",
-  "http://127.0.0.1:5175",
 ]);
+
+// Local web dev servers land on whichever port is free (5173, 5175, 5177, ...),
+// so any plain-http loopback origin is allowed rather than a fixed port list.
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+function isAllowedWebRedirect(url: URL) {
+  if (ALLOWED_WEB_REDIRECT_ORIGINS.has(url.origin)) return true;
+  return url.protocol === "http:" && LOOPBACK_HOSTNAMES.has(url.hostname);
+}
 
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
   providers: [Google],
@@ -38,11 +43,13 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
         throw new Error("Invalid authentication redirect URL.");
       }
 
-      if (ALLOWED_WEB_REDIRECT_ORIGINS.has(redirectUrl.origin)) {
+      if (isAllowedWebRedirect(redirectUrl)) {
         return redirectUrl.toString();
       }
 
-      throw new Error("Authentication redirect URL is not allowed.");
+      throw new Error(
+        `Authentication redirect URL is not allowed: ${redirectUrl.origin}`,
+      );
     },
   },
 });
